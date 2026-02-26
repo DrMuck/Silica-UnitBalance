@@ -14,17 +14,17 @@ A [Silica](https://store.steampowered.com/app/504900/Silica/) server mod for fin
 3. Copy `Si_UnitBalance_Config.json` to your server's `Mods/` folder
 4. Edit the config to your liking and start the server
 
-If running in `server_and_client` mode (for health multiplier sync), players also need the mod installed in their client `Mods/` folder.
+All parameters are synced to clients via the game's built-in OverrideManager — no client-side mod installation needed.
 
 ## Config Overview
 
 The config file (`Si_UnitBalance_Config.json`) supports the following per-unit parameters:
 
-### Synced via OverrideManager (no client mod needed in `server_only` mode)
+### Synced via OverrideManager (server-side only, no client mod needed)
 | Parameter | Description |
 |---|---|
 | `damage_mult` | Scales all projectile damage fields (impact, ricochet, splash, penetrating) |
-| `health_mult` | Scales unit max health (**requires `server_and_client` mode**) |
+| `health_mult` | Scales unit max health |
 | `cost_mult` | Scales construction/spawn cost |
 | `build_time_mult` | Scales build/spawn time |
 | `min_tier` | Override minimum tech tier required |
@@ -67,11 +67,6 @@ Type `!rebalance` in chat (requires admin privileges via the Admin Mod). This wi
 2. Reload the config from disk
 3. Re-apply all overrides
 4. Sync changes to all connected players
-
-## Modes
-
-- **`server_only`**: Only applies safe parameters (damage, cost, build time, tier, range, etc.). Health multiplier is ignored to prevent client-server desync.
-- **`server_and_client`**: Applies all parameters including `health_mult`. Requires the mod on both server and client.
 
 ## Tech Time
 

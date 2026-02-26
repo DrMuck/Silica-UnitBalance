@@ -1,9 +1,8 @@
 {
     "enabled": true,
-    "mode": "server_and_client",
     "dump_fields": false,
     "shrimp_disable_aim": true,
-    "description": "mode: server_only = safe params only (damage/cost/build_time/min_tier/tech_time). server_and_client = all params including health_mult (requires mod on both sides). health_mult is IGNORED in server_only mode to prevent ghost/desync bugs.",
+    "description": "All parameters synced to clients via OverrideManager. No client mod needed. Use !rebalance in chat to hot-reload (requires admin).",
     "tech_time": {
         "_note": "Progressive +30s per tier. Total 1060s = ~17.7 min to max tech. (Default was 30s all tiers)",
         "tier_1": 30,
