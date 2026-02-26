@@ -1,0 +1,14 @@
+# Build output
+Si_UnitBalance/bin/
+Si_UnitBalance/obj/
+
+# IDE
+.vs/
+*.user
+*.suo
+
+# Dumps (large JSON data files)
+dumps/
+
+# Include (reference DLLs)
+include/
