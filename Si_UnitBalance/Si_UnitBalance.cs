@@ -878,10 +878,16 @@ namespace Si_UnitBalance
         // Chat command: !rebalance — hot-reload config during a running game
         // =============================================
 
-        // Called by AdminMod when an admin types !rebalance
+        // Called by AdminMod when an admin types !rebalance or !rebalance default
         private static void OnRebalanceCommand(object player, string args)
         {
-            MelonLogger.Msg("[Rebalance] Hot-reload triggered by admin chat command");
+            // Check for "!rebalance default" — revert to vanilla (no re-apply)
+            bool defaultMode = args != null && args.IndexOf("default", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (defaultMode)
+                MelonLogger.Msg("[Rebalance] Reverting to vanilla defaults (admin command)");
+            else
+                MelonLogger.Msg("[Rebalance] Hot-reload triggered by admin chat command");
 
             try
             {
@@ -899,6 +905,15 @@ namespace Si_UnitBalance
                 _originalProjectileSpeeds.Clear();
                 _originalMoveSpeeds.Clear();
                 _nameCache.Clear();
+
+                if (defaultMode)
+                {
+                    // Sync the revert to all connected players and stop — vanilla is restored
+                    if (_omInitialized)
+                        MelonCoroutines.Start(SyncOverridesToAllPlayers(0.5f));
+                    MelonLogger.Msg("[Rebalance] Vanilla defaults restored. Use !rebalance to reload config.");
+                    return;
+                }
 
                 // 3. Reload config from disk
                 LoadConfig();
