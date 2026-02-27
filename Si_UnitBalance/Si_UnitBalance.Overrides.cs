@@ -1063,6 +1063,74 @@ namespace Si_UnitBalance
                 MelonLogger.Msg($"[MOVESPEED] Applied move speed overrides to {applied} units");
         }
 
+        private static void ApplyStrafeSpeedOverrides(bool useOM)
+        {
+            if (_strafeSpeedMultipliers.Count == 0) return;
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            int applied = 0;
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string name = info.DisplayName;
+                if (string.IsNullOrEmpty(name)) continue;
+                if (!_strafeSpeedMultipliers.TryGetValue(name, out float mult)) continue;
+
+                string oiTarget = useOM ? $"A:{info.name}.asset" : null;
+                MelonLogger.Msg($"[STRAFE] Applying strafe_speed_mult x{mult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+
+                var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
+                bool done = false;
+                foreach (var comp in childComps)
+                {
+                    if (comp == null) continue;
+                    var ct = comp.GetType();
+                    string tn = ct.Name;
+
+                    // CreatureDecapod → scale FlyMoveScaleSide
+                    if (tn == "CreatureDecapod")
+                    {
+                        var f = ct.GetField("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance);
+                        if (f != null && f.FieldType == typeof(float))
+                        {
+                            float orig = (float)f.GetValue(comp);
+                            float newVal = orig * mult;
+                            if (useOM && OMSetFloat(oiTarget, "FlyMoveScaleSide", newVal))
+                                MelonLogger.Msg($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (OM)");
+                            else
+                            {
+                                f.SetValue(comp, newVal);
+                                MelonLogger.Msg($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (direct)");
+                            }
+                            done = true;
+                        }
+                        break;
+                    }
+                    // VehicleAir → scale StrafeSpeed
+                    if (tn == "VehicleAir")
+                    {
+                        var f = ct.GetField("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance);
+                        if (f != null && f.FieldType == typeof(float))
+                        {
+                            float orig = (float)f.GetValue(comp);
+                            float newVal = orig * mult;
+                            if (useOM && OMSetFloat(oiTarget, "StrafeSpeed", newVal))
+                                MelonLogger.Msg($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (OM)");
+                            else
+                            {
+                                f.SetValue(comp, newVal);
+                                MelonLogger.Msg($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (direct)");
+                            }
+                            done = true;
+                        }
+                        break;
+                    }
+                }
+                if (done) applied++;
+            }
+            if (applied > 0)
+                MelonLogger.Msg($"[STRAFE] Applied strafe speed overrides to {applied} units");
+        }
+
         private static void ApplyTurnRadiusOverrides(bool useOM)
         {
             if (_turnRadiusMultipliers.Count == 0) return;

@@ -36,16 +36,7 @@ namespace Si_UnitBalance
             _omInitialized = true;
             try
             {
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    _overrideManagerType = asm.GetType("OverrideManager");
-                    if (_overrideManagerType != null) break;
-                }
-                if (_overrideManagerType == null)
-                {
-                    MelonLogger.Warning("[OverrideManager] Type not found in loaded assemblies");
-                    return false;
-                }
+                _overrideManagerType = typeof(OverrideManager);
 
                 // Get the EOverrideDataType enum
                 var dataTypeEnum = _overrideManagerType.GetNestedType("EOverrideDataType");
@@ -100,17 +91,8 @@ namespace Si_UnitBalance
             try
             {
                 // Find AssetSourceRegistry type (nested inside OverrideManager)
-                Type asrType = _overrideManagerType?.GetNestedType("AssetSourceRegistry",
+                Type asrType = typeof(OverrideManager).GetNestedType("AssetSourceRegistry",
                     BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (asrType == null)
-                {
-                    // Fallback: search all assemblies for top-level type
-                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                    {
-                        asrType = asm.GetType("AssetSourceRegistry");
-                        if (asrType != null) break;
-                    }
-                }
                 if (asrType == null)
                 {
                     MelonLogger.Warning("[OM-DMD] AssetSourceRegistry type not found");
@@ -289,6 +271,7 @@ namespace Si_UnitBalance
                     ApplyJumpSpeedOverrides(omReady);
                     ApplyVisibleEventRadiusOverrides(omReady);
                     ApplyMoveSpeedOverrides(omReady);
+                    ApplyStrafeSpeedOverrides(omReady);
                     ApplyTurnRadiusOverrides(omReady);
                     ApplyTeleportOverrides(omReady);
                     ApplyDispenserTimeoutOverrides(omReady);
@@ -329,15 +312,10 @@ namespace Si_UnitBalance
 
             try
             {
-                Type playerType = null, ngsType = null;
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    if (playerType == null) playerType = asm.GetType("Player");
-                    if (ngsType == null) ngsType = asm.GetType("NetworkGameServer");
-                    if (playerType != null && ngsType != null) break;
-                }
+                Type playerType = typeof(Player);
+                Type ngsType = typeof(NetworkGameServer);
 
-                if (playerType == null || _sendPlayerOverridesMethod == null)
+                if (_sendPlayerOverridesMethod == null)
                 {
                     MelonLogger.Warning("[OverrideSync] Cannot sync: missing Player type or SendPlayerOverrides method");
                 }

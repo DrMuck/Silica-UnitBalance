@@ -442,13 +442,14 @@ def build_unit(name, u, ctype):
 
     elif ctype == 'air_vehicle':
         # VehicleAir: ForwardSpeed+StrafeSpeed (move_speed_mult), TurboSpeed (turbo_speed_mult)
-        # No TurningCircleRadius, no JumpSpeed
+        # strafe_speed_mult scales StrafeSpeed independently
         e['move_speed_mult'] = 1.00
         e['turbo_speed_mult'] = 1.00
+        e['strafe_speed_mult'] = 1.00
 
     elif ctype in ('creature_melee', 'creature_ranged', 'creature_flying_melee'):
         # CreatureDecapod: MoveSpeed/FlyMoveSpeed (move_speed_mult)
-        # No jump, turbo, or turn radius
+        # strafe_speed_mult scales FlyMoveScaleSide (lateral movement while flying)
         ms = u.get('move_speed', 0)
         fs = u.get('fly_speed', 0)
         parts = []
@@ -456,6 +457,7 @@ def build_unit(name, u, ctype):
         if fs: parts.append(f"Fly:{fs}")
         if parts: e['_base_speed'] = ' '.join(parts)
         e['move_speed_mult'] = 1.00
+        e['strafe_speed_mult'] = 1.00
 
     # structures: no movement section
 
@@ -623,22 +625,22 @@ expected_keys = {
     },
     'air_vehicle': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'move': ['move_speed_mult', 'turbo_speed_mult'],
+        'move': ['move_speed_mult', 'turbo_speed_mult', 'strafe_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
     'creature_melee': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'move': ['move_speed_mult'],
+        'move': ['move_speed_mult', 'strafe_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
     'creature_ranged': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'move': ['move_speed_mult'],
+        'move': ['move_speed_mult', 'strafe_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
     'creature_flying_melee': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'move': ['move_speed_mult'],
+        'move': ['move_speed_mult', 'strafe_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
     'structure': {
@@ -653,10 +655,10 @@ expected_keys = {
 
 # Keys that should NOT appear per type
 forbidden_keys = {
-    'infantry': ['build_radius', 'turbo_speed_mult', 'turn_radius_mult',
+    'infantry': ['build_radius', 'turbo_speed_mult', 'turn_radius_mult', 'strafe_speed_mult',
                  'pri_accuracy_mult', 'pri_magazine_mult', 'pri_fire_rate_mult', 'pri_reload_time_mult'],
-    'wheeled_vehicle': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult'],
-    'hovered_vehicle': ['build_radius', 'jump_speed_mult', 'turn_radius_mult'],
+    'wheeled_vehicle': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'strafe_speed_mult'],
+    'hovered_vehicle': ['build_radius', 'jump_speed_mult', 'turn_radius_mult', 'strafe_speed_mult'],
     'air_vehicle': ['build_radius', 'jump_speed_mult', 'turn_radius_mult'],
     'creature_melee': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult'],
     'creature_ranged': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult',

@@ -370,12 +370,12 @@ namespace Si_UnitBalance
             else if (hasHovered || hasAir)
             {
                 names.Add("Movement");
-                keys.Add(new[] { "move_speed_mult", "turbo_speed_mult" });
+                keys.Add(new[] { "move_speed_mult", "turbo_speed_mult", "strafe_speed_mult" });
             }
             else if (hasDecapod)
             {
                 names.Add("Movement");
-                keys.Add(new[] { "move_speed_mult" });
+                keys.Add(new[] { "move_speed_mult", "strafe_speed_mult" });
             }
             // structures: no movement group
 
@@ -868,6 +868,25 @@ namespace Si_UnitBalance
                                     if (f != null && f.FieldType == typeof(float))
                                     {
                                         float v = (float)f.GetValue(comp);
+                                        if (v > 0) val = v.ToString("F1");
+                                    }
+                                }
+                                break;
+                            case "strafe_speed_mult":
+                                // CreatureDecapod → FlyMoveScaleSide
+                                if (decapodComp != null)
+                                {
+                                    float v = GetFloatMember(decapodComp, "FlyMoveScaleSide");
+                                    if (v >= 0) val = v.ToString("F2");
+                                }
+                                // VehicleAir → StrafeSpeed
+                                if (val == null)
+                                {
+                                    foreach (var comp in childComps)
+                                    {
+                                        if (comp == null || val != null) continue;
+                                        if (comp.GetType().Name != "VehicleAir") continue;
+                                        float v = GetFloatMember(comp, "StrafeSpeed");
                                         if (v > 0) val = v.ToString("F1");
                                     }
                                 }

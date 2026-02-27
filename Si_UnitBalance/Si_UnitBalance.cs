@@ -24,6 +24,7 @@
 
 using HarmonyLib;
 using MelonLoader;
+using MelonLoader.Utils;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
@@ -34,7 +35,7 @@ using UnityEngine;
 
 [assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.0.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
-[assembly: MelonOptionalDependencies("SilicaCore")]
+[assembly: MelonOptionalDependencies("Admin Mod")]
 
 namespace Si_UnitBalance
 {
@@ -68,7 +69,6 @@ namespace Si_UnitBalance
         private static MethodInfo _registerAdminCmdMethod;
         private static Type _adminPowerType;
         private static Type _adminCallbackType;
-        private static Type _adminPlayerType;
         private static FieldInfo _playerNameField;
         private static FieldInfo _playerIdField; // PlayerID (NetworkID struct)
 
@@ -143,6 +143,8 @@ namespace Si_UnitBalance
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _lifetimeMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _strafeSpeedMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         // Tech tier number (1-8) -> build time in seconds
         private static readonly Dictionary<int, float> _techTierTimes = new Dictionary<int, float>();
 
@@ -165,13 +167,15 @@ namespace Si_UnitBalance
 
         public override void OnInitializeMelon()
         {
-            var modDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-            _configPath = Path.Combine(modDir, "Si_UnitBalance_Config.json");
-            _configSaveDir = Path.Combine(modDir, "Si_UnitBalance_Configs");
+            var cfgDir = Path.Combine(MelonEnvironment.UserDataDirectory, "UnitBalance_cfg");
+            if (!Directory.Exists(cfgDir))
+                Directory.CreateDirectory(cfgDir);
+            _configPath = Path.Combine(cfgDir, "Si_UnitBalance_Config.json");
+            _configSaveDir = Path.Combine(cfgDir, "Saved_Configs");
 
             LoadConfig();
             TryApplyHarmonyPatches();
-            MelonLogger.Msg($"Unit Balance v7.0.0 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.2.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count}");
         }
 
@@ -183,20 +187,8 @@ namespace Si_UnitBalance
         {
             try
             {
-                Type musicHandler = null;
-                Type damageManager = null;
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    if (musicHandler == null) musicHandler = asm.GetType("MusicJukeboxHandler");
-                    if (damageManager == null) damageManager = asm.GetType("DamageManager");
-                    if (musicHandler != null && damageManager != null) break;
-                }
-
-                if (musicHandler == null || damageManager == null)
-                {
-                    MelonLogger.Msg("SilicaCore not available — Harmony patches skipped (server-only mod, no-op on client)");
-                    return;
-                }
+                Type musicHandler = typeof(MusicJukeboxHandler);
+                Type damageManager = typeof(DamageManager);
 
                 var harmony = HarmonyInstance;
 
@@ -212,62 +204,40 @@ namespace Si_UnitBalance
                 // which avoids client-server desync (Postfix modified HP after damage was already networked)
 
                 // Patch VehicleDispenser.RequestVehicle to block dispensing if team tier < min_tier
-                Type vehicleDispenserType = null;
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                var requestVehicle = AccessTools.Method(typeof(VehicleDispenser), "RequestVehicle");
+                if (requestVehicle != null)
                 {
-                    vehicleDispenserType = asm.GetType("VehicleDispenser");
-                    if (vehicleDispenserType != null) break;
-                }
-                if (vehicleDispenserType != null)
-                {
-                    var requestVehicle = AccessTools.Method(vehicleDispenserType, "RequestVehicle");
-                    if (requestVehicle != null)
-                    {
-                        harmony.Patch(requestVehicle,
-                            prefix: new HarmonyMethod(typeof(Patch_VehicleDispenser), "Prefix"));
-                        MelonLogger.Msg("Patched VehicleDispenser.RequestVehicle for min_tier enforcement");
-                    }
+                    harmony.Patch(requestVehicle,
+                        prefix: new HarmonyMethod(typeof(Patch_VehicleDispenser), "Prefix"));
+                    MelonLogger.Msg("Patched VehicleDispenser.RequestVehicle for min_tier enforcement");
                 }
 
                 // Patch SendPlayerOverrides to chunk overrides into multiple packets
                 // (the original packs ALL overrides into one packet, exceeding Steam's 2400-byte limit)
-                Type networkLayerType = null;
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                var sendPlayerOverrides = typeof(NetworkLayer).GetMethod("SendPlayerOverrides",
+                    BindingFlags.Public | BindingFlags.Static);
+                if (sendPlayerOverrides != null)
                 {
-                    networkLayerType = asm.GetType("NetworkLayer");
-                    if (networkLayerType != null) break;
+                    _sendPlayerOverridesMethod = sendPlayerOverrides;
+                    harmony.Patch(sendPlayerOverrides,
+                        prefix: new HarmonyMethod(typeof(Patch_SendPlayerOverrides), "Prefix"));
+                    MelonLogger.Msg("Patched SendPlayerOverrides for chunked override sync");
                 }
-                if (networkLayerType != null)
-                {
-                    var sendPlayerOverrides = networkLayerType.GetMethod("SendPlayerOverrides",
-                        BindingFlags.Public | BindingFlags.Static);
-                    if (sendPlayerOverrides != null)
-                    {
-                        _sendPlayerOverridesMethod = sendPlayerOverrides;
-                        harmony.Patch(sendPlayerOverrides,
-                            prefix: new HarmonyMethod(typeof(Patch_SendPlayerOverrides), "Prefix"));
-                        MelonLogger.Msg("Patched SendPlayerOverrides for chunked override sync");
-                    }
-                    else
-                        MelonLogger.Warning("SendPlayerOverrides method not found — override sync may fail for large configs");
-                }
+                else
+                    MelonLogger.Warning("SendPlayerOverrides method not found — override sync may fail for large configs");
 
                 // Register chat commands via AdminMod API
                 try
                 {
+                    // AdminMod is optional — find HelperMethods via reflection
                     Type helperType = null;
-                    Type playerType = null;
                     foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
                     {
-                        if (helperType == null)
-                            helperType = asm.GetType("SilicaAdminMod.HelperMethods");
-                        if (playerType == null)
-                            playerType = asm.GetType("Player");
+                        helperType = asm.GetType("SilicaAdminMod.HelperMethods");
+                        if (helperType != null) break;
                     }
-                    if (helperType != null && playerType != null)
+                    if (helperType != null)
                     {
-                        // Cache AdminMod types for reuse
-                        _adminPlayerType = playerType;
                         _adminCallbackType = helperType.GetNestedType("CommandCallback", BindingFlags.Public);
                         if (_adminCallbackType == null)
                             _adminCallbackType = helperType.Assembly.GetType("SilicaAdminMod.HelperMethods+CommandCallback");
@@ -279,8 +249,8 @@ namespace Si_UnitBalance
                         _sendConsoleToPlayerMethod = helperType.GetMethod("SendConsoleMessageToPlayer", BindingFlags.Public | BindingFlags.Static);
 
                         // Cache Player.PlayerName and Player.PlayerID for audit log
-                        _playerNameField = playerType.GetField("PlayerName", BindingFlags.Public | BindingFlags.Instance);
-                        _playerIdField = playerType.GetField("PlayerID", BindingFlags.Public | BindingFlags.Instance);
+                        _playerNameField = typeof(Player).GetField("PlayerName", BindingFlags.Public | BindingFlags.Instance);
+                        _playerIdField = typeof(Player).GetField("PlayerID", BindingFlags.Public | BindingFlags.Instance);
 
                         if (_adminCallbackType != null && _registerAdminCmdMethod != null)
                         {
@@ -289,7 +259,7 @@ namespace Si_UnitBalance
                             {
                                 var method = typeof(UnitBalance).GetMethod(targetMethod, BindingFlags.NonPublic | BindingFlags.Static);
                                 var dm = new System.Reflection.Emit.DynamicMethod(
-                                    name, typeof(void), new Type[] { playerType, typeof(string) },
+                                    name, typeof(void), new Type[] { typeof(Player), typeof(string) },
                                     typeof(UnitBalance).Module, true);
                                 var il = dm.GetILGenerator();
                                 il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
@@ -334,7 +304,7 @@ namespace Si_UnitBalance
                             MelonLogger.Warning("Could not find CommandCallback or RegisterAdminCommand in AdminMod");
                     }
                     else
-                        MelonLogger.Warning($"AdminMod API not found (helper={helperType != null}, player={playerType != null}).");
+                        MelonLogger.Warning("AdminMod not found — chat commands (!rebalance, !b) disabled");
                 }
                 catch (Exception chatEx)
                 {
@@ -391,6 +361,7 @@ namespace Si_UnitBalance
                 _fowDistanceOverrides.Clear();
                 _visibleEventRadiusMultipliers.Clear();
                 _lifetimeMultipliers.Clear();
+                _strafeSpeedMultipliers.Clear();
                 _projectileOverrides.Clear();
                 _techTierTimes.Clear();
                 _teleportCooldown = -1f;
@@ -435,6 +406,7 @@ namespace Si_UnitBalance
                         float fowDistance = overrides["fow_distance"]?.Value<float>() ?? -1f;
                         float verMult = overrides["visible_event_radius_mult"]?.Value<float>() ?? 1.0f;
                         float lifetimeMult = overrides["proj_lifetime_mult"]?.Value<float>() ?? 1.0f;
+                        float strafeSpeedMult = overrides["strafe_speed_mult"]?.Value<float>() ?? 1.0f;
                         float dispenseTimeout = overrides["dispense_timeout"]?.Value<float>() ?? -1f;
 
                         // Per-weapon multipliers (pri_/sec_ prefixed)
@@ -495,6 +467,8 @@ namespace Si_UnitBalance
                             _visibleEventRadiusMultipliers[unitName] = verMult;
                         if (Math.Abs(lifetimeMult - 1.0f) > 0.001f)
                             _lifetimeMultipliers[unitName] = lifetimeMult;
+                        if (Math.Abs(strafeSpeedMult - 1.0f) > 0.001f)
+                            _strafeSpeedMultipliers[unitName] = strafeSpeedMult;
                         if (dispenseTimeout >= 0)
                             _dispenseTimeout = dispenseTimeout; // global — applies to all dispensers of this unit
 
@@ -567,8 +541,14 @@ namespace Si_UnitBalance
         {
             try
             {
-                // Try to copy from Si_UnitBalance_Config_Default.json (comprehensive vanilla template)
+                // Try to copy from Si_UnitBalance_Config_Default.json in config dir or Mods dir
                 string defaultPath = Path.Combine(Path.GetDirectoryName(_configPath)!, "Si_UnitBalance_Config_Default.json");
+                if (!File.Exists(defaultPath))
+                {
+                    // Fallback: check Mods directory for legacy placement
+                    string modsDefault = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "Si_UnitBalance_Config_Default.json");
+                    if (File.Exists(modsDefault)) defaultPath = modsDefault;
+                }
                 if (File.Exists(defaultPath))
                 {
                     File.Copy(defaultPath, _configPath);

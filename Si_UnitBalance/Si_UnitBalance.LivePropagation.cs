@@ -63,13 +63,14 @@ namespace Si_UnitBalance
             bool hasFireRate = HasAnyWeaponMult(_fireRateMultipliers, name);
             bool hasMoveSpeed = _moveSpeedMultipliers.TryGetValue(name, out float moveMult);
             bool hasTurboSpeed = _turboSpeedMultipliers.TryGetValue(name, out float turboMult);
+            bool hasStrafeSpeed = _strafeSpeedMultipliers.TryGetValue(name, out float strafeMult);
             bool hasTurnRadius = _turnRadiusMultipliers.TryGetValue(name, out float turnMult);
             bool hasTargetDist = _targetDistanceOverrides.TryGetValue(name, out float targetDist);
             bool hasFoW = _fowDistanceOverrides.TryGetValue(name, out float fowDist);
             bool hasJump = _jumpSpeedMultipliers.TryGetValue(name, out float jumpMult);
 
             if (!hasRange && !hasReload && !hasAccuracy && !hasMagazine && !hasFireRate
-                && !hasMoveSpeed && !hasTurboSpeed && !hasTurnRadius
+                && !hasMoveSpeed && !hasTurboSpeed && !hasStrafeSpeed && !hasTurnRadius
                 && !hasTargetDist && !hasFoW && !hasJump) return;
 
             // Build prefab component lookup by type (for reading vanilla values)
@@ -222,6 +223,15 @@ namespace Si_UnitBalance
                         }
                         fieldsSet += LiveScaleFieldDeclaredOnlyLog(prefabComp, liveComp, fn, fieldMult, name);
                     }
+                }
+
+                // --- Strafe speed: FlyMoveScaleSide (creature) or StrafeSpeed (VehicleAir) ---
+                if (hasStrafeSpeed && prefabComp != null)
+                {
+                    if (typeName == "CreatureDecapod")
+                        fieldsSet += LiveScaleField(prefabComp, liveComp, "FlyMoveScaleSide", strafeMult);
+                    else if (typeName == "VehicleAir")
+                        fieldsSet += LiveScaleFieldDeclaredOnly(prefabComp, liveComp, "StrafeSpeed", strafeMult);
                 }
             }
 
@@ -393,7 +403,7 @@ namespace Si_UnitBalance
             try
             {
                 string outPath = System.IO.Path.Combine(
-                    System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location),
+                    System.IO.Path.GetDirectoryName(_configPath),
                     "Si_UnitBalance_Dump.json");
 
                 var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();

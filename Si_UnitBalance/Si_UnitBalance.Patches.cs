@@ -136,6 +136,7 @@ namespace Si_UnitBalance
                     ApplyJumpSpeedOverrides(omReady);
                     ApplyVisibleEventRadiusOverrides(omReady);
                     ApplyMoveSpeedOverrides(omReady);
+                    ApplyStrafeSpeedOverrides(omReady);
                     ApplyTurnRadiusOverrides(omReady);
                     ApplyTeleportOverrides(omReady);
                     ApplyDispenserTimeoutOverrides(omReady);
