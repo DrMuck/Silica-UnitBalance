@@ -565,49 +565,26 @@ namespace Si_UnitBalance
 
         private static void CreateDefaultConfig()
         {
-            string defaultJson = @"{
-    ""enabled"": true,
-    ""dump_fields"": false,
-    ""description"": ""Unit balance mod. damage/health_mult = combat scaling, cost/build_time_mult = economy scaling, min_tier = tech requirement override. tech_time = per-tier research time in seconds (default 30s all tiers). Omit or -1 for min_tier = no change."",
-    ""tech_time"": {
-        ""_note"": ""Build time in seconds for each tech tier research (all factions). Default is 30s for all tiers."",
-        ""tier_1"": 30,
-        ""tier_2"": 30,
-        ""tier_3"": 30,
-        ""tier_4"": 30,
-        ""tier_5"": 30,
-        ""tier_6"": 30,
-        ""tier_7"": 30,
-        ""tier_8"": 30
-    },
-    ""units"": {
-        ""Gunship"":      { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 5.24 - dominant air unit"" },
-        ""Siege Tank"":   { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 4.98 - very strong heavy vehicle"" },
-        ""Crimson Tank"": { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 3.69"" },
-        ""Railgun Tank"": { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 3.68"" },
-        ""Goliath"":      { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 2.70"" },
-        ""Firebug"":      { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 3.59"" },
-        ""Scorpion"":     { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 3.45"" },
-        ""Colossus"":     { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 3.62"" },
-        ""Behemoth"":     { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 2.10"" },
-        ""Hover Tank"":   { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 2.50"" },
-
-        ""Horned Crab"":  { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.13 - worst combat unit"" },
-        ""Great Worm"":   { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.19"" },
-        ""Flak Car"":     { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.47 - fails at anti-air"" },
-        ""Crab"":         { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.56"" },
-        ""Squid"":        { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.45"" },
-
-        ""Rifleman"":     { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.18"" },
-        ""Trooper"":      { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.18"" },
-        ""Scout"":        { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.20"" },
-        ""Militia"":      { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.21"" },
-        ""Marksman"":     { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""_note"": ""K/D 0.67"" },
-        ""Commando"":     { ""damage_mult"": 1.00, ""health_mult"": 1.00, ""cost_mult"": 1.00, ""build_time_mult"": 1.00, ""move_speed_mult"": 1.00, ""_note"": ""K/D 1.20"" }
-    }
-}";
             try
             {
+                // Try to copy from Si_UnitBalance_Config_Default.json (comprehensive vanilla template)
+                string defaultPath = Path.Combine(Path.GetDirectoryName(_configPath)!, "Si_UnitBalance_Config_Default.json");
+                if (File.Exists(defaultPath))
+                {
+                    File.Copy(defaultPath, _configPath);
+                    MelonLogger.Msg($"Created config from default template: {defaultPath}");
+                    return;
+                }
+
+                // Fallback: minimal inline default
+                string defaultJson = @"{
+    ""enabled"": true,
+    ""dump_fields"": false,
+    ""shrimp_disable_aim"": false,
+    ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
+    ""tech_time"": { ""tier_1"": 30, ""tier_2"": 30, ""tier_3"": 30, ""tier_4"": 30, ""tier_5"": 30, ""tier_6"": 30, ""tier_7"": 30, ""tier_8"": 30 },
+    ""units"": {}
+}";
                 File.WriteAllText(_configPath, defaultJson);
             }
             catch (Exception ex)

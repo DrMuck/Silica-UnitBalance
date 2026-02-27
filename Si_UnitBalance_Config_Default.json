@@ -2,9 +2,10 @@
     "enabled": true,
     "dump_fields": false,
     "shrimp_disable_aim": false,
-    "description": "Default/vanilla config — no balance changes. Use with !rebalance to restore modded values from Si_UnitBalance_Config.json.",
+    "description": "Vanilla base config — all multipliers at 1.00 (no change), absolute overrides at -1 (disabled). Modify values to rebalance. Use !rebalance in chat to hot-reload.",
+
     "tech_time": {
-        "_note": "Vanilla: 30s all tiers",
+        "_note": "Build time in seconds per tech tier research (all factions). Vanilla: 30s all tiers.",
         "tier_1": 30,
         "tier_2": 30,
         "tier_3": 30,
@@ -14,76 +15,469 @@
         "tier_7": 30,
         "tier_8": 30
     },
+
     "units": {
-        "_comment": "=== STRUCTURES (Sol+Centauri shared) ===",
-        "Headquarters":        { "_note": "no change" },
-        "Refinery":            { "_note": "no change" },
-        "Barracks":            { "_note": "no change" },
-        "Air Factory":         { "_note": "no change" },
-        "Heavy Factory":       { "_note": "no change" },
-        "Ultra Heavy Factory": { "_note": "no change" },
-        "Turret":              { "_note": "no change" },
-        "Heavy Turret":        { "_note": "no change" },
-        "Anti-Air Rocket Turret": { "_note": "no change" },
+        "_teleport": {
+            "cooldown": 120,
+            "duration": 5,
+            "_note": "Teleportation: cooldown 120s, cast time 5s (absolute values, vanilla defaults)"
+        },
 
-        "_comment2": "=== SOL UNITS ===",
-        "Scout":          { "_note": "no change" },
-        "Rifleman":       { "_note": "no change" },
-        "Commando":       { "_note": "no change" },
-        "Light Striker":  { "_note": "no change" },
-        "Pulse Truck":    { "_note": "no change" },
-        "Bomber":         { "_note": "no change" },
-        "Hover Tank":     { "_note": "no change" },
-        "Siege Tank":     { "_note": "no change" },
-        "Gunship":        { "_note": "no change" },
-        "Dropship":       { "_note": "no change" },
-        "Platoon Hauler": { "_note": "no change" },
-        "Barrage Truck":  { "_note": "no change" },
-        "Hover Bike":     { "_note": "no change" },
-        "Heavy Striker":  { "_note": "no change" },
-        "Railgun Tank":   { "_note": "no change" },
-        "Marksman":       { "_note": "no change" },
+        "_comment_sol_barracks": "========== SOL — Barracks ==========",
+        "Scout":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Rifleman": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Sniper":   {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Heavy":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Commando": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
 
-        "_comment3": "=== CENTAURI UNITS ===",
-        "Militia":        { "_note": "no change" },
-        "Trooper":        { "_note": "no change" },
-        "Interceptor":    { "_note": "no change" },
-        "Dreadnought":    { "_note": "no change" },
-        "Combat Tank":    { "_note": "no change" },
-        "Heavy Tank":     { "_note": "no change" },
-        "Squad Transport": { "_note": "no change" },
-        "Pyro Tank":      { "_note": "no change" },
-        "Freighter":      { "_note": "no change" },
-        "Crimson Tank":   { "_note": "no change" },
-        "Flak Car":       { "_note": "no change" },
-        "Strike Tank":    { "_note": "no change" },
-        "Shuttle":        { "_note": "no change" },
+        "_comment_sol_lf": "========== SOL — Light Factory ==========",
+        "Light Quad":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Platoon Hauler": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Heavy Quad":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Light Striker":  {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Heavy Striker":  {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "AA Truck":       {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
 
-        "_comment4": "=== ALIEN STRUCTURES ===",
-        "Nest":                  { "_note": "no change" },
-        "Node":                  { "_note": "no change" },
-        "Bio Cache":             { "_note": "no change" },
-        "Lesser Spawning Cyst":  { "_note": "no change" },
-        "Greater Spawning Cyst": { "_note": "no change" },
-        "Grand Spawning Cyst":   { "_note": "no change" },
-        "Colossal Spawning Cyst": { "_note": "no change" },
-        "Quantum Cortex":        { "_note": "no change" },
-        "Hive Spire":     { "_note": "no change" },
-        "Thorn Spire":    { "_note": "no change" },
+        "_comment_sol_hf": "========== SOL — Heavy Factory ==========",
+        "Hover Tank":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Barrage Truck":  {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Railgun Tank":   {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Pulse Truck":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
 
-        "_comment5": "=== ALIEN UNITS ===",
-        "Shrimp":         { "_note": "no change" },
-        "Crab":           { "_note": "no change" },
-        "Shocker":        { "_note": "no change" },
-        "Horned Crab":    { "_note": "no change" },
-        "Hunter":         { "_note": "no change" },
-        "Behemoth":       { "_note": "no change" },
-        "Dragonfly":      { "_note": "no change" },
-        "Goliath":        { "_note": "no change" },
-        "Scorpion":       { "_note": "no change" },
-        "Defiler":        { "_note": "no change" },
-        "Firebug":        { "_note": "no change" },
-        "Colossus":       { "_note": "no change" },
-        "Queen":          { "_note": "no change" }
+        "_comment_sol_uhf": "========== SOL — Ultra Heavy Factory ==========",
+        "Harvester":      {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Siege Tank":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_sol_air": "========== SOL — Air Factory ==========",
+        "Gunship":        {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Dropship":       {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Fighter":        {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Bomber":         {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_sol_struct": "========== SOL/CENTAURI — Structures (shared names apply to both factions) ==========",
+        "Headquarters":           { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Refinery":               { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Barracks":               { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Air Factory":            { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Heavy Factory":          { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Ultra Heavy Factory":    { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Turret":                 { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "damage_mult": 1.00, "range_mult": 1.00, "accuracy_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Heavy Turret":           { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "damage_mult": 1.00, "range_mult": 1.00, "accuracy_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Anti-Air Rocket Turret": { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "damage_mult": 1.00, "range_mult": 1.00, "accuracy_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+
+        "_comment_cen_barracks": "========== CENTAURI — Barracks ==========",
+        "Militia":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Trooper":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Marksman":   {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Juggernaut": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Templar":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00, "jump_speed_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_cen_lf": "========== CENTAURI — Light Factory ==========",
+        "Light Raider":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Squad Transport": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Heavy Raider":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Assault Car":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Strike Tank":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Flak Car":        {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_cen_hf": "========== CENTAURI — Heavy Factory ==========",
+        "Combat Tank": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Rocket Tank": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Heavy Tank":  {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+        "Pyro Tank":   {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "target_distance": -1,
+            "min_tier": -1
+        },
+
+        "_comment_cen_uhf": "========== CENTAURI — Ultra Heavy Factory ==========",
+        "Crimson Tank": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turn_radius_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_cen_air": "========== CENTAURI — Air Factory ==========",
+        "Shuttle":      {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Dreadnought":  {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Interceptor":  {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Freighter":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_htp": "========== HTP — Hover Bike (dispense_timeout in seconds, -1 = no override) ==========",
+        "Hover Bike": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "magazine_mult": 1.00, "fire_rate_mult": 1.00, "reload_time_mult": 1.00,
+            "move_speed_mult": 1.00, "turbo_speed_mult": 1.00,
+            "dispense_timeout": -1,
+            "min_tier": -1
+        },
+
+        "_comment_alien_lesser": "========== ALIEN — Lesser Spawning Cyst ==========",
+        "Crab":      {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1,
+            "_note": "Melee unit"
+        },
+        "Shrimp":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Shocker":   {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Wasp":      {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1,
+            "_note": "Melee flying unit"
+        },
+        "Dragonfly": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Squid":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_alien_greater": "========== ALIEN — Greater Spawning Cyst ==========",
+        "Horned Crab": {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1,
+            "_note": "Melee unit"
+        },
+        "Hunter":      {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1,
+            "_note": "Melee unit — fast, leap attack"
+        },
+        "Behemoth":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "target_distance": -1,
+            "min_tier": -1,
+            "_note": "Instant-hit laser beam"
+        },
+        "Scorpion":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1
+        },
+        "Firebug":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_alien_grand": "========== ALIEN — Grand Spawning Cyst ==========",
+        "Goliath":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1,
+            "_note": "Melee unit — massive HP, 12000 melee damage"
+        },
+
+        "_comment_alien_colossal": "========== ALIEN — Colossal Spawning Cyst ==========",
+        "Defiler":     {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1,
+            "_note": "10-projectile swarm, 180 deg spread"
+        },
+        "Colossus":    {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00, "range_mult": 1.00, "proj_speed_mult": 1.00, "proj_lifetime_mult": 1.00,
+            "accuracy_mult": 1.00, "fire_rate_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1,
+            "_note": "Beam weapon, 800 base range, 20s animation"
+        },
+
+        "_comment_alien_nest": "========== ALIEN — Nest ==========",
+        "Queen":       {
+            "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00,
+            "damage_mult": 1.00,
+            "move_speed_mult": 1.00,
+            "min_tier": -1
+        },
+
+        "_comment_alien_struct": "========== ALIEN — Structures ==========",
+        "Nest":                    { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Node":                    { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Bio Cache":               { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Lesser Spawning Cyst":    { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Greater Spawning Cyst":   { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Grand Spawning Cyst":     { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Colossal Spawning Cyst":  { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Quantum Cortex":          { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Hive Spire":              { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "damage_mult": 1.00, "range_mult": 1.00, "accuracy_mult": 1.00, "build_radius": -1, "min_tier": -1 },
+        "Thorn Spire":             { "health_mult": 1.00, "cost_mult": 1.00, "build_time_mult": 1.00, "damage_mult": 1.00, "range_mult": 1.00, "accuracy_mult": 1.00, "build_radius": -1, "min_tier": -1 }
     }
 }
