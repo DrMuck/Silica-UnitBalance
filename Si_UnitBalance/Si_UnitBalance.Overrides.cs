@@ -873,41 +873,106 @@ namespace Si_UnitBalance
             if (_visibleEventRadiusMultipliers.Count == 0) return;
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
             int applied = 0;
+            var modifiedPD = new HashSet<string>();
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
                 string name = info.DisplayName;
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_visibleEventRadiusMultipliers.TryGetValue(name, out float mult)) continue;
-                // Find all ProjectileData referenced by this unit's turrets/weapons
+
                 var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
+                bool anyApplied = false;
+
                 foreach (var comp in childComps)
                 {
                     if (comp == null) continue;
                     string typeName = comp.GetType().Name;
-                    if (typeName != "VehicleTurret") continue;
-                    // Check PrimaryProjectile and SecondaryProjectile fields
-                    foreach (string pdFieldName in new[] { "PrimaryProjectile", "SecondaryProjectile" })
+
+                    // VehicleTurret: PrimaryProjectile/SecondaryProjectile
+                    if (typeName == "VehicleTurret")
                     {
-                        var pdField = comp.GetType().GetField(pdFieldName,
-                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                        if (pdField == null) continue;
-                        var pdObj = pdField.GetValue(comp);
-                        if (pdObj == null) continue;
-                        float origVER = GetFloatMember(pdObj, "VisibleEventRadius");
+                        foreach (string pdFieldName in new[] { "PrimaryProjectile", "SecondaryProjectile" })
+                        {
+                            var pdField = comp.GetType().GetField(pdFieldName,
+                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                            if (pdField == null) continue;
+                            var pdObj = pdField.GetValue(comp);
+                            if (pdObj == null) continue;
+                            string pdName = (pdObj as UnityEngine.Object)?.name ?? "";
+                            if (string.IsNullOrEmpty(pdName) || modifiedPD.Contains(pdName)) continue;
+                            float origVER = GetFloatMember(pdObj, "VisibleEventRadius");
+                            if (origVER <= 0) continue;
+                            float newVER = origVER * mult;
+                            string pdTarget = useOM ? $"A:{pdName}.asset" : null;
+                            if (useOM) OMSetFloat(pdTarget, "VisibleEventRadius", newVER);
+                            else SetFloatMember(pdObj, "VisibleEventRadius", newVER);
+                            MelonLogger.Msg($"[VER] {name}: {pdName} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
+                            modifiedPD.Add(pdName);
+                            anyApplied = true;
+                        }
+                    }
+
+                    // CreatureDecapod: AttackPrimary/AttackSecondary → AttackProjectileData
+                    if (typeName == "CreatureDecapod")
+                    {
+                        foreach (string attackFieldName in new[] { "AttackPrimary", "AttackSecondary" })
+                        {
+                            var attackField = comp.GetType().GetField(attackFieldName,
+                                BindingFlags.Public | BindingFlags.Instance);
+                            if (attackField == null) continue;
+                            object attackObj;
+                            try { attackObj = attackField.GetValue(comp); } catch { continue; }
+                            if (attackObj == null) continue;
+                            var pdField = attackObj.GetType().GetField("AttackProjectileData",
+                                BindingFlags.Public | BindingFlags.Instance);
+                            if (pdField == null) continue;
+                            object pdObj;
+                            try { pdObj = pdField.GetValue(attackObj); } catch { continue; }
+                            if (pdObj == null) continue;
+                            string pdName = "";
+                            try { pdName = ((UnityEngine.Object)pdObj).name; } catch { continue; }
+                            if (string.IsNullOrEmpty(pdName) || modifiedPD.Contains(pdName)) continue;
+                            float origVER = GetFloatMember(pdObj, "VisibleEventRadius");
+                            if (origVER <= 0) continue;
+                            float newVER = origVER * mult;
+                            string pdTarget = useOM ? $"A:{pdName}.asset" : null;
+                            if (useOM) OMSetFloat(pdTarget, "VisibleEventRadius", newVER);
+                            else SetFloatMember(pdObj, "VisibleEventRadius", newVER);
+                            MelonLogger.Msg($"[VER] {name}: {pdName} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
+                            modifiedPD.Add(pdName);
+                            anyApplied = true;
+                        }
+                    }
+
+                    // Generic: any component field of type ProjectileData (catches infantry CharacterAttachment)
+                    var fields = comp.GetType().GetFields(
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    foreach (var field in fields)
+                    {
+                        if (field.FieldType.Name != "ProjectileData") continue;
+                        object pdObj2;
+                        try { pdObj2 = field.GetValue(comp); } catch { continue; }
+                        if (pdObj2 == null) continue;
+                        string pdName2 = "";
+                        try { pdName2 = ((UnityEngine.Object)pdObj2).name; } catch { continue; }
+                        if (string.IsNullOrEmpty(pdName2) || modifiedPD.Contains(pdName2)) continue;
+                        float origVER = GetFloatMember(pdObj2, "VisibleEventRadius");
                         if (origVER <= 0) continue;
                         float newVER = origVER * mult;
-                        string pdName = (pdObj as UnityEngine.Object)?.name ?? pdObj.ToString();
-                        string pdTarget = useOM ? $"A:{pdName}.asset" : null;
+                        string pdTarget = useOM ? $"A:{pdName2}.asset" : null;
                         if (useOM) OMSetFloat(pdTarget, "VisibleEventRadius", newVER);
-                        else SetFloatMember(pdObj, "VisibleEventRadius", newVER);
-                        MelonLogger.Msg($"[VER] {name}: {pdName} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
-                        applied++;
+                        else SetFloatMember(pdObj2, "VisibleEventRadius", newVER);
+                        MelonLogger.Msg($"[VER] {name}: {pdName2} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
+                        modifiedPD.Add(pdName2);
+                        anyApplied = true;
                     }
                 }
+
+                if (anyApplied) applied++;
             }
             if (applied > 0)
-                MelonLogger.Msg($"[VER] Applied VisibleEventRadius overrides to {applied} projectiles");
+                MelonLogger.Msg($"[VER] Applied VisibleEventRadius overrides to {applied} units");
         }
 
         private static void ApplyMoveSpeedOverrides(bool useOM)

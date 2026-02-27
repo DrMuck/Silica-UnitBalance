@@ -78,8 +78,22 @@ namespace Si_UnitBalance
         };
 
         // Per-weapon param keys (without pri_/sec_ prefix)
+        // Weapon param keys per unit type (must match gen_default_config.py)
+        // Vehicles (VehicleTurret): all 7 params
         private static readonly string[] _weaponParamKeys = {
             "damage_mult", "proj_speed_mult", "proj_lifetime_mult", "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult"
+        };
+        // Infantry (CharacterAttachment): only 3 functional params (accuracy/magazine/fire_rate/reload not overridable)
+        private static readonly string[] _weaponParamKeysInfantry = {
+            "damage_mult", "proj_speed_mult", "proj_lifetime_mult"
+        };
+        // Creature ranged (CreatureDecapod ranged): 4 functional params (magazine/fire_rate/reload not applicable)
+        private static readonly string[] _weaponParamKeysCreatureRanged = {
+            "damage_mult", "proj_speed_mult", "proj_lifetime_mult", "accuracy_mult"
+        };
+        // Creature melee (CreatureDecapod melee): only damage
+        private static readonly string[] _weaponParamKeysCreatureMelee = {
+            "damage_mult"
         };
 
         // Per-weapon multiplier resolution: checks "pri:"/"sec:" prefixed key, falls back to shared
@@ -229,18 +243,64 @@ namespace Si_UnitBalance
         {
             GetUnitWeaponInfo(unitName, out bool hasPri, out bool hasSec, out string priName, out string secName);
 
+            // Detect component types on the prefab for dynamic param selection
+            bool hasSoldier = false, hasVT = false, hasWheeled = false, hasHovered = false, hasAir = false, hasDecapod = false;
+            try
+            {
+                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                ObjectInfo matchedInfo = null;
+                foreach (var info in allInfos)
+                {
+                    if (info == null || info.Prefab == null) continue;
+                    if (info.DisplayName == unitName) { matchedInfo = info; break; }
+                }
+                if (matchedInfo != null)
+                {
+                    var comps = matchedInfo.Prefab.GetComponentsInChildren<Component>(true);
+                    foreach (var c in comps)
+                    {
+                        if (c == null) continue;
+                        string tn = c.GetType().Name;
+                        if (tn == "Soldier" || tn == "PlayerMovement" || tn == "FPSMovement") hasSoldier = true;
+                        else if (tn == "VehicleTurret" || tn == "TurretWeapon") hasVT = true;
+                        else if (tn == "VehicleWheeled") hasWheeled = true;
+                        else if (tn == "VehicleHovered") hasHovered = true;
+                        else if (tn == "VehicleAir") hasAir = true;
+                        else if (tn == "CreatureDecapod") hasDecapod = true;
+                    }
+                }
+            }
+            catch { }
+
+            bool isMobile = hasSoldier || hasWheeled || hasHovered || hasAir || hasDecapod;
+            bool isStructure = !isMobile;
+
             var names = new List<string>();
             var keys = new List<string[]>();
 
-            // Health & Production (always)
+            // ── Health & Production (always) ──
             names.Add("Health & Production");
-            if (string.Equals(unitName, "Hover Bike", StringComparison.OrdinalIgnoreCase))
-                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "build_radius", "dispense_timeout" });
-            else
+            if (isStructure)
                 keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "build_radius" });
+            else if (string.Equals(unitName, "Hover Bike", StringComparison.OrdinalIgnoreCase))
+                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "dispense_timeout" });
+            else
+                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier" });
 
-            if (hasPri)
+            // ── Weapons ──
+            // Armed structures must be checked first: they have VT but use non-prefixed keys
+            if (isStructure && hasVT)
             {
+                // Armed structure: full weapon params (non-prefixed shared keys)
+                string label = "Damage & Weapons";
+                if (!string.IsNullOrEmpty(priName)) label += " (" + priName + ")";
+                names.Add(label);
+                keys.Add(new[] { "damage_mult", "proj_speed_mult", "proj_lifetime_mult", "range_mult",
+                                 "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult" });
+            }
+            else if (hasPri && hasVT)
+            {
+                // Vehicle primary weapon: all 7 params
                 string label = "Primary Weapon";
                 if (!string.IsNullOrEmpty(priName)) label += " (" + priName + ")";
                 names.Add(label);
@@ -248,29 +308,84 @@ namespace Si_UnitBalance
                 for (int i = 0; i < _weaponParamKeys.Length; i++) wk[i] = "pri_" + _weaponParamKeys[i];
                 keys.Add(wk);
             }
-
-            if (hasSec)
+            else if (hasPri && hasDecapod)
             {
-                string label = "Secondary Weapon";
-                if (!string.IsNullOrEmpty(secName)) label += " (" + secName + ")";
+                // Creature primary weapon: 4 params if ranged, 1 if melee
+                string label = "Primary Weapon";
+                if (!string.IsNullOrEmpty(priName)) label += " (" + priName + ")";
                 names.Add(label);
-                var wk = new string[_weaponParamKeys.Length];
-                for (int i = 0; i < _weaponParamKeys.Length; i++) wk[i] = "sec_" + _weaponParamKeys[i];
+                bool isMelee = string.Equals(priName, "Melee", StringComparison.OrdinalIgnoreCase);
+                var paramSet = isMelee ? _weaponParamKeysCreatureMelee : _weaponParamKeysCreatureRanged;
+                var wk = new string[paramSet.Length];
+                for (int i = 0; i < paramSet.Length; i++) wk[i] = "pri_" + paramSet[i];
+                keys.Add(wk);
+            }
+            else if (!hasPri && hasSoldier)
+            {
+                // Infantry primary weapon: 3 params (dmg/spd/life only)
+                names.Add("Primary Weapon");
+                var wk = new string[_weaponParamKeysInfantry.Length];
+                for (int i = 0; i < _weaponParamKeysInfantry.Length; i++) wk[i] = "pri_" + _weaponParamKeysInfantry[i];
                 keys.Add(wk);
             }
 
-            // Fallback: no weapons detected, show unified group for backwards compat
-            if (!hasPri && !hasSec)
+            // Secondary weapon: only for mobile units (structures don't use pri_/sec_ prefixes)
+            if (!isStructure)
             {
-                names.Add("Damage & Weapons");
-                keys.Add(new[] { "damage_mult", "range_mult", "proj_speed_mult", "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult" });
+                if (hasSec && hasVT)
+                {
+                    // Vehicle secondary weapon: all 7 params
+                    string label = "Secondary Weapon";
+                    if (!string.IsNullOrEmpty(secName)) label += " (" + secName + ")";
+                    names.Add(label);
+                    var wk = new string[_weaponParamKeys.Length];
+                    for (int i = 0; i < _weaponParamKeys.Length; i++) wk[i] = "sec_" + _weaponParamKeys[i];
+                    keys.Add(wk);
+                }
+                else if (hasSec && hasDecapod)
+                {
+                    // Creature secondary weapon: melee → 1 param (damage only)
+                    string label = "Secondary Weapon";
+                    if (!string.IsNullOrEmpty(secName)) label += " (" + secName + ")";
+                    names.Add(label);
+                    bool isMelee = string.Equals(secName, "Melee", StringComparison.OrdinalIgnoreCase);
+                    var paramSet = isMelee ? _weaponParamKeysCreatureMelee : _weaponParamKeysCreatureRanged;
+                    var wk = new string[paramSet.Length];
+                    for (int i = 0; i < paramSet.Length; i++) wk[i] = "sec_" + paramSet[i];
+                    keys.Add(wk);
+                }
             }
 
-            names.Add("Movement");
-            keys.Add(new[] { "move_speed_mult", "jump_speed_mult", "turbo_speed_mult", "turn_radius_mult" });
+            // ── Movement (only applicable params per component type) ──
+            if (hasSoldier)
+            {
+                names.Add("Movement");
+                keys.Add(new[] { "move_speed_mult", "jump_speed_mult" });
+            }
+            else if (hasWheeled)
+            {
+                names.Add("Movement");
+                keys.Add(new[] { "move_speed_mult", "turn_radius_mult" });
+            }
+            else if (hasHovered || hasAir)
+            {
+                names.Add("Movement");
+                keys.Add(new[] { "move_speed_mult", "turbo_speed_mult" });
+            }
+            else if (hasDecapod)
+            {
+                names.Add("Movement");
+                keys.Add(new[] { "move_speed_mult" });
+            }
+            // structures: no movement group
 
-            names.Add("Vision & Sense");
-            keys.Add(new[] { "target_distance", "fow_distance", "visible_event_radius_mult" });
+            // ── Vision & Sense (all mobile units get target + fow + VER) ──
+            if (isMobile)
+            {
+                names.Add("Vision & Sense");
+                keys.Add(new[] { "target_distance", "fow_distance", "visible_event_radius_mult" });
+            }
+            // structures: no vision group
 
             groupNames = names.ToArray();
             groupKeys = keys.ToArray();
@@ -449,13 +564,14 @@ namespace Si_UnitBalance
 
                 // Cache component lookups by type
                 Component vtComp = null, sensorComp = null, soldierComp = null;
-                Component wheeledComp = null, decapodComp = null;
+                Component wheeledComp = null, decapodComp = null, twComp = null;
                 var allVtComps = new List<Component>();
                 foreach (var comp in childComps)
                 {
                     if (comp == null) continue;
                     string tn = comp.GetType().Name;
                     if (tn == "VehicleTurret") { allVtComps.Add(comp); if (vtComp == null) vtComp = comp; }
+                    else if (tn == "TurretWeapon" && twComp == null) twComp = comp;
                     else if (tn == "Sensor" && sensorComp == null) sensorComp = comp;
                     else if ((tn == "Soldier" || tn == "PlayerMovement" || tn == "FPSMovement") && soldierComp == null) soldierComp = comp;
                     else if (tn == "VehicleWheeled" && wheeledComp == null) wheeledComp = comp;
@@ -488,6 +604,14 @@ namespace Si_UnitBalance
                         if (priPD == null) { priPD = pd; priVtComp = vt; priVtPrefix = pfx; }
                         else if (secPD == null) { secPD = pd; secVtComp = vt; secVtPrefix = pfx; }
                     }
+                }
+
+                // Pre-cache TurretWeapon ProjectileData (for armed structures)
+                object twPD = null;
+                if (twComp != null)
+                {
+                    var twPdF = twComp.GetType().GetField("ProjectileData", BindingFlags.Public | BindingFlags.Instance);
+                    if (twPdF != null) try { twPD = twPdF.GetValue(twComp); } catch { }
                 }
 
                 var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
@@ -550,6 +674,12 @@ namespace Si_UnitBalance
                                         }
                                     }
                                 }
+                                // TurretWeapon fallback (armed structures)
+                                if (val == null && twPD != null)
+                                {
+                                    float dmg = GetFloatMember(twPD, "m_fImpactDamage");
+                                    if (dmg > 0) val = dmg.ToString("F0");
+                                }
                                 // Creature attack damage
                                 if (val == null && decapodComp != null)
                                 {
@@ -586,6 +716,13 @@ namespace Si_UnitBalance
                                     if (f != null && f.FieldType == typeof(float))
                                         val = ((float)f.GetValue(vtComp)).ToString("F0");
                                 }
+                                // TurretWeapon: use Sensor.TargetingDistance as range base
+                                if (val == null && twComp != null && sensorComp != null)
+                                {
+                                    var f = sensorComp.GetType().GetField("TargetingDistance", flags);
+                                    if (f != null && f.FieldType == typeof(float))
+                                        val = ((float)f.GetValue(sensorComp)).ToString("F0");
+                                }
                                 break;
                             case "proj_speed_mult":
                                 if (vtComp != null)
@@ -601,6 +738,31 @@ namespace Si_UnitBalance
                                         }
                                     }
                                 }
+                                if (val == null && twPD != null)
+                                {
+                                    float spd = GetFloatMember(twPD, "m_fBaseSpeed");
+                                    if (spd > 0) val = spd.ToString("F0");
+                                }
+                                break;
+                            case "proj_lifetime_mult":
+                                if (vtComp != null)
+                                {
+                                    var pdField = vtComp.GetType().GetField("PrimaryProjectile", flags);
+                                    if (pdField != null)
+                                    {
+                                        var pd = pdField.GetValue(vtComp);
+                                        if (pd != null)
+                                        {
+                                            float lt = GetFloatMember(pd, "m_fLifeTime");
+                                            if (lt > 0) val = lt.ToString("F2") + "s";
+                                        }
+                                    }
+                                }
+                                if (val == null && twPD != null)
+                                {
+                                    float lt = GetFloatMember(twPD, "m_fLifeTime");
+                                    if (lt > 0) val = lt.ToString("F2") + "s";
+                                }
                                 break;
                             case "accuracy_mult":
                                 if (vtComp != null)
@@ -608,6 +770,11 @@ namespace Si_UnitBalance
                                     var f = vtComp.GetType().GetField("PrimaryMuzzleSpread", flags);
                                     if (f != null && f.FieldType == typeof(float))
                                         val = ((float)f.GetValue(vtComp)).ToString("F4");
+                                }
+                                if (val == null && twComp != null)
+                                {
+                                    float spread = GetFloatMember(twComp, "MuzzleSpread");
+                                    if (spread >= 0) val = spread.ToString("F4");
                                 }
                                 break;
                             case "magazine_mult":
@@ -617,6 +784,18 @@ namespace Si_UnitBalance
                                     if (f != null && f.FieldType == typeof(int))
                                         val = ((int)f.GetValue(vtComp)).ToString();
                                 }
+                                if (val == null && twComp != null)
+                                {
+                                    var f = twComp.GetType().GetField("MagazineSize", flags);
+                                    if (f != null && f.FieldType == typeof(int))
+                                        val = ((int)f.GetValue(twComp)).ToString();
+                                    else
+                                    {
+                                        var p = twComp.GetType().GetProperty("MagazineSize", flags);
+                                        if (p != null && p.PropertyType == typeof(int))
+                                            val = ((int)p.GetValue(twComp)).ToString();
+                                    }
+                                }
                                 break;
                             case "fire_rate_mult":
                                 if (vtComp != null)
@@ -624,6 +803,11 @@ namespace Si_UnitBalance
                                     var f = vtComp.GetType().GetField("PrimaryFireInterval", flags);
                                     if (f != null && f.FieldType == typeof(float))
                                         val = ((float)f.GetValue(vtComp)).ToString("F3") + "s";
+                                }
+                                if (val == null && twComp != null)
+                                {
+                                    float fi = GetFloatMember(twComp, "FireInterval");
+                                    if (fi > 0) val = fi.ToString("F3") + "s";
                                 }
                                 if (val == null && decapodComp != null)
                                 {
@@ -645,6 +829,11 @@ namespace Si_UnitBalance
                                     var f = vtComp.GetType().GetField("PrimaryReloadTime", flags);
                                     if (f != null && f.FieldType == typeof(float))
                                         val = ((float)f.GetValue(vtComp)).ToString("F1") + "s";
+                                }
+                                if (val == null && twComp != null)
+                                {
+                                    float rt = GetFloatMember(twComp, "ReloadTime");
+                                    if (rt > 0) val = rt.ToString("F1") + "s";
                                 }
                                 break;
                             case "move_speed_mult":
@@ -708,6 +897,7 @@ namespace Si_UnitBalance
                                 }
                                 break;
                             case "visible_event_radius_mult":
+                                // Try VehicleTurret first
                                 if (vtComp != null)
                                 {
                                     var pdField = vtComp.GetType().GetField("PrimaryProjectile", flags);
@@ -718,6 +908,46 @@ namespace Si_UnitBalance
                                         {
                                             float ver = GetFloatMember(pd, "VisibleEventRadius");
                                             if (ver > 0) val = ver.ToString("F0");
+                                        }
+                                    }
+                                }
+                                // Try CreatureDecapod AttackPrimary.AttackProjectileData
+                                if (val == null && decapodComp != null)
+                                {
+                                    var atkField = decapodComp.GetType().GetField("AttackPrimary", BindingFlags.Public | BindingFlags.Instance);
+                                    if (atkField != null)
+                                    {
+                                        var atk = atkField.GetValue(decapodComp);
+                                        if (atk != null)
+                                        {
+                                            var pdF = atk.GetType().GetField("AttackProjectileData", BindingFlags.Public | BindingFlags.Instance);
+                                            if (pdF != null)
+                                            {
+                                                var pd = pdF.GetValue(atk);
+                                                if (pd != null)
+                                                {
+                                                    float ver = GetFloatMember(pd, "VisibleEventRadius");
+                                                    if (ver > 0) val = ver.ToString("F0");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // Fallback: search any component field of type ProjectileData (infantry)
+                                if (val == null)
+                                {
+                                    foreach (var comp in childComps)
+                                    {
+                                        if (comp == null || val != null) continue;
+                                        var compFields = comp.GetType().GetFields(flags);
+                                        foreach (var cf in compFields)
+                                        {
+                                            if (cf.FieldType.Name != "ProjectileData") continue;
+                                            object pdObj2;
+                                            try { pdObj2 = cf.GetValue(comp); } catch { continue; }
+                                            if (pdObj2 == null) continue;
+                                            float ver = GetFloatMember(pdObj2, "VisibleEventRadius");
+                                            if (ver > 0) { val = ver.ToString("F0"); break; }
                                         }
                                     }
                                 }
