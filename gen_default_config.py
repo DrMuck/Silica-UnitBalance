@@ -1,6 +1,6 @@
 import json
 
-data = json.load(open('C:/Users/schwe/Projects/Si_UnitBalance/dumps/Si_UnitBalance_Dump_2026-02-23_v2.json'))
+data = json.load(open('C:/Users/schwe/Projects/Si_UnitBalance/dumps/Si_UnitBalance_Dump_2026-02-27_v3.json'))
 units_list = data['units']
 
 by_name = {}
@@ -443,20 +443,31 @@ def build_unit(name, u, ctype):
     elif ctype == 'air_vehicle':
         # VehicleAir: ForwardSpeed+StrafeSpeed (move_speed_mult), TurboSpeed (turbo_speed_mult)
         # strafe_speed_mult scales StrafeSpeed independently
+        afs = u.get('air_forward_speed', 0)
+        ass_ = u.get('air_strafe_speed', 0)
+        ats = u.get('air_turbo_speed', 0)
+        parts = []
+        if afs: parts.append(f"Fwd:{afs}")
+        if ass_: parts.append(f"Strafe:{ass_}")
+        if ats: parts.append(f"Turbo:{ats}")
+        if parts: e['_base_speed'] = ' '.join(parts)
         e['move_speed_mult'] = 1.00
         e['turbo_speed_mult'] = 1.00
         e['strafe_speed_mult'] = 1.00
 
     elif ctype in ('creature_melee', 'creature_ranged', 'creature_flying_melee'):
-        # CreatureDecapod: MoveSpeed/FlyMoveSpeed (move_speed_mult)
+        # CreatureDecapod: MoveSpeed (move_speed_mult), FlyMoveSpeed (fly_speed_mult)
         # strafe_speed_mult scales FlyMoveScaleSide (lateral movement while flying)
         ms = u.get('move_speed', 0)
         fs = u.get('fly_speed', 0)
+        fss = u.get('fly_strafe_scale', -1)
         parts = []
         if ms: parts.append(f"Move:{ms}")
         if fs: parts.append(f"Fly:{fs}")
+        if fss >= 0: parts.append(f"Strafe:{fss}")
         if parts: e['_base_speed'] = ' '.join(parts)
         e['move_speed_mult'] = 1.00
+        if fs: e['fly_speed_mult'] = 1.00
         e['strafe_speed_mult'] = 1.00
 
     # structures: no movement section
@@ -528,7 +539,7 @@ for n in ['Gunship', 'Dropship', 'Fighter', 'Bomber']:
     uc[n] = build_unit(n, by_name[n], 'air_vehicle')
 
 uc["_comment_struct"] = "========== SOL/CENTAURI — Structures =========="
-for n in ['Headquarters', 'Refinery', 'Barracks', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory']:
+for n in ['Headquarters', 'Refinery', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory']:
     uc[n] = build_unit(n, by_name[n], 'structure')
 for n in ['Turret', 'Heavy Turret', 'Anti-Air Rocket Turret']:
     uc[n] = build_unit(n, by_name[n], 'structure_armed')
@@ -630,17 +641,17 @@ expected_keys = {
     },
     'creature_melee': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'move': ['move_speed_mult', 'strafe_speed_mult'],
+        'move': ['move_speed_mult', 'fly_speed_mult', 'strafe_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
     'creature_ranged': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'move': ['move_speed_mult', 'strafe_speed_mult'],
+        'move': ['move_speed_mult', 'fly_speed_mult', 'strafe_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
     'creature_flying_melee': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'move': ['move_speed_mult', 'strafe_speed_mult'],
+        'move': ['move_speed_mult', 'fly_speed_mult', 'strafe_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
     'structure': {
@@ -655,18 +666,18 @@ expected_keys = {
 
 # Keys that should NOT appear per type
 forbidden_keys = {
-    'infantry': ['build_radius', 'turbo_speed_mult', 'turn_radius_mult', 'strafe_speed_mult',
+    'infantry': ['build_radius', 'turbo_speed_mult', 'turn_radius_mult', 'strafe_speed_mult', 'fly_speed_mult',
                  'pri_accuracy_mult', 'pri_magazine_mult', 'pri_fire_rate_mult', 'pri_reload_time_mult'],
-    'wheeled_vehicle': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'strafe_speed_mult'],
-    'hovered_vehicle': ['build_radius', 'jump_speed_mult', 'turn_radius_mult', 'strafe_speed_mult'],
-    'air_vehicle': ['build_radius', 'jump_speed_mult', 'turn_radius_mult'],
+    'wheeled_vehicle': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'strafe_speed_mult', 'fly_speed_mult'],
+    'hovered_vehicle': ['build_radius', 'jump_speed_mult', 'turn_radius_mult', 'strafe_speed_mult', 'fly_speed_mult'],
+    'air_vehicle': ['build_radius', 'jump_speed_mult', 'turn_radius_mult', 'fly_speed_mult'],
     'creature_melee': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult'],
     'creature_ranged': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult',
                         'pri_magazine_mult', 'pri_fire_rate_mult', 'pri_reload_time_mult'],
     'creature_flying_melee': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult'],
-    'structure': ['move_speed_mult', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult',
+    'structure': ['move_speed_mult', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult', 'fly_speed_mult',
                   'target_distance', 'fow_distance', 'visible_event_radius_mult'],
-    'structure_armed': ['move_speed_mult', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult',
+    'structure_armed': ['move_speed_mult', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult', 'fly_speed_mult',
                         'target_distance', 'fow_distance', 'visible_event_radius_mult'],
 }
 
@@ -689,7 +700,7 @@ for n in ['Shrimp', 'Shocker', 'Dragonfly', 'Behemoth', 'Scorpion', 'Firebug', '
     unit_types[n] = 'creature_ranged'
 for n in ['Wasp', 'Squid']:
     unit_types[n] = 'creature_flying_melee'
-for n in ['Headquarters', 'Refinery', 'Barracks', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory',
+for n in ['Headquarters', 'Refinery', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory',
           'Nest', 'Node', 'Bio Cache', 'Lesser Spawning Cyst', 'Greater Spawning Cyst',
           'Grand Spawning Cyst', 'Colossal Spawning Cyst', 'Quantum Cortex']:
     unit_types[n] = 'structure'

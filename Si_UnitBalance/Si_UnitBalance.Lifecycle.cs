@@ -286,6 +286,18 @@ namespace Si_UnitBalance
                         $"{_projectileOverrides.Count} projOverrides, " +
                         $"{_minTierOverrides.Count} minTier, {_techTierTimes.Count} techTime");
 
+                    // Subscribe to tier change events for dispenser LocalTimeout reset
+                    if (_minTierOverrides.Count > 0)
+                    {
+                        _dispenserTierResets.Clear();
+                        GameEvents.OnTeamTechnologyTierChanged += OnTeamTierChanged;
+                        MelonLogger.Msg("[DISPENSER] Subscribed to tier change events for min_tier unlock");
+                    }
+
+                    // Spawn additional units if enabled
+                    if (_additionalSpawn)
+                        MelonCoroutines.Start(SpawnAdditionalUnits(5f));
+
                     // Send overrides to all connected players who joined before game start
                     // (they missed the overrides because notify=false during bulk setup)
                     if (omReady)
@@ -387,11 +399,104 @@ namespace Si_UnitBalance
         // Server-only mod: no client fallback needed.
         // The base game's OnReceiveOverrides() handles client-side override application.
 
+        // =============================================
+        // Additional spawn — spawn extra transport/utility units at game start
+        // =============================================
+
+        private static readonly (string faction, string unitName, int count)[] _additionalSpawnMap =
+        {
+            ("Sol", "Platoon Hauler", 3),
+            ("Centauri", "Squad Transport", 3),
+            ("Alien", "Hunter", 1),
+        };
+
+        private static IEnumerator SpawnAdditionalUnits(float delay)
+        {
+            if (delay > 0f)
+                yield return new WaitForSeconds(delay);
+
+            MelonLogger.Msg("[SPAWN] Additional spawn triggered");
+
+            // Cache ObjectInfo lookup
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var infoByName = new Dictionary<string, ObjectInfo>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string dn = info.DisplayName;
+                if (!string.IsNullOrEmpty(dn) && !infoByName.ContainsKey(dn))
+                    infoByName[dn] = info;
+            }
+
+            int totalSpawned = 0;
+
+            foreach (var team in Team.Teams)
+            {
+                if (team == null || team.Structures == null || team.Structures.Count == 0) continue;
+
+                // Determine faction from team name
+                string teamId = team.TeamShortName ?? team.name ?? "";
+                string matchedFaction = null;
+                foreach (var entry in _additionalSpawnMap)
+                {
+                    if (teamId.IndexOf(entry.faction, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        matchedFaction = entry.faction;
+                        break;
+                    }
+                }
+                if (matchedFaction == null) continue;
+
+                // Find spawn position 150m in front of the HQ
+                Structure baseStruct = team.Structures[0];
+                if (baseStruct == null) continue;
+                Vector3 hqPos = baseStruct.transform.position;
+                Quaternion spawnRot = baseStruct.transform.rotation;
+                Vector3 spawnPos = hqPos + baseStruct.transform.forward * 150f;
+
+                foreach (var entry in _additionalSpawnMap)
+                {
+                    if (!string.Equals(entry.faction, matchedFaction, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    if (!infoByName.TryGetValue(entry.unitName, out ObjectInfo unitInfo))
+                    {
+                        MelonLogger.Warning($"[SPAWN] ObjectInfo not found for '{entry.unitName}'");
+                        continue;
+                    }
+
+                    for (int i = 0; i < entry.count; i++)
+                    {
+                        try
+                        {
+                            // Offset each unit slightly so they don't stack
+                            Vector3 offset = new Vector3((i - 1) * 5f, 0f, 3f);
+                            Vector3 pos = spawnPos + spawnRot * offset;
+                            Game.SpawnPrefab(unitInfo.Prefab, null, team, pos, spawnRot);
+                            totalSpawned++;
+                        }
+                        catch (Exception ex)
+                        {
+                            MelonLogger.Warning($"[SPAWN] Failed to spawn '{entry.unitName}' for {teamId}: {ex.Message}");
+                        }
+                    }
+
+                    MelonLogger.Msg($"[SPAWN] Spawned {entry.count}x {entry.unitName} for {teamId}");
+                }
+            }
+
+            MelonLogger.Msg($"[SPAWN] Additional spawn complete: {totalSpawned} units");
+        }
+
         private static class Patch_GameEnded
         {
             public static void Postfix()
             {
                 MelonLogger.Msg("[UnitBalance] Game ended");
+
+                // Unsubscribe tier change events
+                GameEvents.OnTeamTechnologyTierChanged -= OnTeamTierChanged;
+                _dispenserTierResets.Clear();
 
                 // Clear direct-mutation caches (objects are destroyed on map change)
                 _originalCreatureAttackAimDist.Clear();
@@ -406,6 +511,104 @@ namespace Si_UnitBalance
                     OMRevertAll();
                 }
             }
+        }
+
+        // =============================================
+        // Tier change handler — reset dispenser LocalTimeout once when min_tier is reached
+        // =============================================
+
+        private static void OnTeamTierChanged(Team team, int oldTier, int newTier)
+        {
+            try
+            {
+                if (_minTierOverrides.Count == 0 || newTier <= oldTier) return;
+
+                foreach (var kvp in _minTierOverrides)
+                {
+                    string unitName = kvp.Key;
+                    int minTier = kvp.Value;
+                    if (minTier < 0) continue;
+
+                    // Did we just cross the threshold?
+                    if (oldTier < minTier && newTier >= minTier)
+                    {
+                        string resetKey = $"{team.TeamShortName}_{unitName}";
+                        if (_dispenserTierResets.Contains(resetKey)) continue;
+                        _dispenserTierResets.Add(resetKey);
+
+                        ResetDispenserLocalTimeout(unitName, team);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DISPENSER] Tier change handler error: {ex.Message}");
+            }
+        }
+
+        private static void ResetDispenserLocalTimeout(string unitName, Team team)
+        {
+            var flags = BindingFlags.Public | BindingFlags.Instance;
+            var privFlags = BindingFlags.NonPublic | BindingFlags.Instance;
+
+            // Find VehicleDispenser type via reflection
+            Type vdType = null;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                vdType = asm.GetType("VehicleDispenser");
+                if (vdType != null) break;
+            }
+            if (vdType == null) return;
+
+            // Find all VehicleDispenser instances (scene + prefab)
+            var allDisps = Resources.FindObjectsOfTypeAll(vdType);
+            int reset = 0;
+
+            foreach (var dispObj in allDisps)
+            {
+                if (dispObj == null) continue;
+                var disp = dispObj as Component;
+                if (disp == null) continue;
+
+                // Check VehicleToDispense.DisplayName matches our unit
+                var vtdF = disp.GetType().GetField("VehicleToDispense", flags);
+                if (vtdF == null) continue;
+                var vtdObj = vtdF.GetValue(disp);
+                if (vtdObj == null) continue;
+
+                string dn = null;
+                var dnF = vtdObj.GetType().GetField("DisplayName", flags);
+                if (dnF != null) dn = dnF.GetValue(vtdObj) as string;
+                else
+                {
+                    var dnP = vtdObj.GetType().GetProperty("DisplayName", flags);
+                    if (dnP != null) dn = dnP.GetValue(vtdObj) as string;
+                }
+                if (!string.Equals(dn, unitName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                // Check team match — only reset dispensers for the team that reached the tier
+                var teamProp = disp.GetType().GetProperty("Team", flags);
+                if (teamProp != null)
+                {
+                    var dispTeam = teamProp.GetValue(disp) as Team;
+                    if (dispTeam != null && dispTeam != team) continue;
+                }
+
+                // Reset LocalTimeout to 0 (private field)
+                var ltF = disp.GetType().GetField("LocalTimeout", privFlags);
+                if (ltF != null && ltF.FieldType == typeof(float))
+                {
+                    float oldVal = (float)ltF.GetValue(disp);
+                    if (oldVal > 0f)
+                    {
+                        ltF.SetValue(disp, 0f);
+                        MelonLogger.Msg($"[DISPENSER] Reset LocalTimeout on '{unitName}' dispenser ({oldVal:F0}s -> 0s)");
+                    }
+                    reset++;
+                }
+            }
+
+            MelonLogger.Msg($"[DISPENSER] Team '{team.TeamShortName}' reached tier for '{unitName}' — checked {reset} dispenser(s)");
         }
     }
 }

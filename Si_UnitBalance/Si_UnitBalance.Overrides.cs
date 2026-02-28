@@ -977,7 +977,7 @@ namespace Si_UnitBalance
 
         private static void ApplyMoveSpeedOverrides(bool useOM)
         {
-            if (_moveSpeedMultipliers.Count == 0 && _turboSpeedMultipliers.Count == 0) return;
+            if (_moveSpeedMultipliers.Count == 0 && _turboSpeedMultipliers.Count == 0 && _flySpeedMultipliers.Count == 0) return;
 
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
             int applied = 0;
@@ -990,11 +990,14 @@ namespace Si_UnitBalance
 
                 bool hasMoveSpeed = _moveSpeedMultipliers.TryGetValue(name, out float mult);
                 bool hasTurboSpeed = _turboSpeedMultipliers.TryGetValue(name, out float turboMult);
-                if (!hasMoveSpeed && !hasTurboSpeed) continue;
+                bool hasFlySpeed = _flySpeedMultipliers.TryGetValue(name, out float flyMult);
+                if (!hasMoveSpeed && !hasTurboSpeed && !hasFlySpeed) continue;
 
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
                 if (hasMoveSpeed)
                     MelonLogger.Msg($"[MOVESPEED] Applying move_speed_mult x{mult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                if (hasFlySpeed)
+                    MelonLogger.Msg($"[MOVESPEED] Applying fly_speed_mult x{flyMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
                 if (hasTurboSpeed)
                     MelonLogger.Msg($"[MOVESPEED] Applying turbo_speed_mult x{turboMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
 
@@ -1009,9 +1012,17 @@ namespace Si_UnitBalance
                         var compType = comp.GetType();
                         foreach (string fieldName in _speedFieldNames)
                         {
-                            // TurboSpeed uses turbo_speed_mult; all others use move_speed_mult
+                            // FlyMoveSpeed uses fly_speed_mult (or fallback to move_speed_mult)
+                            // TurboSpeed uses turbo_speed_mult (or fallback to move_speed_mult)
+                            // All others use move_speed_mult
                             float fieldMult;
-                            if (fieldName == "TurboSpeed")
+                            if (fieldName == "FlyMoveSpeed")
+                            {
+                                if (hasFlySpeed) fieldMult = flyMult;
+                                else if (hasMoveSpeed) fieldMult = mult;
+                                else continue;
+                            }
+                            else if (fieldName == "TurboSpeed")
                             {
                                 if (hasTurboSpeed) fieldMult = turboMult;
                                 else if (hasMoveSpeed) fieldMult = mult;

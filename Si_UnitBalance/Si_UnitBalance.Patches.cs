@@ -59,6 +59,18 @@ namespace Si_UnitBalance
                     if (currentTier < minTier)
                     {
                         MelonLogger.Msg($"[DISPENSER] Blocked '{unitName}' — team tier {currentTier} < required {minTier}");
+
+                        // Notify the requesting player via chat
+                        try
+                        {
+                            if (_sendChatToPlayerMethod != null && player != null)
+                            {
+                                string msg = _chatPrefix + $"<color=#FF6666>{unitName}</color> requires tech tier <color=#FFD700>{minTier}</color> (current: {currentTier})";
+                                _sendChatToPlayerMethod.Invoke(null, new object[] { player, new string[] { msg } });
+                            }
+                        }
+                        catch { }
+
                         return false; // Block the spawn
                     }
                 }
@@ -494,11 +506,11 @@ namespace Si_UnitBalance
 
                 // ── HTP Menu ──────────────────────────────────────────
                 case MenuLevel.HTPMenu:
-                    if (selection < 1 || selection > 4) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-4.</color>"); return; }
+                    if (selection < 1 || selection > 5) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-5.</color>"); return; }
                     if (selection == 1) state.Level = MenuLevel.HTPHoverbike;
                     else if (selection == 2) state.Level = MenuLevel.HTPTier;
                     else if (selection == 3) state.Level = MenuLevel.HTPTeleport;
-                    else
+                    else if (selection == 4)
                     {
                         // Toggle shrimp aim disable
                         _shrimpDisableAim = !_shrimpDisableAim;
@@ -509,6 +521,18 @@ namespace Si_UnitBalance
                         string steamId = GetPlayerSteamId(player);
                         WriteAuditLog(playerName, steamId, "shrimp", "disable_aim", (!_shrimpDisableAim).ToString(), _shrimpDisableAim.ToString());
                         MelonLogger.Msg($"[BAL] {playerName} ({steamId}): shrimp_disable_aim -> {_shrimpDisableAim}");
+                    }
+                    else // selection == 5
+                    {
+                        // Toggle additional spawn
+                        _additionalSpawn = !_additionalSpawn;
+                        WriteBoolToJson("additional_spawn", _additionalSpawn);
+                        string spawnStatus = _additionalSpawn ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Additional Spawn: " + spawnStatus + " " + _dimColor + "(applies next game)</color>");
+                        string playerName2 = GetPlayerName(player);
+                        string steamId2 = GetPlayerSteamId(player);
+                        WriteAuditLog(playerName2, steamId2, "htp", "additional_spawn", (!_additionalSpawn).ToString(), _additionalSpawn.ToString());
+                        MelonLogger.Msg($"[BAL] {playerName2} ({steamId2}): additional_spawn -> {_additionalSpawn}");
                     }
                     break;
 

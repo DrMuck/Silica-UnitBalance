@@ -375,7 +375,7 @@ namespace Si_UnitBalance
             else if (hasDecapod)
             {
                 names.Add("Movement");
-                keys.Add(new[] { "move_speed_mult", "strafe_speed_mult" });
+                keys.Add(new[] { "move_speed_mult", "fly_speed_mult", "strafe_speed_mult" });
             }
             // structures: no movement group
 
@@ -872,6 +872,14 @@ namespace Si_UnitBalance
                                     }
                                 }
                                 break;
+                            case "fly_speed_mult":
+                                // CreatureDecapod → FlyMoveSpeed
+                                if (decapodComp != null)
+                                {
+                                    float v = GetFloatMember(decapodComp, "FlyMoveSpeed");
+                                    if (v > 0) val = v.ToString("F1");
+                                }
+                                break;
                             case "strafe_speed_mult":
                                 // CreatureDecapod → FlyMoveScaleSide
                                 if (decapodComp != null)
@@ -1293,7 +1301,9 @@ namespace Si_UnitBalance
                 {
                     SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP</color> " + _dimColor + "(Hover · Tier · Teleportation)</color>");
                     string shrimpStatus = _shrimpDisableAim ? "<color=#FF5555>OFF</color>" : "<color=#55FF55>ON</color>";
+                    string spawnStatus = _additionalSpawn ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Hoverbike  " + _itemColor + "2.</color> Tier  " + _itemColor + "3.</color> Teleportation  " + _itemColor + "4.</color> Shrimp Aim [" + shrimpStatus + "]");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]");
                     break;
                 }
 

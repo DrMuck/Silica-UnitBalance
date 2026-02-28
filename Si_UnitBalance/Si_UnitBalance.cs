@@ -49,6 +49,7 @@ namespace Si_UnitBalance
         private static bool _enabled = true;
         private static bool _dumpFields = true;
         private static bool _shrimpDisableAim = false;
+        private static bool _additionalSpawn = false;
         private static bool _harmonyApplied; // true when SilicaCore found (server)
 
         // OverrideManager reflection cache (resolved once in OnGameStartedLogic)
@@ -113,6 +114,8 @@ namespace Si_UnitBalance
         // Unit/structure name -> min tier override (-1 = no override)
         private static readonly Dictionary<string, int> _minTierOverrides =
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // Tracks which team+unit combos have had their dispenser LocalTimeout reset (once per game)
+        private static readonly HashSet<string> _dispenserTierResets = new HashSet<string>();
         private static readonly Dictionary<string, float> _rangeMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _speedMultipliers =
@@ -144,6 +147,8 @@ namespace Si_UnitBalance
         private static readonly Dictionary<string, float> _lifetimeMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _strafeSpeedMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _flySpeedMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         // Tech tier number (1-8) -> build time in seconds
         private static readonly Dictionary<int, float> _techTierTimes = new Dictionary<int, float>();
@@ -340,6 +345,7 @@ namespace Si_UnitBalance
                 _enabled = config["enabled"]?.Value<bool>() ?? true;
                 _dumpFields = config["dump_fields"]?.Value<bool>() ?? false;
                 _shrimpDisableAim = config["shrimp_disable_aim"]?.Value<bool>() ?? false;
+                _additionalSpawn = config["additional_spawn"]?.Value<bool>() ?? false;
 
                 _damageMultipliers.Clear();
                 _healthMultipliers.Clear();
@@ -362,6 +368,7 @@ namespace Si_UnitBalance
                 _visibleEventRadiusMultipliers.Clear();
                 _lifetimeMultipliers.Clear();
                 _strafeSpeedMultipliers.Clear();
+                _flySpeedMultipliers.Clear();
                 _projectileOverrides.Clear();
                 _techTierTimes.Clear();
                 _teleportCooldown = -1f;
@@ -407,6 +414,7 @@ namespace Si_UnitBalance
                         float verMult = overrides["visible_event_radius_mult"]?.Value<float>() ?? 1.0f;
                         float lifetimeMult = overrides["proj_lifetime_mult"]?.Value<float>() ?? 1.0f;
                         float strafeSpeedMult = overrides["strafe_speed_mult"]?.Value<float>() ?? 1.0f;
+                        float flySpeedMult = overrides["fly_speed_mult"]?.Value<float>() ?? 1.0f;
                         float dispenseTimeout = overrides["dispense_timeout"]?.Value<float>() ?? -1f;
 
                         // Per-weapon multipliers (pri_/sec_ prefixed)
@@ -469,6 +477,8 @@ namespace Si_UnitBalance
                             _lifetimeMultipliers[unitName] = lifetimeMult;
                         if (Math.Abs(strafeSpeedMult - 1.0f) > 0.001f)
                             _strafeSpeedMultipliers[unitName] = strafeSpeedMult;
+                        if (Math.Abs(flySpeedMult - 1.0f) > 0.001f)
+                            _flySpeedMultipliers[unitName] = flySpeedMult;
                         if (dispenseTimeout >= 0)
                             _dispenseTimeout = dispenseTimeout; // global — applies to all dispensers of this unit
 

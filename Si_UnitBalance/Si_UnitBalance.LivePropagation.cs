@@ -64,13 +64,14 @@ namespace Si_UnitBalance
             bool hasMoveSpeed = _moveSpeedMultipliers.TryGetValue(name, out float moveMult);
             bool hasTurboSpeed = _turboSpeedMultipliers.TryGetValue(name, out float turboMult);
             bool hasStrafeSpeed = _strafeSpeedMultipliers.TryGetValue(name, out float strafeMult);
+            bool hasFlySpeed = _flySpeedMultipliers.TryGetValue(name, out float flySpeedMult);
             bool hasTurnRadius = _turnRadiusMultipliers.TryGetValue(name, out float turnMult);
             bool hasTargetDist = _targetDistanceOverrides.TryGetValue(name, out float targetDist);
             bool hasFoW = _fowDistanceOverrides.TryGetValue(name, out float fowDist);
             bool hasJump = _jumpSpeedMultipliers.TryGetValue(name, out float jumpMult);
 
             if (!hasRange && !hasReload && !hasAccuracy && !hasMagazine && !hasFireRate
-                && !hasMoveSpeed && !hasTurboSpeed && !hasStrafeSpeed && !hasTurnRadius
+                && !hasMoveSpeed && !hasTurboSpeed && !hasFlySpeed && !hasStrafeSpeed && !hasTurnRadius
                 && !hasTargetDist && !hasFoW && !hasJump) return;
 
             // Build prefab component lookup by type (for reading vanilla values)
@@ -205,12 +206,18 @@ namespace Si_UnitBalance
                 }
 
                 // --- Any component with speed fields (VehicleHovered, VehicleAir, CreatureDecapod, etc.) ---
-                if ((hasMoveSpeed || hasTurboSpeed) && prefabComp != null)
+                if ((hasMoveSpeed || hasTurboSpeed || hasFlySpeed) && prefabComp != null)
                 {
                     foreach (string fn in _speedFieldNames)
                     {
                         float fieldMult;
-                        if (fn == "TurboSpeed")
+                        if (fn == "FlyMoveSpeed")
+                        {
+                            if (hasFlySpeed) fieldMult = flySpeedMult;
+                            else if (hasMoveSpeed) fieldMult = moveMult;
+                            else continue;
+                        }
+                        else if (fn == "TurboSpeed")
                         {
                             if (hasTurboSpeed) fieldMult = turboMult;
                             else if (hasMoveSpeed) fieldMult = moveMult;
@@ -527,9 +534,12 @@ namespace Si_UnitBalance
 
                     // Movement
                     float moveSpeed = 0, flyMoveSpeed = 0;
+                    float flyMoveScaleSide = -1, flyMoveScaleBack = -1; // CreatureDecapod lateral/back scale
                     float walkSpeed = 0, runSpeed = 0, jumpSpeed = 0;
+                    // VehicleAir movement detail
+                    float airForwardSpeed = 0, airStrafeSpeed = 0, airTurboSpeed = 0;
                     // Vehicle movement detail
-                    string vehicleType = "";  // "Wheeled", "Hovered", or ""
+                    string vehicleType = "";  // "Wheeled", "Hovered", "Air", or ""
                     float vehAccel = 0;       // WheelMotorAccel (%) or MoveAcceleration (m/s^2)
                     float vehTurnRadius = 0;  // TurningCircleRadius (wheeled)
                     float vehTurnSpeed = 0;   // TurnSpeed (hovered, deg/s)
@@ -567,6 +577,13 @@ namespace Si_UnitBalance
                     // Creature projectile damage
                     float projImpactDmg = 0, projRicochetDmg = 0, projSplashDmg = 0;
                     float projImpactDmg2 = 0, projRicochetDmg2 = 0, projSplashDmg2 = 0;
+                    // Infantry weapon (HumanHandsAnimator on Soldier.Attachments[].AttachObject)
+                    string hhaProjName = "";
+                    int hhaMagazine = 0;
+                    float hhaFireDelay = 0, hhaReloadTime = 0;
+                    float hhaSpreadMin = 0, hhaSpreadMax = 0;
+                    float hhaImpactDmg = 0, hhaProjSpeed = 0, hhaProjLifetime = 0;
+                    bool hhaInstantHit = false;
                     // TeleportUI (on structures)
                     bool hasTeleport = false;
                     float teleportTime = 0, teleportCooldown = 0;
@@ -588,6 +605,8 @@ namespace Si_UnitBalance
                             {
                                 try { var f = ct.GetField("MoveSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) moveSpeed = (float)f.GetValue(comp); } catch { }
                                 try { var f = ct.GetField("FlyMoveSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) flyMoveSpeed = (float)f.GetValue(comp); } catch { }
+                                try { var f = ct.GetField("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance); if (f != null) flyMoveScaleSide = (float)f.GetValue(comp); } catch { }
+                                try { var f = ct.GetField("FlyMoveScaleBack", BindingFlags.Public | BindingFlags.Instance); if (f != null) flyMoveScaleBack = (float)f.GetValue(comp); } catch { }
 
                                 // Primary attack
                                 try
@@ -787,6 +806,69 @@ namespace Si_UnitBalance
                                 try { var f = ct.GetField("JumpSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) jumpSpeed = (float)f.GetValue(comp); } catch { }
                             }
 
+                            // Soldier: scan CharacterAttachment assets for weapon matching this unit
+                            // (Soldier.Attachments is empty on dedicated server — prefabs stripped)
+                            if (tn == "Soldier" && string.IsNullOrEmpty(hhaProjName))
+                            {
+                                try
+                                {
+                                    string infoInternal = info.name ?? "";
+                                    string baseName = infoInternal.StartsWith("ObjectInfo_") ? infoInternal.Substring(11) : infoInternal;
+
+                                    var caList = CharacterAttachment.CharacterAttachmentDatas;
+                                    if (caList != null)
+                                    {
+                                        foreach (var ca in caList)
+                                        {
+                                            if (ca == null || ca.AttachObject == null) continue;
+                                            if (!ca.name.Contains(baseName)) continue;
+
+                                            var hhaComps = ca.AttachObject.GetComponentsInChildren<Component>(true);
+                                            foreach (var hc in hhaComps)
+                                            {
+                                                if (hc == null || hc.GetType().Name != "HumanHandsAnimator") continue;
+                                                var ht = hc.GetType();
+                                                try { hhaFireDelay = GetFloatField(ht, hc, "FireDelay"); } catch { }
+                                                try { var mf = ht.GetField("MagazineSize", BindingFlags.Public | BindingFlags.Instance); if (mf != null) hhaMagazine = (int)mf.GetValue(hc); } catch { }
+                                                try { hhaReloadTime = GetFloatField(ht, hc, "ReloadTime"); } catch { }
+                                                try { hhaSpreadMin = GetFloatField(ht, hc, "MuzzleSpreadMin"); } catch { }
+                                                try { hhaSpreadMax = GetFloatField(ht, hc, "MuzzleSpreadMax"); } catch { }
+                                                try
+                                                {
+                                                    var btField = ht.GetField("BulletType", BindingFlags.Public | BindingFlags.Instance);
+                                                    if (btField != null)
+                                                    {
+                                                        var pdObj = btField.GetValue(hc);
+                                                        if (pdObj != null)
+                                                        {
+                                                            hhaProjName = (pdObj as UnityEngine.Object)?.name ?? "";
+                                                            var pdt = pdObj.GetType();
+                                                            try { hhaImpactDmg = GetFloatField(pdt, pdObj, "m_fImpactDamage"); } catch { }
+                                                            try { hhaProjSpeed = GetFloatField(pdt, pdObj, "m_fBaseSpeed"); } catch { }
+                                                            try { hhaProjLifetime = GetFloatField(pdt, pdObj, "m_fLifeTime"); } catch { }
+                                                            try
+                                                            {
+                                                                var ihf = pdt.GetField("m_InstantHit", BindingFlags.Public | BindingFlags.Instance);
+                                                                if (ihf != null) hhaInstantHit = (bool)ihf.GetValue(pdObj);
+                                                                else { var ihp = pdt.GetProperty("m_InstantHit", BindingFlags.Public | BindingFlags.Instance); if (ihp != null) hhaInstantHit = (bool)ihp.GetValue(pdObj); }
+                                                            }
+                                                            catch { }
+                                                        }
+                                                    }
+                                                }
+                                                catch { }
+                                                MelonLogger.Msg($"[DUMP-DBG] {name}: HHA via CA '{ca.name}' proj={hhaProjName} mag={hhaMagazine} fi={hhaFireDelay:F4}");
+                                                break;
+                                            }
+                                            if (!string.IsNullOrEmpty(hhaProjName)) break;
+                                        }
+                                        if (string.IsNullOrEmpty(hhaProjName))
+                                            MelonLogger.Msg($"[DUMP-DBG] {name}: no CA match for '{baseName}' ({caList.Count} CAs)");
+                                    }
+                                }
+                                catch (Exception ex) { MelonLogger.Warning($"[DUMP-DBG] {name}: HHA error: {ex.Message}"); }
+                            }
+
                             // VehicleWheeled: ground vehicle movement
                             if (tn == "VehicleWheeled")
                             {
@@ -804,6 +886,15 @@ namespace Si_UnitBalance
                                 try { var f = ct.GetField("MoveSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) { float val = (float)f.GetValue(comp); if (val > moveSpeed) moveSpeed = val; } } catch { }
                                 try { var f = ct.GetField("MoveAcceleration", BindingFlags.Public | BindingFlags.Instance); if (f != null) vehAccel = (float)f.GetValue(comp); } catch { }
                                 try { var f = ct.GetField("TurnSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) vehTurnSpeed = (float)f.GetValue(comp); } catch { }
+                            }
+
+                            // VehicleAir: aircraft movement
+                            if (tn == "VehicleAir")
+                            {
+                                vehicleType = "Air";
+                                try { var f = ct.GetField("ForwardSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) airForwardSpeed = (float)f.GetValue(comp); } catch { }
+                                try { var f = ct.GetField("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) airStrafeSpeed = (float)f.GetValue(comp); } catch { }
+                                try { var f = ct.GetField("TurboSpeed", BindingFlags.Public | BindingFlags.Instance); if (f != null) airTurboSpeed = (float)f.GetValue(comp); } catch { }
                             }
 
                             // TeleportUI: teleportation settings on structures
@@ -838,6 +929,8 @@ namespace Si_UnitBalance
                     // Movement
                     sb.Append($"\"move_speed\":{moveSpeed:F1},");
                     sb.Append($"\"fly_speed\":{flyMoveSpeed:F1},");
+                    if (flyMoveScaleSide >= 0) sb.Append($"\"fly_strafe_scale\":{flyMoveScaleSide:F2},");
+                    if (flyMoveScaleBack >= 0) sb.Append($"\"fly_back_scale\":{flyMoveScaleBack:F2},");
                     sb.Append($"\"walk_speed\":{walkSpeed:F1},");
                     sb.Append($"\"run_speed\":{runSpeed:F1},");
                     sb.Append($"\"jump_speed\":{jumpSpeed:F2},");
@@ -847,6 +940,10 @@ namespace Si_UnitBalance
                     sb.Append($"\"veh_turn_radius\":{vehTurnRadius:F1},");
                     sb.Append($"\"veh_turn_speed\":{vehTurnSpeed:F1},");
                     sb.Append($"\"veh_reverse_scale\":{vehReverseScale:F2},");
+                    // VehicleAir detail
+                    if (airForwardSpeed > 0) sb.Append($"\"air_forward_speed\":{airForwardSpeed:F1},");
+                    if (airStrafeSpeed > 0) sb.Append($"\"air_strafe_speed\":{airStrafeSpeed:F1},");
+                    if (airTurboSpeed > 0) sb.Append($"\"air_turbo_speed\":{airTurboSpeed:F1},");
                     // Primary attack
                     sb.Append($"\"atk_damage\":{atkDamage:F0},");
                     sb.Append($"\"atk_cooldown\":{atkCooldown:F2},");
@@ -908,6 +1005,20 @@ namespace Si_UnitBalance
                     sb.Append($"\"proj2_impact_dmg\":{projImpactDmg2:F1},");
                     sb.Append($"\"proj2_ricochet_dmg\":{projRicochetDmg2:F1},");
                     sb.Append($"\"proj2_splash_dmg\":{projSplashDmg2:F1},");
+                    // Infantry weapon (HumanHandsAnimator)
+                    if (!string.IsNullOrEmpty(hhaProjName))
+                    {
+                        sb.Append($"\"hha_proj\":\"{EscJson(hhaProjName)}\",");
+                        sb.Append($"\"hha_impact_dmg\":{hhaImpactDmg:F1},");
+                        sb.Append($"\"hha_proj_speed\":{hhaProjSpeed:F1},");
+                        sb.Append($"\"hha_proj_lifetime\":{hhaProjLifetime:F2},");
+                        sb.Append($"\"hha_instant_hit\":{(hhaInstantHit ? "true" : "false")},");
+                        sb.Append($"\"hha_magazine\":{hhaMagazine},");
+                        sb.Append($"\"hha_fire_delay\":{hhaFireDelay:F4},");
+                        sb.Append($"\"hha_reload_time\":{hhaReloadTime:F2},");
+                        sb.Append($"\"hha_spread_min\":{hhaSpreadMin:F3},");
+                        sb.Append($"\"hha_spread_max\":{hhaSpreadMax:F3},");
+                    }
                     // Teleport
                     sb.Append($"\"has_teleport\":{(hasTeleport ? "true" : "false")},");
                     sb.Append($"\"teleport_time\":{teleportTime:F1},");
