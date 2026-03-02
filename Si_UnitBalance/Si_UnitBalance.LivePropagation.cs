@@ -52,7 +52,7 @@ namespace Si_UnitBalance
             processedGOs.Add(goId);
             liveCount++;
 
-            string name = info.DisplayName;
+            string name = ResolveConfigName(info.DisplayName, info.name);
             if (string.IsNullOrEmpty(name)) return;
 
             // Gather all overrides for this unit name (weapon params use HasAnyWeaponMult for per-weapon keys)
@@ -464,7 +464,7 @@ namespace Si_UnitBalance
                 foreach (var info in allInfos)
                 {
                     if (info == null) continue;
-                    string name = info.DisplayName;
+                    string name = ResolveConfigName(info.DisplayName, info.name);
                     if (string.IsNullOrEmpty(name)) continue;
 
                     // Skip tutorial/TD variants by internal name

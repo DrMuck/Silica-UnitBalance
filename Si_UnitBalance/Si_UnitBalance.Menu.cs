@@ -14,6 +14,57 @@ namespace Si_UnitBalance
         // Balance Editor UI — chat-based menu system (!b command)
         // =============================================
 
+        // Vanilla base value cache: populated before overrides are applied
+        private static readonly Dictionary<string, Dictionary<string, string>> _vanillaBaseCache =
+            new Dictionary<string, Dictionary<string, string>>();
+
+        // Shared ObjectInfo array — set during CacheVanillaBaseValues to avoid repeated FindObjectsOfTypeAll
+        private static ObjectInfo[] _sharedAllInfos = null;
+
+        /// <summary>
+        /// Snapshots base values from game objects while they are in vanilla state.
+        /// Must be called BEFORE any Apply* overrides run.
+        /// </summary>
+        internal static void CacheVanillaBaseValues()
+        {
+            _vanillaBaseCache.Clear();
+            // Single scan — shared by GetUnitParamGroups and GetBaseValuesLive during caching
+            _sharedAllInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            int cached = 0;
+            foreach (var faction in _unitNames)
+            {
+                foreach (var category in faction)
+                {
+                    foreach (string unitName in category)
+                    {
+                        try
+                        {
+                            GetUnitParamGroups(unitName, out string[] groupNames, out string[][] groupKeys);
+                            var allKeys = new List<string>();
+                            foreach (var gk in groupKeys)
+                                allKeys.AddRange(gk);
+                            var baseVals = GetBaseValuesLive(unitName, allKeys.ToArray());
+                            if (baseVals.Count > 0)
+                            {
+                                _vanillaBaseCache[unitName] = baseVals;
+                                cached++;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            _sharedAllInfos = null; // release
+            MelonLogger.Msg($"[BASE] Cached vanilla base values for {cached} units");
+        }
+
+        // Match ObjectInfo against a menu unit name, handling resolved names (e.g. "Sol Harvester" → DisplayName "Harvester" + internal name containing "_Sol_")
+        private static bool MatchesUnitName(ObjectInfo info, string unitName)
+        {
+            if (info.DisplayName == unitName) return true;
+            return ResolveConfigName(info.DisplayName, info.name) == unitName;
+        }
+
         private static readonly string[][] _factionNames = {
             new[] { "Sol" },
             new[] { "Centauri" },
@@ -37,18 +88,18 @@ namespace Si_UnitBalance
                 new[] { "Scout", "Rifleman", "Sniper", "Heavy", "Commando" },
                 new[] { "Light Quad", "Platoon Hauler", "Heavy Quad", "Light Striker", "Heavy Striker", "AA Truck" },
                 new[] { "Hover Tank", "Barrage Truck", "Railgun Tank", "Pulse Truck" },
-                new[] { "Harvester", "Siege Tank" },
+                new[] { "Sol Harvester", "Siege Tank" },
                 new[] { "Gunship", "Dropship", "Fighter", "Bomber" },
-                new[] { "Headquarters", "Refinery", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
+                new[] { "Sol Headquarters", "Refinery", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
             },
             // Centauri
             new[] {
                 new[] { "Militia", "Trooper", "Marksman", "Juggernaut", "Templar" },
                 new[] { "Light Raider", "Squad Transport", "Heavy Raider", "Assault Car", "Strike Tank", "Flak Car" },
                 new[] { "Combat Tank", "Rocket Tank", "Heavy Tank", "Pyro Tank" },
-                new[] { "Harvester", "Crimson Tank" },
+                new[] { "Cent Harvester", "Crimson Tank" },
                 new[] { "Shuttle", "Dreadnought", "Interceptor", "Freighter" },
-                new[] { "Headquarters", "Refinery", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
+                new[] { "Cent Headquarters", "Refinery", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
             },
             // Alien
             new[] {
@@ -128,12 +179,12 @@ namespace Si_UnitBalance
             secName = "";
             try
             {
-                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
                     if (info == null || info.Prefab == null) continue;
-                    if (info.DisplayName == unitName) { matchedInfo = info; break; }
+                    if (MatchesUnitName(info, unitName)) { matchedInfo = info; break; }
                 }
                 if (matchedInfo == null) return;
 
@@ -247,12 +298,12 @@ namespace Si_UnitBalance
             bool hasSoldier = false, hasVT = false, hasWheeled = false, hasHovered = false, hasAir = false, hasDecapod = false;
             try
             {
-                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
                     if (info == null || info.Prefab == null) continue;
-                    if (info.DisplayName == unitName) { matchedInfo = info; break; }
+                    if (MatchesUnitName(info, unitName)) { matchedInfo = info; break; }
                 }
                 if (matchedInfo != null)
                 {
@@ -473,14 +524,15 @@ namespace Si_UnitBalance
             return "0";
         }
 
-        // Shortcut handler for .1-.9, .0, .back commands
+        // Shortcut handler for /1-/9, /0, /back commands
         // Only active when player is in the balance menu
+        // Using / prefix hides chat from other players (AdminMod blocks the message)
         private static void OnMenuShortcut(object player, string args)
         {
             long key = GetPlayerKey(player);
             if (!_menuStates.ContainsKey(key)) return; // Not in menu, silently ignore
 
-            // args is full text like "!1" or ".1 1.5" or "!back"
+            // args is full text like "/1" or "/1 1.5" or "/back"
             // Extract the command and optional extra args
             string text = args?.Trim() ?? "";
             // Strip prefix char (!, /, .)
@@ -547,15 +599,31 @@ namespace Si_UnitBalance
         // Reads from prefab components which retain vanilla values (OM stores overrides separately).
         private static Dictionary<string, string> GetBaseValues(string unitName, string[] paramKeys)
         {
+            // Return cached vanilla values if available (avoids reading modded live objects)
+            if (_vanillaBaseCache.TryGetValue(unitName, out var cached))
+            {
+                var filtered = new Dictionary<string, string>();
+                foreach (string key in paramKeys)
+                {
+                    if (cached.TryGetValue(key, out string val))
+                        filtered[key] = val;
+                }
+                return filtered;
+            }
+            return GetBaseValuesLive(unitName, paramKeys);
+        }
+
+        private static Dictionary<string, string> GetBaseValuesLive(string unitName, string[] paramKeys)
+        {
             var result = new Dictionary<string, string>();
             try
             {
-                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
                     if (info == null || info.Prefab == null) continue;
-                    if (info.DisplayName == unitName) { matchedInfo = info; break; }
+                    if (MatchesUnitName(info, unitName)) { matchedInfo = info; break; }
                 }
                 if (matchedInfo == null) return result;
 
@@ -1285,7 +1353,7 @@ namespace Si_UnitBalance
                     if (state.JsonLoadFileList == null || state.JsonLoadFileList.Length == 0)
                     {
                         SendChatToPlayer(player, _chatPrefix + _dimColor + "No saved configs found.</color>");
-                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Use .back to return.</color>");
+                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Use /back to return.</color>");
                     }
                     else
                     {
@@ -1303,7 +1371,9 @@ namespace Si_UnitBalance
                     string shrimpStatus = _shrimpDisableAim ? "<color=#FF5555>OFF</color>" : "<color=#55FF55>ON</color>";
                     string spawnStatus = _additionalSpawn ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Hoverbike  " + _itemColor + "2.</color> Tier  " + _itemColor + "3.</color> Teleportation  " + _itemColor + "4.</color> Shrimp Aim [" + shrimpStatus + "]");
+                    string watchdogStatus = _watchdogEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "6.</color> Discord  " + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]");
                     break;
                 }
 
@@ -1389,6 +1459,16 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 90 (or !b 1 90)</color>");
                     break;
                 }
+
+                // ── Discord Webhook ──────────────────────────────────
+                case MenuLevel.DiscordMenu:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Discord Webhook</color>");
+                    string autoStatus = _discordAutoPost ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Auto-post on Rebalance [" + autoStatus + "]");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Push Balance Changes Now");
+                    break;
+                }
             }
         }
 
@@ -1429,7 +1509,7 @@ namespace Si_UnitBalance
             state.PendingOldVal = oldVal;
 
             SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> " + unitName + " " + paramKey + " " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "</color>");
-            SendChatToPlayer(player, _chatPrefix + _itemColor + ".1</color>=Save  " + _itemColor + ".2</color>=Cancel  " + _itemColor + ".3</color>=Save+Rebalance");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
         }
 
         // ── HTP Edit Handlers ────────────────────────────────────────
@@ -1465,7 +1545,7 @@ namespace Si_UnitBalance
             state.PendingUnitName = "Hover Bike";
 
             SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Hover Bike " + paramKey + " " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "</color>");
-            SendChatToPlayer(player, _chatPrefix + _itemColor + ".1</color>=Save  " + _itemColor + ".2</color>=Cancel  " + _itemColor + ".3</color>=Save+Rebalance");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
         }
 
         private static void HandleHTPTierEdit(object player, BalanceMenuState state, int tierNum, string valueStr)
@@ -1508,7 +1588,7 @@ namespace Si_UnitBalance
             state.PendingTechTierKey = tierKey;
 
             SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Tier " + tierNum + " tech time " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "s</color>");
-            SendChatToPlayer(player, _chatPrefix + _itemColor + ".1</color>=Save  " + _itemColor + ".2</color>=Cancel  " + _itemColor + ".3</color>=Save+Rebalance");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
         }
 
         private static void HandleHTPTeleportEdit(object player, BalanceMenuState state, int paramIdx, string valueStr)
@@ -1541,7 +1621,7 @@ namespace Si_UnitBalance
             state.PendingUnitName = "_teleport";
 
             SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Teleport " + label + " " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "s</color>");
-            SendChatToPlayer(player, _chatPrefix + _itemColor + ".1</color>=Save  " + _itemColor + ".2</color>=Cancel  " + _itemColor + ".3</color>=Save+Rebalance");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
         }
 
         private static bool WriteTechTierToJson(string tierKey, float value)

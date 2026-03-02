@@ -139,6 +139,9 @@ namespace Si_UnitBalance
                     if (omReady && _healthMultipliers.Count > 0)
                         RegisterDamageManagerDataInOM();
 
+                    // Snapshot vanilla base values before overrides modify them
+                    CacheVanillaBaseValues();
+
                     ApplyConstructionDataOverrides(omReady);
                     ApplyHealthOverrides(omReady);
                     ApplyProjectileDamageOverrides(omReady);
@@ -166,6 +169,10 @@ namespace Si_UnitBalance
                     // 5. Sync to all connected players
                     if (omReady)
                         MelonCoroutines.Start(SyncOverridesToAllPlayers(0.5f));
+
+                    // 6. Auto-post to Discord if enabled
+                    if (_discordAutoPost && !string.IsNullOrEmpty(_discordWebhookUrl))
+                        PostBalanceChangesToDiscord();
                 }
             }
             catch (Exception ex)
@@ -382,7 +389,7 @@ namespace Si_UnitBalance
             // Parse number
             if (!int.TryParse(arg, out int selection) || selection < 1)
             {
-                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use .1-.9, .back, or .0 to exit</color>");
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use /1-/9, /back, or /0 to exit</color>");
                 return;
             }
 
@@ -400,14 +407,14 @@ namespace Si_UnitBalance
                 return;
             }
 
-            // HTP Tier edit: ".1 45" sets tier_1 to 45 seconds
+            // HTP Tier edit: "/1 45" sets tier_1 to 45 seconds
             if (state.Level == MenuLevel.HTPTier && !string.IsNullOrEmpty(arg2))
             {
                 HandleHTPTierEdit(player, state, selection, arg2);
                 return;
             }
 
-            // HTP Teleport edit: ".1 90" sets cooldown, ".2 3" sets duration
+            // HTP Teleport edit: "/1 90" sets cooldown, "/2 3" sets duration
             if (state.Level == MenuLevel.HTPTeleport && !string.IsNullOrEmpty(arg2))
             {
                 HandleHTPTeleportEdit(player, state, selection, arg2);
@@ -454,7 +461,7 @@ namespace Si_UnitBalance
                     break;
                 }
                 case MenuLevel.ParamGroup:
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 1.5 (or !b 1 1.5)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: /1 1.5 (or /b 1 1.5)</color>");
                     return;
 
                 case MenuLevel.JsonMenu:
@@ -465,14 +472,14 @@ namespace Si_UnitBalance
                         // Blank reset — ask for confirmation
                         state.JsonPendingAction = "blank";
                         SendChatToPlayer(player, _chatPrefix + _headerColor + "Reset to blank?</color> All current settings will be lost!");
-                        SendChatToPlayer(player, _chatPrefix + _itemColor + ".1</color>=Confirm  " + _itemColor + ".2</color>=Cancel");
+                        SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Confirm  " + _itemColor + "/2</color>=Cancel");
                         return;
                     }
                     else if (selection == 2)
                     {
                         // Save — ask for name
                         state.JsonPendingSave = true;
-                        SendChatToPlayer(player, _chatPrefix + "Enter save name " + _dimColor + "(e.g. !b myconfig)</color> or " + _itemColor + ".1</color> for timestamp only");
+                        SendChatToPlayer(player, _chatPrefix + "Enter save name " + _dimColor + "(e.g. /b myconfig)</color> or " + _itemColor + "/1</color> for timestamp only");
                         return;
                     }
                     else // selection == 3
@@ -500,16 +507,17 @@ namespace Si_UnitBalance
                     state.JsonPendingAction = "load";
                     state.JsonPendingFile = selectedFile;
                     SendChatToPlayer(player, _chatPrefix + _headerColor + "Load " + selectedFile + "?</color>");
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + ".1</color>=Confirm  " + _itemColor + ".2</color>=Cancel");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Confirm  " + _itemColor + "/2</color>=Cancel");
                     return;
                 }
 
                 // ── HTP Menu ──────────────────────────────────────────
                 case MenuLevel.HTPMenu:
-                    if (selection < 1 || selection > 5) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-5.</color>"); return; }
+                    if (selection < 1 || selection > 7) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-7.</color>"); return; }
                     if (selection == 1) state.Level = MenuLevel.HTPHoverbike;
                     else if (selection == 2) state.Level = MenuLevel.HTPTier;
                     else if (selection == 3) state.Level = MenuLevel.HTPTeleport;
+                    else if (selection == 6) { state.Level = MenuLevel.DiscordMenu; break; }
                     else if (selection == 4)
                     {
                         // Toggle shrimp aim disable
@@ -522,7 +530,7 @@ namespace Si_UnitBalance
                         WriteAuditLog(playerName, steamId, "shrimp", "disable_aim", (!_shrimpDisableAim).ToString(), _shrimpDisableAim.ToString());
                         MelonLogger.Msg($"[BAL] {playerName} ({steamId}): shrimp_disable_aim -> {_shrimpDisableAim}");
                     }
-                    else // selection == 5
+                    else if (selection == 5)
                     {
                         // Toggle additional spawn
                         _additionalSpawn = !_additionalSpawn;
@@ -533,6 +541,18 @@ namespace Si_UnitBalance
                         string steamId2 = GetPlayerSteamId(player);
                         WriteAuditLog(playerName2, steamId2, "htp", "additional_spawn", (!_additionalSpawn).ToString(), _additionalSpawn.ToString());
                         MelonLogger.Msg($"[BAL] {playerName2} ({steamId2}): additional_spawn -> {_additionalSpawn}");
+                    }
+                    else // selection == 7
+                    {
+                        // Toggle watchdog
+                        _watchdogEnabled = !_watchdogEnabled;
+                        WriteBoolToJson("watchdog_enabled", _watchdogEnabled);
+                        string wdStatus = _watchdogEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Round Watchdog: " + wdStatus);
+                        string playerName3 = GetPlayerName(player);
+                        string steamId3 = GetPlayerSteamId(player);
+                        WriteAuditLog(playerName3, steamId3, "htp", "watchdog_enabled", (!_watchdogEnabled).ToString(), _watchdogEnabled.ToString());
+                        MelonLogger.Msg($"[BAL] {playerName3} ({steamId3}): watchdog_enabled -> {_watchdogEnabled}");
                     }
                     break;
 
@@ -546,7 +566,7 @@ namespace Si_UnitBalance
                 }
 
                 case MenuLevel.HTPHoverbikeParam:
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 1.5 (or !b 1 1.5)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: /1 1.5 (or /b 1 1.5)</color>");
                     return;
 
                 case MenuLevel.HTPTier:
@@ -563,6 +583,28 @@ namespace Si_UnitBalance
                     if (selection < 1 || selection > 2) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-2.</color>"); return; }
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: ." + selection + " <value> (or !b " + selection + " <value>)</color>");
                     return;
+                }
+
+                case MenuLevel.DiscordMenu:
+                {
+                    if (selection < 1 || selection > 2) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-2.</color>"); return; }
+                    if (selection == 1)
+                    {
+                        _discordAutoPost = !_discordAutoPost;
+                        WriteBoolToJson("discord_auto_post", _discordAutoPost);
+                        string autoStatus = _discordAutoPost ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Auto-post on Rebalance: " + autoStatus);
+                        string playerName = GetPlayerName(player);
+                        string steamId = GetPlayerSteamId(player);
+                        WriteAuditLog(playerName, steamId, "discord", "auto_post", (!_discordAutoPost).ToString(), _discordAutoPost.ToString());
+                        MelonLogger.Msg($"[BAL] {playerName} ({steamId}): discord_auto_post -> {_discordAutoPost}");
+                    }
+                    else // selection == 2
+                    {
+                        SendChatToPlayer(player, _chatPrefix + "Posting balance changes to Discord...");
+                        PostBalanceChangesToDiscord();
+                    }
+                    break;
                 }
             }
 

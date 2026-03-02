@@ -216,7 +216,7 @@ turret_data = {
 vehicle_movement = {
     # VehicleHovered
     'Hover Tank':  {'move': 10, 'turbo': 30, 'turn_speed': 60},
-    'Hover Bike':  {'move': 10, 'turbo': 30},
+    'Hover Bike':  {'move': 37.5, 'turbo': 30},
 }
 
 

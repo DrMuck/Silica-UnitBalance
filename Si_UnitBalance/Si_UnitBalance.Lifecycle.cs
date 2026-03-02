@@ -15,12 +15,40 @@ namespace Si_UnitBalance
         // =============================================
 
         private static bool _gameStartedRan; // tracks if Harmony hook fired
+        private static int _watchdogGeneration; // incremented each game start to cancel stale watchdogs
+        private const float WatchdogTimeoutSeconds = 60f; // time after game end before forcing recovery
+        private static bool _watchdogEnabled = true;
+        private static bool _watchdogFired; // prevents re-triggering after recovery EndRound
+
+        private static class Patch_GameInit
+        {
+            public static void Postfix()
+            {
+                // Fires on first map load (GameMode.OnEnable) — cancel any pending watchdog
+                _watchdogGeneration++;
+                _watchdogFired = false;
+                MelonLogger.Msg("[UnitBalance] Game init (lobby) — watchdog cancelled");
+            }
+        }
+
+        private static class Patch_GameRestart
+        {
+            public static void Postfix()
+            {
+                // Fires on ENDED → INIT within same map (round restart/voting) — cancel watchdog
+                _watchdogGeneration++;
+                _watchdogFired = false;
+                MelonLogger.Msg("[UnitBalance] Game restart (voting) — watchdog cancelled");
+            }
+        }
 
         private static class Patch_GameStarted
         {
             public static void Postfix()
             {
                 _gameStartedRan = true;
+                _watchdogGeneration++; // redundant safety — already cancelled in Init
+                _watchdogFired = false;
                 OnGameStartedLogic();
             }
         }
@@ -262,6 +290,9 @@ namespace Si_UnitBalance
                     if (omReady && _healthMultipliers.Count > 0)
                         RegisterDamageManagerDataInOM();
 
+                    // Snapshot vanilla base values before overrides modify them
+                    CacheVanillaBaseValues();
+
                     ApplyConstructionDataOverrides(omReady);
                     ApplyHealthOverrides(omReady);
                     ApplyProjectileDamageOverrides(omReady);
@@ -447,12 +478,10 @@ namespace Si_UnitBalance
                 }
                 if (matchedFaction == null) continue;
 
-                // Find spawn position 150m in front of the HQ
                 Structure baseStruct = team.Structures[0];
                 if (baseStruct == null) continue;
                 Vector3 hqPos = baseStruct.transform.position;
-                Quaternion spawnRot = baseStruct.transform.rotation;
-                Vector3 spawnPos = hqPos + baseStruct.transform.forward * 150f;
+                Vector3 hqForward = baseStruct.transform.forward;
 
                 foreach (var entry in _additionalSpawnMap)
                 {
@@ -469,10 +498,13 @@ namespace Si_UnitBalance
                     {
                         try
                         {
-                            // Offset each unit slightly so they don't stack
-                            Vector3 offset = new Vector3((i - 1) * 5f, 0f, 3f);
-                            Vector3 pos = spawnPos + spawnRot * offset;
-                            Game.SpawnPrefab(unitInfo.Prefab, null, team, pos, spawnRot);
+                            // Spread units in different directions from HQ (120° apart)
+                            float angleDeg = (360f / entry.count) * i;
+                            float angleRad = angleDeg * Mathf.Deg2Rad;
+                            Vector3 dir = Quaternion.Euler(0f, angleDeg, 0f) * hqForward;
+                            Vector3 pos = hqPos + dir * 150f;
+                            Quaternion rot = Quaternion.LookRotation(dir, Vector3.up);
+                            Game.SpawnPrefab(unitInfo.Prefab, null, team, pos, rot);
                             totalSpawned++;
                         }
                         catch (Exception ex)
@@ -510,6 +542,120 @@ namespace Si_UnitBalance
                 {
                     OMRevertAll();
                 }
+
+                // Start watchdog — if no new game starts within timeout, force recovery (once only)
+                if (_watchdogEnabled && !_watchdogFired)
+                    MelonCoroutines.Start(RoundTransitionWatchdog(_watchdogGeneration));
+            }
+        }
+
+        /// <summary>
+        /// Watchdog coroutine: waits after game end with countdown notifications,
+        /// then forces EndRound if the next game never starts.
+        /// The generation token cancels the watchdog if a new game starts normally.
+        /// </summary>
+        private static IEnumerator RoundTransitionWatchdog(int generation)
+        {
+            // Wait initial 20s silently — normal transitions complete well within this
+            yield return new WaitForSeconds(20f);
+            if (generation != _watchdogGeneration) yield break;
+
+            // Remaining countdown with 10s intervals and player notifications
+            float remaining = WatchdogTimeoutSeconds - 20f;
+            BroadcastChat($"{_chatPrefix}<color=#FFAA00>[Watchdog] Round transition stalled — auto-recovery in {remaining:0}s</color>");
+            MelonLogger.Warning($"[Watchdog] Round transition stalled — countdown started ({remaining}s)");
+
+            while (remaining > 0f)
+            {
+                float wait = remaining > 10f ? 10f : remaining;
+                yield return new WaitForSeconds(wait);
+                remaining -= wait;
+
+                if (generation != _watchdogGeneration)
+                {
+                    BroadcastChat($"{_chatPrefix}<color=#55FF55>[Watchdog] New round detected — watchdog cancelled</color>");
+                    MelonLogger.Msg("[Watchdog] New round started — watchdog cancelled");
+                    yield break;
+                }
+
+                if (remaining > 0f)
+                {
+                    BroadcastChat($"{_chatPrefix}<color=#FFAA00>[Watchdog] Auto-recovery in {remaining:0}s...</color>");
+                }
+            }
+
+            // Timeout reached — force recovery (set flag to prevent loop)
+            _watchdogFired = true;
+            BroadcastChat($"{_chatPrefix}<color=#FF5555>[Watchdog] Forcing round end — server recovery</color>");
+            MelonLogger.Warning($"[Watchdog] No new game started within {WatchdogTimeoutSeconds}s — forcing EndRound");
+
+            try
+            {
+                Type gameModeType = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    gameModeType = asm.GetType("GameMode");
+                    if (gameModeType != null) break;
+                }
+
+                if (gameModeType != null)
+                {
+                    var currentProp = gameModeType.GetProperty("CurrentGameMode", BindingFlags.Public | BindingFlags.Static);
+                    var currentMode = currentProp?.GetValue(null);
+                    if (currentMode != null)
+                    {
+                        var endRound = currentMode.GetType().GetMethod("EndRound", BindingFlags.Public | BindingFlags.Instance);
+                        if (endRound != null)
+                        {
+                            endRound.Invoke(currentMode, null);
+                            MelonLogger.Msg("[Watchdog] EndRound() called — server should recover");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"[Watchdog] Recovery failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sends a chat message to all connected players (skipping server player).
+        /// </summary>
+        private static void BroadcastChat(string message)
+        {
+            try
+            {
+                Type playerType = typeof(Player);
+                IList playersList = null;
+
+                var playersProp = playerType.GetProperty("Players", BindingFlags.Public | BindingFlags.Static);
+                if (playersProp != null)
+                    playersList = playersProp.GetValue(null) as IList;
+                else
+                {
+                    var playersField = playerType.GetField("Players", BindingFlags.Public | BindingFlags.Static);
+                    if (playersField != null)
+                        playersList = playersField.GetValue(null) as IList;
+                }
+
+                if (playersList == null) return;
+
+                // Get server player to skip
+                object serverPlayer = null;
+                Type ngsType = typeof(NetworkGameServer);
+                var getServerPlayer = ngsType.GetMethod("GetServerPlayer", BindingFlags.Public | BindingFlags.Static);
+                serverPlayer = getServerPlayer?.Invoke(null, null);
+
+                foreach (var p in playersList)
+                {
+                    if (p != null && !p.Equals(serverPlayer))
+                        SendChatToPlayer(p, message);
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[Watchdog] BroadcastChat error: {ex.Message}");
             }
         }
 

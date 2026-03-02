@@ -29,7 +29,7 @@ namespace Si_UnitBalance
             {
                 if (info == null || info.ConstructionData == null) continue;
 
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
 
                 var cd = info.ConstructionData;
@@ -125,7 +125,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_healthMultipliers.TryGetValue(name, out float hpMult)) continue;
 
@@ -202,7 +202,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
 
                 bool hasDamageMult = HasAnyWeaponMult(_damageMultipliers, name);
@@ -401,7 +401,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
 
                 bool hasRange = HasAnyWeaponMult(_rangeMultipliers, name);
@@ -470,9 +470,10 @@ namespace Si_UnitBalance
                                 }
                             }
                         }
+                    }
 
-                        // CreatureDecapod: per-weapon range/accuracy/speed (direct mutation)
-                        if (typeName == "CreatureDecapod")
+                    // CreatureDecapod: per-weapon range/accuracy/speed (independent of hasRange)
+                    if (typeName == "CreatureDecapod")
                         {
                             var compType = comp.GetType();
                             foreach (string attackFieldName in new[] { "AttackPrimary", "AttackSecondary" })
@@ -482,21 +483,70 @@ namespace Si_UnitBalance
                                 float atkAccMult = GetWeaponMult(_accuracyMultipliers, name, weapon);
                                 float atkSpeedMult = GetWeaponMult(_speedMultipliers, name, weapon);
 
+                                // Il2Cpp: serialized fields may be properties — try field first, then property
+                                object attackObj = null;
                                 var attackField = compType.GetField(attackFieldName,
                                     BindingFlags.Public | BindingFlags.Instance);
-                                if (attackField == null) continue;
-                                object attackObj;
-                                try { attackObj = attackField.GetValue(comp); } catch { continue; }
-                                if (attackObj == null) continue;
+                                if (attackField != null)
+                                    try { attackObj = attackField.GetValue(comp); } catch { }
+                                if (attackObj == null)
+                                {
+                                    var attackProp = compType.GetProperty(attackFieldName,
+                                        BindingFlags.Public | BindingFlags.Instance);
+                                    if (attackProp != null)
+                                        try { attackObj = attackProp.GetValue(comp); } catch { }
+                                }
+                                if (attackObj == null)
+                                    continue;
 
                                 var attackType = attackObj.GetType();
 
-                                // Scale AttackProjectileAimDistMax (server-authoritative AI field)
-                                if (Math.Abs(atkRangeMult - 1f) > 0.001f)
+                                // Get ProjectileData early (needed for instant-hit detection + scaling)
+                                object pdObj = null;
                                 {
-                                    var aimDistField = attackType.GetField("AttackProjectileAimDistMax",
+                                    var pdField = attackType.GetField("AttackProjectileData",
                                         BindingFlags.Public | BindingFlags.Instance);
-                                    if (aimDistField != null)
+                                    if (pdField != null)
+                                        try { pdObj = pdField.GetValue(attackObj); } catch { }
+                                    if (pdObj == null)
+                                    {
+                                        var pdProp = attackType.GetProperty("AttackProjectileData",
+                                            BindingFlags.Public | BindingFlags.Instance);
+                                        if (pdProp != null)
+                                            try { pdObj = pdProp.GetValue(attackObj); } catch { }
+                                    }
+                                }
+
+                                // Detect instant-hit: for these projectiles, speed mult IS range
+                                bool isInstantHitAtk = false;
+                                if (pdObj != null)
+                                {
+                                    try
+                                    {
+                                        var ihField = pdObj.GetType().GetField("m_InstantHit",
+                                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                        if (ihField != null)
+                                            isInstantHitAtk = (bool)ihField.GetValue(pdObj);
+                                        else
+                                        {
+                                            var ihProp = pdObj.GetType().GetProperty("m_InstantHit",
+                                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                            if (ihProp != null && ihProp.CanRead)
+                                                isInstantHitAtk = (bool)ihProp.GetValue(pdObj);
+                                        }
+                                    }
+                                    catch { }
+                                }
+
+                                // For instant-hit, speed mult effectively scales range
+                                float effectiveAimDistMult = atkRangeMult *
+                                    (isInstantHitAtk ? atkSpeedMult : 1f);
+
+                                // Scale AttackProjectileAimDistMax (server-authoritative AI field)
+                                if (Math.Abs(effectiveAimDistMult - 1f) > 0.001f)
+                                {
+                                    float aimDist = GetFloatMember(attackObj, "AttackProjectileAimDistMax");
+                                    if (!float.IsNaN(aimDist))
                                     {
                                         string key = $"{name}_ca_{attackFieldName}";
                                         float orig;
@@ -504,21 +554,20 @@ namespace Si_UnitBalance
                                             orig = _originalCreatureAttackAimDist[key];
                                         else
                                         {
-                                            orig = (float)aimDistField.GetValue(attackObj);
+                                            orig = aimDist;
                                             _originalCreatureAttackAimDist[key] = orig;
                                         }
-                                        float newVal = orig * atkRangeMult;
-                                        aimDistField.SetValue(attackObj, newVal);
-                                        MelonLogger.Msg($"  CreatureAttack.{attackFieldName}.AimDistMax: {orig} -> {newVal} (direct)");
+                                        float newVal = orig * effectiveAimDistMult;
+                                        SetFloatMember(attackObj, "AttackProjectileAimDistMax", newVal);
+                                        MelonLogger.Msg($"  CreatureAttack.{attackFieldName}.AimDistMax: {orig} -> {newVal} (direct{(isInstantHitAtk ? ", instant-hit" : "")})");
                                     }
                                 }
 
                                 // Scale AttackProjectileSpread (server-authoritative AI field)
                                 if (Math.Abs(atkAccMult - 1f) > 0.001f)
                                 {
-                                    var spreadField = attackType.GetField("AttackProjectileSpread",
-                                        BindingFlags.Public | BindingFlags.Instance);
-                                    if (spreadField != null)
+                                    float spread = GetFloatMember(attackObj, "AttackProjectileSpread");
+                                    if (!float.IsNaN(spread))
                                     {
                                         string key = $"{name}_spread_{attackFieldName}";
                                         float orig;
@@ -526,45 +575,34 @@ namespace Si_UnitBalance
                                             orig = _originalSpread[key];
                                         else
                                         {
-                                            orig = (float)spreadField.GetValue(attackObj);
+                                            orig = spread;
                                             _originalSpread[key] = orig;
                                         }
                                         float newVal = orig * atkAccMult;
-                                        spreadField.SetValue(attackObj, newVal);
+                                        SetFloatMember(attackObj, "AttackProjectileSpread", newVal);
                                         MelonLogger.Msg($"  CreatureAttack.{attackFieldName}.Spread: {orig} -> {newVal} (direct)");
                                     }
                                 }
 
-                                // Find ProjectileData referenced inside CreatureAttack
+                                // Scale ProjectileData (using already-retrieved pdObj)
                                 float atkLifetimeMult = GetWeaponMult(_lifetimeMultipliers, name, weapon);
                                 bool hasAtkRange = Math.Abs(atkRangeMult - 1f) > 0.001f;
                                 bool hasAtkSpeed = Math.Abs(atkSpeedMult - 1f) > 0.001f;
                                 bool hasAtkLifetime = Math.Abs(atkLifetimeMult - 1f) > 0.001f;
-                                if (hasAtkRange || hasAtkSpeed || hasAtkLifetime)
+                                if ((hasAtkRange || hasAtkSpeed || hasAtkLifetime) && pdObj != null)
                                 {
-                                    var pdField = attackType.GetField("AttackProjectileData",
-                                        BindingFlags.Public | BindingFlags.Instance);
-                                    if (pdField != null)
+                                    string pdName = "";
+                                    try { pdName = ((UnityEngine.Object)pdObj).name; } catch { }
+                                    if (!string.IsNullOrEmpty(pdName) && !modifiedPD.Contains(pdName))
                                     {
-                                        object pdObj;
-                                        try { pdObj = pdField.GetValue(attackObj); } catch { pdObj = null; }
-                                        if (pdObj != null)
-                                        {
-                                            string pdName = "";
-                                            try { pdName = ((UnityEngine.Object)pdObj).name; } catch { }
-                                            if (!string.IsNullOrEmpty(pdName) && !modifiedPD.Contains(pdName))
-                                            {
-                                                ScaleProjectileData(pdObj, pdName,
-                                                    hasAtkRange ? atkRangeMult : 1f, hasAtkSpeed ? atkSpeedMult : 1f, modifiedPD, useOM,
-                                                    hasAtkLifetime ? atkLifetimeMult : 1f);
-                                                foundProjectileOnComponent = true;
-                                            }
-                                        }
+                                        ScaleProjectileData(pdObj, pdName,
+                                            hasAtkRange ? atkRangeMult : 1f, hasAtkSpeed ? atkSpeedMult : 1f, modifiedPD, useOM,
+                                            hasAtkLifetime ? atkLifetimeMult : 1f);
+                                        foundProjectileOnComponent = true;
                                     }
                                 }
                             }
                         }
-                    }
 
                     // VehicleTurret weapon params via OverrideManager (per-weapon multiplier resolution)
                     if (typeName == "VehicleTurret")
@@ -746,7 +784,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_targetDistanceOverrides.TryGetValue(name, out float targetDist)) continue;
 
@@ -792,7 +830,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_fowDistanceOverrides.TryGetValue(name, out float fowDist)) continue;
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
@@ -833,7 +871,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_jumpSpeedMultipliers.TryGetValue(name, out float mult)) continue;
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
@@ -877,7 +915,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_visibleEventRadiusMultipliers.TryGetValue(name, out float mult)) continue;
 
@@ -985,7 +1023,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
 
                 bool hasMoveSpeed = _moveSpeedMultipliers.TryGetValue(name, out float mult);
@@ -1034,11 +1072,28 @@ namespace Si_UnitBalance
                                 fieldMult = mult;
                             }
 
+                            // Il2Cpp: serialized fields may be properties — try field first, then property
+                            float orig;
                             var field = compType.GetField(fieldName,
                                 BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance);
-                            if (field == null || field.FieldType != typeof(float)) continue;
-                            float orig = (float)field.GetValue(comp);
+                            if (field != null && field.FieldType == typeof(float))
+                            {
+                                orig = (float)field.GetValue(comp);
+                            }
+                            else
+                            {
+                                var prop = compType.GetProperty(fieldName,
+                                    BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance);
+                                if (prop == null || prop.PropertyType != typeof(float)) continue;
+                                orig = (float)prop.GetValue(comp);
+                            }
                             if (orig <= 0) continue;
+                            // Anti-compounding: cache the first-seen value as the true original
+                            string cacheKey = $"{name}_{compType.Name}_{fieldName}";
+                            if (!_originalMoveSpeeds.ContainsKey(cacheKey))
+                                _originalMoveSpeeds[cacheKey] = orig;
+                            else
+                                orig = _originalMoveSpeeds[cacheKey];
                             float newVal = orig * fieldMult;
                             if (OMSetFloat(oiTarget, fieldName, newVal))
                             {
@@ -1082,7 +1137,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_strafeSpeedMultipliers.TryGetValue(name, out float mult)) continue;
 
@@ -1100,16 +1155,34 @@ namespace Si_UnitBalance
                     // CreatureDecapod → scale FlyMoveScaleSide
                     if (tn == "CreatureDecapod")
                     {
+                        // Il2Cpp: try field first, then property
+                        float orig;
+                        bool found = false;
                         var f = ct.GetField("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance);
                         if (f != null && f.FieldType == typeof(float))
                         {
-                            float orig = (float)f.GetValue(comp);
+                            orig = (float)f.GetValue(comp);
+                            found = true;
+                        }
+                        else
+                        {
+                            var p = ct.GetProperty("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance);
+                            if (p != null && p.PropertyType == typeof(float))
+                            {
+                                orig = (float)p.GetValue(comp);
+                                found = true;
+                            }
+                            else orig = 0;
+                        }
+                        if (found)
+                        {
                             float newVal = orig * mult;
                             if (useOM && OMSetFloat(oiTarget, "FlyMoveScaleSide", newVal))
                                 MelonLogger.Msg($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (OM)");
                             else
                             {
-                                f.SetValue(comp, newVal);
+                                if (f != null) f.SetValue(comp, newVal);
+                                else { var p = ct.GetProperty("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance); p?.SetValue(comp, newVal); }
                                 MelonLogger.Msg($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (direct)");
                             }
                             done = true;
@@ -1119,16 +1192,34 @@ namespace Si_UnitBalance
                     // VehicleAir → scale StrafeSpeed
                     if (tn == "VehicleAir")
                     {
+                        // Il2Cpp: try field first, then property
+                        float orig;
+                        bool found = false;
                         var f = ct.GetField("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance);
                         if (f != null && f.FieldType == typeof(float))
                         {
-                            float orig = (float)f.GetValue(comp);
+                            orig = (float)f.GetValue(comp);
+                            found = true;
+                        }
+                        else
+                        {
+                            var p = ct.GetProperty("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance);
+                            if (p != null && p.PropertyType == typeof(float))
+                            {
+                                orig = (float)p.GetValue(comp);
+                                found = true;
+                            }
+                            else orig = 0;
+                        }
+                        if (found)
+                        {
                             float newVal = orig * mult;
                             if (useOM && OMSetFloat(oiTarget, "StrafeSpeed", newVal))
                                 MelonLogger.Msg($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (OM)");
                             else
                             {
-                                f.SetValue(comp, newVal);
+                                if (f != null) f.SetValue(comp, newVal);
+                                else { var p = ct.GetProperty("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance); p?.SetValue(comp, newVal); }
                                 MelonLogger.Msg($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (direct)");
                             }
                             done = true;
@@ -1152,7 +1243,7 @@ namespace Si_UnitBalance
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
-                string name = info.DisplayName;
+                string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
                 if (!_turnRadiusMultipliers.TryGetValue(name, out float mult)) continue;
 
@@ -1208,7 +1299,7 @@ namespace Si_UnitBalance
                     if (comp == null) continue;
                     if (comp.GetType().Name != "TeleportUI") continue;
 
-                    string name = info.DisplayName;
+                    string name = ResolveConfigName(info.DisplayName, info.name);
                     string oiTarget = useOM ? $"A:{info.name}.asset" : null;
 
                     if (_teleportCooldown >= 0)
@@ -1428,8 +1519,21 @@ namespace Si_UnitBalance
             HashSet<string> modifiedPD, bool useOM = false, float lifetimeMult = 1f)
         {
             string pdTarget = useOM ? $"A:{pdName}.asset" : null;
+
+            // Anti-compounding: cache first-seen values as true originals
             float origLt = GetFloatMember(pdObj, "m_fLifeTime");
+            string ltKey = $"{pdName}_lifetime";
+            if (!_originalProjectileLifetimes.ContainsKey(ltKey))
+                _originalProjectileLifetimes[ltKey] = origLt;
+            else
+                origLt = _originalProjectileLifetimes[ltKey];
+
             float origSpeed = GetFloatMember(pdObj, "m_fBaseSpeed");
+            string spdKey = $"{pdName}_speed";
+            if (!_originalProjectileSpeeds.ContainsKey(spdKey))
+                _originalProjectileSpeeds[spdKey] = origSpeed;
+            else
+                origSpeed = _originalProjectileSpeeds[spdKey];
 
             // Check if this is an instant-hit (hitscan/ray) projectile
             bool isInstantHit = false;
@@ -1504,6 +1608,7 @@ namespace Si_UnitBalance
 
             // Scale VisibleEventRadius for instant-hit projectiles (beams need VER to match range)
             // Normal projectiles (flames, balls) don't need VER scaling — projectile renders independently
+            // VER is also available as a manual UI setting (visible_event_radius_mult) — only auto-scale here for range_mult
             if (Math.Abs(rangeMult - 1f) > 0.001f && isInstantHit)
             {
                 float origVER = GetFloatMember(pdObj, "VisibleEventRadius");

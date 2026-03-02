@@ -78,7 +78,7 @@ namespace Si_UnitBalance
                 }
 
                 // === Deep dump: ALL components on combat units to find weapon/range fields ===
-                string[] dumpTargets = { "Shrimp", "Crab", "Behemoth", "Scorpion", "Defiler", "Colossus", "Dragonfly", "Goliath", "Hunter", "Firebug", "Railgun Tank", "Nest", "Interceptor", "Headquarters", "Combat Tank", "Heavy Tank", "Barrage Truck" };
+                string[] dumpTargets = { "Shrimp", "Crab", "Behemoth", "Scorpion", "Defiler", "Colossus", "Dragonfly", "Goliath", "Hunter", "Firebug", "Railgun Tank", "Nest", "Interceptor", "Headquarters", "Combat Tank", "Heavy Tank", "Barrage Truck", "Siege Tank", "Harvester" };
                 foreach (string targetName in dumpTargets)
                 {
                     MelonLogger.Msg($"--- {targetName.ToUpper()} DEEP COMPONENT DUMP ---");

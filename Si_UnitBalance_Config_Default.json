@@ -373,7 +373,7 @@
             "visible_event_radius_mult": 1.0
         },
         "_comment_sol_uhf": "========== SOL \u2014 Ultra Heavy Factory ==========",
-        "Harvester": {
+        "Sol Harvester": {
             "_base": "HP:80000 Cost:1500 Build:60.0s T0",
             "health_mult": 1.0,
             "cost_mult": 1.0,
@@ -541,7 +541,15 @@
             "visible_event_radius_mult": 1.0
         },
         "_comment_struct": "========== SOL/CENTAURI \u2014 Structures ==========",
-        "Headquarters": {
+        "Sol Headquarters": {
+            "_base": "HP:100000 Cost:7000 Build:120.0s T5",
+            "health_mult": 1.0,
+            "cost_mult": 1.0,
+            "build_time_mult": 1.0,
+            "min_tier": 5,
+            "build_radius": 1500
+        },
+        "Cent Headquarters": {
             "_base": "HP:100000 Cost:7000 Build:120.0s T5",
             "health_mult": 1.0,
             "cost_mult": 1.0,
@@ -1000,6 +1008,19 @@
             "visible_event_radius_mult": 1.0
         },
         "_comment_cen_uhf": "========== CENTAURI \u2014 Ultra Heavy Factory ==========",
+        "Cent Harvester": {
+            "_base": "HP:80000 Cost:1500 Build:60.0s T0",
+            "health_mult": 1.0,
+            "cost_mult": 1.0,
+            "build_time_mult": 1.0,
+            "min_tier": -1,
+            "move_speed_mult": 1.0,
+            "turn_radius_mult": 1.0,
+            "_base_sense": "FOW:200 Target:400",
+            "target_distance": 400,
+            "fow_distance": 200,
+            "visible_event_radius_mult": 1.0
+        },
         "Crimson Tank": {
             "_base": "HP:80000 Cost:4500 Build:60.0s T7",
             "health_mult": 1.0,
@@ -1162,7 +1183,7 @@
             "pri_magazine_mult": 1.0,
             "pri_fire_rate_mult": 1.0,
             "pri_reload_time_mult": 1.0,
-            "_base_speed": "Move:10 Turbo:30",
+            "_base_speed": "Move:37.5 Turbo:30",
             "move_speed_mult": 1.0,
             "turbo_speed_mult": 1.0,
             "_base_sense": "",

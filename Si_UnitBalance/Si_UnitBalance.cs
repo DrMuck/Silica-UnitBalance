@@ -50,6 +50,8 @@ namespace Si_UnitBalance
         private static bool _dumpFields = true;
         private static bool _shrimpDisableAim = false;
         private static bool _additionalSpawn = false;
+        private static bool _discordAutoPost = false;
+        private static string _discordWebhookUrl = "";
         private static bool _harmonyApplied; // true when SilicaCore found (server)
 
         // OverrideManager reflection cache (resolved once in OnGameStartedLogic)
@@ -76,7 +78,7 @@ namespace Si_UnitBalance
         // Per-player menu state for !b command (keyed by SteamID for stable identity across Il2Cpp wrappers)
         private static readonly Dictionary<long, BalanceMenuState> _menuStates = new Dictionary<long, BalanceMenuState>();
 
-        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTeleport }
+        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTeleport, DiscordMenu }
         private class BalanceMenuState
         {
             public MenuLevel Level = MenuLevel.Root;
@@ -170,6 +172,30 @@ namespace Si_UnitBalance
         // Dispenser timeout override (absolute seconds, -1 = no override)
         private static float _dispenseTimeout = -1f;
 
+        // Resolve display name to config key — handles units with duplicate DisplayNames
+        // (e.g., both Sol and Centauri have DisplayName="Harvester" and "Headquarters")
+        private static string ResolveConfigName(string displayName, string internalName)
+        {
+            if (!string.IsNullOrEmpty(internalName))
+            {
+                if (string.Equals(displayName, "Harvester", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (internalName.IndexOf("_Sol_", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return "Sol Harvester";
+                    if (internalName.IndexOf("_Cent_", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return "Cent Harvester";
+                }
+                else if (string.Equals(displayName, "Headquarters", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (internalName.IndexOf("_Sol_", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return "Sol Headquarters";
+                    if (internalName.IndexOf("_Cent_", StringComparison.OrdinalIgnoreCase) >= 0)
+                        return "Cent Headquarters";
+                }
+            }
+            return displayName;
+        }
+
         public override void OnInitializeMelon()
         {
             var cfgDir = Path.Combine(MelonEnvironment.UserDataDirectory, "UnitBalance_cfg");
@@ -196,6 +222,14 @@ namespace Si_UnitBalance
                 Type damageManager = typeof(DamageManager);
 
                 var harmony = HarmonyInstance;
+
+                var gameInit = AccessTools.Method(musicHandler, "OnGameInit");
+                if (gameInit != null)
+                    harmony.Patch(gameInit, postfix: new HarmonyMethod(typeof(Patch_GameInit), "Postfix"));
+
+                var gameRestart = AccessTools.Method(musicHandler, "OnGameRestart");
+                if (gameRestart != null)
+                    harmony.Patch(gameRestart, postfix: new HarmonyMethod(typeof(Patch_GameRestart), "Postfix"));
 
                 var gameStarted = AccessTools.Method(musicHandler, "OnGameStarted");
                 if (gameStarted != null)
@@ -275,23 +309,24 @@ namespace Si_UnitBalance
                             }
 
                             object powerNone = Enum.ToObject(_adminPowerType, 0);
-                            // Power.Cheat (0x80) — allows any admin with Cheat power (standard admins)
-                            object powerCheat = Enum.ToObject(_adminPowerType, 0x80);
+                            // Power.Generic (0x4000) — all admins (root and non-root) have this
+                            object powerGeneric = Enum.ToObject(_adminPowerType, 0x4000);
 
-                            // Register !rebalance (Cheat power — standard admins can use)
+                            // Register !rebalance (Generic power — all admins can use)
                             _registerAdminCmdMethod.Invoke(null, new object[] {
                                 "rebalance", MakeShim("RebalanceShim", "OnRebalanceCommand"),
-                                powerCheat, "Hot-reload unit balance config" });
+                                powerGeneric, "Hot-reload unit balance config" });
                             MelonLogger.Msg("Registered !rebalance admin command via AdminMod");
 
-                            // Register !b (balance editor UI — Cheat power for standard admins)
+                            // Register !b (balance editor UI — Generic power for all admins)
                             _registerAdminCmdMethod.Invoke(null, new object[] {
                                 "b", MakeShim("BalanceShim", "OnBalanceCommand"),
-                                powerCheat, "Balance editor UI" });
+                                powerGeneric, "Balance editor UI" });
                             MelonLogger.Msg("Registered !b admin command (balance editor)");
 
-                            // Register shortcut commands: .1 through .9, .0, .back
-                            // These let admins navigate the menu without typing "!b " prefix
+                            // Register shortcut commands: /1 through /9, /0, /back
+                            // These let admins navigate the menu without typing "/b " prefix
+                            // Using / prefix hides chat from other players (AdminMod feature)
                             var shortcutShim = MakeShim("MenuShortcutShim", "OnMenuShortcut");
                             string[] shortcuts = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "back" };
                             foreach (var sc in shortcuts)
@@ -299,11 +334,11 @@ namespace Si_UnitBalance
                                 try
                                 {
                                     _registerAdminCmdMethod.Invoke(null, new object[] {
-                                        sc, shortcutShim, powerCheat, null });
+                                        sc, shortcutShim, powerGeneric, null });
                                 }
                                 catch { }
                             }
-                            MelonLogger.Msg("Registered .1-.9, .0, .back shortcut commands");
+                            MelonLogger.Msg("Registered /1-/9, /0, /back shortcut commands");
                         }
                         else
                             MelonLogger.Warning("Could not find CommandCallback or RegisterAdminCommand in AdminMod");
@@ -346,6 +381,9 @@ namespace Si_UnitBalance
                 _dumpFields = config["dump_fields"]?.Value<bool>() ?? false;
                 _shrimpDisableAim = config["shrimp_disable_aim"]?.Value<bool>() ?? false;
                 _additionalSpawn = config["additional_spawn"]?.Value<bool>() ?? false;
+                _discordAutoPost = config["discord_auto_post"]?.Value<bool>() ?? false;
+                _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
+                _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
 
                 _damageMultipliers.Clear();
                 _healthMultipliers.Clear();
