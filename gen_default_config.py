@@ -1,6 +1,6 @@
 import json
 
-data = json.load(open('C:/Users/schwe/Projects/Si_UnitBalance/dumps/Si_UnitBalance_Dump_2026-02-27_v3.json'))
+data = json.load(open('C:/Users/schwe/Projects/Si_UnitBalance/dumps/Si_UnitBalance_Dump_2026-03-04_v4_multiturret.json'))
 units_list = data['units']
 
 by_name = {}
@@ -12,92 +12,110 @@ for u in units_list:
         by_name[name] = u
 
 # =============================================================================
-# PROJECTILE DATA — from unit_data_reference.md Section 4
-# Format: (impact_damage, speed, lifetime)
+# PROJECTILE DATA — from Si_UnitBalance_Dump.json + unit_data_reference.md
+# Format: dict with keys: impact, ricochet, splash, pen, speed, lifetime
+#   splash_r_max, splash_r_min, splash_r_pow (splash radius fields, only if splash)
+# Only non-zero damage sub-types are listed; missing = 0
+# splash_r_min defaults to 1, splash_r_pow defaults to 3 (game defaults)
 # =============================================================================
 projectile_db = {
     # Alien
-    'ProjectileData_Acidball':    (400, 240, 15),
-    'ProjectileData_Behemoth':    (150, 80, 10),
-    'ProjectileData_BioHive':     (150, 80, 6.875),
-    'ProjectileData_BioTurret':   (300, 250, 7),
-    'ProjectileData_Colossus':    (70000, 500, 1.5),
-    'ProjectileData_Dragonfly':   (120, 400, 1),
-    'ProjectileData_Firebug':     (1000, 60, 10),
-    'ProjectileData_Queen':       (1000, 90, 10),
-    'ProjectileData_Ray':         (400, 400, 1),       # instant-hit (speed=raycast dist)
-    'ProjectileData_Scorpion':    (120, 250, 10),
-    'ProjectileData_Shard':       (400, 200, 2),       # Shrimp projectile
-    'ProjectileData_Shocker':     (250, 800, 0.375),
-    'ProjectileData_SquidExplode':(0, 1, 0.5),
-    'ProjectileData_Swarm':       (200, 80, 7.5),
-    # Infantry
-    'ProjectileData_BalteriumRifle': (70, 500, 5),
-    'ProjectileData_Bullpup':       (36, 450, 3),
-    'ProjectileData_MarksmanRifle': (300, 600, 5),
-    'ProjectileData_Minigun':       (55, 500, 3),
-    'ProjectileData_RGXRifle':      (55, 500, 3),
-    'ProjectileData_Rifle':         (45, 500, 3),
-    'ProjectileData_SMG':           (27, 350, 3),
-    'ProjectileData_SMG2':          (85, 450, 3),
-    'ProjectileData_SniperRifle':   (700, 800, 5),
+    'ProjectileData_Acidball':    {'impact': 400, 'splash': 400, 'splash_r_max': 6, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 240, 'life': 15},
+    'ProjectileData_Behemoth':    {'impact': 150, 'speed': 80, 'life': 10},
+    'ProjectileData_BioHive':     {'impact': 150, 'speed': 80, 'life': 6.875},
+    'ProjectileData_BioTurret':   {'impact': 300, 'speed': 250, 'life': 7},
+    'ProjectileData_Colossus':    {'impact': 70000, 'ricochet': 500, 'splash': 50000, 'splash_r_max': 80, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 500, 'life': 1.5},
+    'ProjectileData_Dragonfly':   {'impact': 120, 'ricochet': 30, 'splash': 150, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 400, 'life': 1},
+    'ProjectileData_Firebug':     {'impact': 1000, 'splash': 500, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 60, 'life': 10},
+    'ProjectileData_Queen':       {'impact': 1000, 'splash': 500, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 90, 'life': 10},
+    'ProjectileData_Ray':         {'impact': 400, 'ricochet': 400, 'splash': 600, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 400, 'life': 1},  # instant-hit
+    'ProjectileData_Scorpion':    {'impact': 120, 'speed': 250, 'life': 10},
+    'ProjectileData_Shard':       {'impact': 400, 'speed': 200, 'life': 2},   # Shrimp
+    'ProjectileData_Shocker':     {'impact': 250, 'ricochet': 30, 'splash': 250, 'splash_r_max': 2, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 800, 'life': 0.375},
+    'ProjectileData_SquidExplode':{'splash': 3500, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 1, 'life': 0.5},
+    'ProjectileData_Swarm':       {'impact': 200, 'ricochet': 150, 'splash': 150, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 80, 'life': 7.5},
+    # Infantry (impact only)
+    'ProjectileData_BalteriumRifle': {'impact': 70, 'speed': 500, 'life': 5},
+    'ProjectileData_Bullpup':       {'impact': 36, 'speed': 450, 'life': 3},
+    'ProjectileData_MarksmanRifle': {'impact': 300, 'splash': 100, 'splash_r_max': 4, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 600, 'life': 5},
+    'ProjectileData_Minigun':       {'impact': 55, 'speed': 500, 'life': 3},
+    'ProjectileData_RGXRifle':      {'impact': 55, 'speed': 500, 'life': 3},
+    'ProjectileData_Rifle':         {'impact': 45, 'speed': 500, 'life': 3},
+    'ProjectileData_SMG':           {'impact': 27, 'speed': 350, 'life': 3},
+    'ProjectileData_SMG2':          {'impact': 85, 'speed': 450, 'life': 3},
+    'ProjectileData_SniperRifle':   {'impact': 700, 'speed': 800, 'life': 5},
     # Vehicle LMG/MMG
-    'ProjectileData_LMG_LightQuad':        (50, 400, 3),
-    'ProjectileData_LMG_LightArmoredCar':  (75, 500, 5),
-    'ProjectileData_LMG_ChainMG':          (40, 350, 3),
-    'ProjectileData_LMG_CrimsonFreighter': (32, 350, 3),
-    'ProjectileData_MMG_HoverTank':        (50, 400, 3),
-    'ProjectileData_MMG_TroopHauler':      (50, 400, 3),
-    'ProjectileData_MMG_HeavyQuad2':       (80, 400, 3),
-    'ProjectileData_MMG_LightQuad2':       (70, 400, 3),
-    'ProjectileData_MMG_HeavyArmoredCar':  (50, 400, 3),
-    'ProjectileData_SG_CombatTank':        (100, 300, 1),
+    'ProjectileData_LMG_LightQuad':        {'impact': 50, 'ricochet': 8, 'speed': 400, 'life': 3},
+    'ProjectileData_LMG_LightArmoredCar':  {'impact': 75, 'ricochet': 25, 'speed': 500, 'life': 5},
+    'ProjectileData_LMG_ChainMG':          {'impact': 40, 'speed': 350, 'life': 3},
+    'ProjectileData_LMG_CrimsonFreighter': {'impact': 32, 'speed': 350, 'life': 3},
+    'ProjectileData_MMG_HoverTank':        {'impact': 50, 'ricochet': 10, 'speed': 400, 'life': 3},
+    'ProjectileData_MMG_TroopHauler':      {'impact': 50, 'ricochet': 10, 'speed': 400, 'life': 3},
+    'ProjectileData_MMG_HeavyQuad2':       {'impact': 80, 'ricochet': 18, 'speed': 400, 'life': 3},
+    'ProjectileData_MMG_LightQuad2':       {'impact': 70, 'ricochet': 14, 'speed': 400, 'life': 3},
+    'ProjectileData_MMG_HeavyArmoredCar':  {'impact': 50, 'ricochet': 10, 'speed': 400, 'life': 3},
+    'ProjectileData_SG_CombatTank':        {'impact': 100, 'ricochet': 40, 'speed': 300, 'life': 1},
     # Vehicle HMG
-    'ProjectileData_HMG_HeavyQuad':        (70, 550, 5),
-    'ProjectileData_HMG_Gunship':          (160, 400, 2.5),
-    'ProjectileData_HMG_BomberCraft':      (80, 860, 5),
-    'ProjectileData_HMG_HeavyTank':        (80, 800, 5),
-    'ProjectileData_HMG_LightArmoredCar2': (200, 400, 2.5),
-    'ProjectileData_HMG_OldHeavy':         (80, 350, 5),
-    'ProjectileData_HMG_StealthDropship':  (300, 500, 2),
-    'ProjectileData_HMG_StealthFighter':   (100, 1600, 0.156),
-    'ProjectileData_HMG_ArmedTransport':   (70, 400, 5),
-    'ProjectileData_HMG_TurretMedium':     (160, 550, 5),
+    'ProjectileData_HMG_HeavyQuad':        {'impact': 70, 'ricochet': 20, 'speed': 550, 'life': 5},
+    'ProjectileData_HMG_Gunship':          {'impact': 160, 'ricochet': 60, 'splash': 80, 'splash_r_max': 3, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 400, 'life': 2.5},
+    'ProjectileData_HMG_BomberCraft':      {'impact': 80, 'splash': 50, 'splash_r_max': 3, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 860, 'life': 5},
+    'ProjectileData_HMG_HeavyTank':        {'impact': 80, 'ricochet': 20, 'splash': 50, 'splash_r_max': 1.5, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 800, 'life': 5},
+    'ProjectileData_HMG_LightArmoredCar2': {'impact': 200, 'ricochet': 60, 'splash': 100, 'splash_r_max': 3, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 400, 'life': 2.5},
+    'ProjectileData_HMG_OldHeavy':         {'impact': 80, 'speed': 350, 'life': 5},
+    'ProjectileData_HMG_StealthDropship':  {'impact': 300, 'ricochet': 30, 'speed': 500, 'life': 2},
+    'ProjectileData_HMG_StealthFighter':   {'impact': 100, 'ricochet': 30, 'speed': 1600, 'life': 0.156},
+    'ProjectileData_HMG_ArmedTransport':   {'impact': 70, 'ricochet': 20, 'speed': 400, 'life': 5},
+    'ProjectileData_HMG_TurretMedium':     {'impact': 160, 'speed': 550, 'life': 5},
     # Shells
-    'ProjectileData_Shell_HoverTank':       (1000, 500, 5),
-    'ProjectileData_Shell_CombatTank':      (1500, 350, 5.71),
-    'ProjectileData_Shell_CrimsonTank':     (15000, 250, 6.5),
-    'ProjectileData_Shell_HeavyTank':       (15000, 300, 8),
-    'ProjectileData_Shell_StrikeTank':      (700, 300, 6.7),
-    'ProjectileData_Shell_HeavyArmoredCar': (800, 400, 5),
-    'ProjectileData_Shell_LightArmoredCar': (350, 500, 5),
-    'ProjectileData_Shell_ShuttleCannon':   (350, 500, 5),
-    'ProjectileData_Shell_Dreadnought':     (1000, 100, 5),
-    'ProjectileData_Shell_DreadnoughtCannon': (350, 500, 5),
-    'ProjectileData_Shell_Interceptor':     (350, 350, 1),
-    'ProjectileData_Shell_StealthBomber':   (1600, 400, 5),
-    'ProjectileData_Shell_Turret_Heavy':    (1600, 200, 10),
-    'ProjectileData_Railgun_RailgunTank':   (4000, 1500, 2),
+    'ProjectileData_Shell_HoverTank':       {'impact': 1000, 'ricochet': 500, 'splash': 600, 'splash_r_max': 15, 'splash_r_min': 1, 'splash_r_pow': 3, 'pen': 5000, 'speed': 500, 'life': 5},
+    'ProjectileData_Shell_CombatTank':      {'impact': 1500, 'ricochet': 500, 'splash': 3000, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 350, 'life': 5.71},
+    'ProjectileData_Shell_CrimsonTank':     {'impact': 15000, 'ricochet': 3000, 'splash': 5000, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 250, 'life': 6.5},
+    'ProjectileData_Shell_HeavyTank':       {'impact': 15000, 'ricochet': 3000, 'splash': 4000, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 300, 'life': 8},
+    'ProjectileData_Shell_StrikeTank':      {'impact': 700, 'ricochet': 500, 'splash': 1000, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 300, 'life': 6.7},
+    'ProjectileData_Shell_HeavyArmoredCar': {'impact': 800, 'ricochet': 400, 'splash': 500, 'splash_r_max': 15, 'splash_r_min': 1, 'splash_r_pow': 3, 'pen': 4500, 'speed': 400, 'life': 5},
+    'ProjectileData_Shell_LightArmoredCar': {'impact': 350, 'ricochet': 120, 'splash': 220, 'splash_r_max': 4, 'splash_r_min': 1, 'splash_r_pow': 3, 'pen': 220, 'speed': 500, 'life': 5},
+    'ProjectileData_Shell_ShuttleCannon':   {'impact': 350, 'ricochet': 120, 'splash': 220, 'splash_r_max': 4, 'splash_r_min': 1, 'splash_r_pow': 3, 'pen': 220, 'speed': 500, 'life': 5},
+    'ProjectileData_Shell_Dreadnought':     {'impact': 1000, 'ricochet': 200, 'splash': 600, 'splash_r_max': 15, 'splash_r_min': 1, 'splash_r_pow': 3, 'pen': 1600, 'speed': 100, 'life': 5},
+    'ProjectileData_Shell_DreadnoughtCannon': {'impact': 350, 'ricochet': 120, 'splash': 220, 'splash_r_max': 4, 'splash_r_min': 1, 'splash_r_pow': 3, 'pen': 220, 'speed': 500, 'life': 5},
+    'ProjectileData_Shell_Interceptor':     {'impact': 350, 'ricochet': 120, 'splash': 220, 'splash_r_max': 4, 'splash_r_min': 1, 'splash_r_pow': 3, 'pen': 220, 'speed': 350, 'life': 1},
+    'ProjectileData_Shell_StealthBomber':   {'impact': 1600, 'ricochet': 250, 'splash': 1000, 'splash_r_max': 8, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 400, 'life': 5},
+    'ProjectileData_Shell_Turret_Heavy':    {'impact': 1600, 'speed': 200, 'life': 10},
+    'ProjectileData_Railgun_RailgunTank':   {'impact': 4000, 'ricochet': 4000, 'pen': 8000, 'speed': 1500, 'life': 2},
     # Rockets
-    'ProjectileData_Rocket_BarrageTruck':   (500, 85, 10),
-    'ProjectileData_Rocket_RailgunTank':    (700, 50, 10),
-    'ProjectileData_Rocket_RocketTank':     (12000, 100, 20),
-    'ProjectileData_Rocket_StealthGunship': (300, 150, 6.7),
-    'ProjectileData_Rocket_StealthFighter': (1000, 250, 3),
-    'ProjectileData_Rocket_TurretAA':       (600, 150, 6.7),
-    'ProjectileData_Rocket_AntiAirCar':     (400, 100, 6),
+    'ProjectileData_Rocket_BarrageTruck':   {'impact': 500, 'splash': 900, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 85, 'life': 10},
+    'ProjectileData_Rocket_RailgunTank':    {'impact': 700, 'splash': 500, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 50, 'life': 10},
+    'ProjectileData_Rocket_RocketTank':     {'impact': 12000, 'splash': 8000, 'splash_r_max': 30, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 100, 'life': 20},
+    'ProjectileData_Rocket_StealthGunship': {'impact': 300, 'splash': 500, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 150, 'life': 6.7},
+    'ProjectileData_Rocket_StealthFighter': {'impact': 1000, 'splash': 1000, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 250, 'life': 3},
+    'ProjectileData_Rocket_TurretAA':       {'impact': 600, 'splash': 600, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 150, 'life': 6.7},
+    'ProjectileData_Rocket_AntiAirCar':     {'impact': 400, 'splash': 600, 'splash_r_max': 15, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 100, 'life': 6},
     # Special
-    'ProjectileData_Flamethrower':       (1000, 70, 10),
-    'ProjectileData_Flak_AAFlakCar':     (500, 150, 4),
-    'ProjectileData_Plasma_SiegeTank':   (30000, 100, 12),
-    'ProjectileData_PulseTank':          (0, 75, 5),     # splash-only
-    'ProjectileData_MiningLaser':        (300, 500, 0.03),
+    'ProjectileData_Flamethrower':       {'impact': 1000, 'splash': 600, 'splash_r_max': 10, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 70, 'life': 10},
+    'ProjectileData_Flak_AAFlakCar':     {'impact': 500, 'splash': 500, 'splash_r_max': 30, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 150, 'life': 4},
+    'ProjectileData_Plasma_SiegeTank':   {'impact': 30000, 'ricochet': 500, 'splash': 15000, 'splash_r_max': 50, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 100, 'life': 12},
+    'ProjectileData_PulseTank':          {'ricochet': 500, 'splash': 1000, 'splash_r_max': 15, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 75, 'life': 5},
+    'ProjectileData_MiningLaser':        {'impact': 300, 'splash': 300, 'splash_r_max': 2, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 500, 'life': 0.03},
     # Bombs
-    'ProjectileData_DropBomb':           (5000, 30, 30),
-    'ProjectileData_DiveBomb':           (15000, 1, 30),
-    'ProjectileData_ContainerBomb':      (120000, 1, 30),
-    'ProjectileData_DropTank':           (3000, 1, 30),
+    'ProjectileData_DropBomb':           {'impact': 5000, 'splash': 3000, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 30, 'life': 30},
+    'ProjectileData_DiveBomb':           {'impact': 15000, 'splash': 15000, 'splash_r_max': 30, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 1, 'life': 30},
+    'ProjectileData_Bomb_DiveBomb':      {'impact': 15000, 'ricochet': 3000, 'splash': 15000, 'splash_r_max': 30, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 1, 'life': 30},
+    'ProjectileData_Bomb_DropBomb':      {'impact': 5000, 'ricochet': 3000, 'splash': 3000, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 30, 'life': 30},
+    'ProjectileData_ContainerBomb':      {'impact': 120000, 'splash': 120000, 'splash_r_max': 80, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 1, 'life': 30},
+    'ProjectileData_Bomb_ContainerBomb': {'impact': 120000, 'ricochet': 3000, 'splash': 120000, 'splash_r_max': 80, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 1, 'life': 30},
+    'ProjectileData_Bomb_DropTank':      {'impact': 3000, 'splash': 3000, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 1, 'life': 30},
+    'ProjectileData_DropTank':           {'impact': 3000, 'splash': 3000, 'splash_r_max': 20, 'splash_r_min': 1, 'splash_r_pow': 3, 'speed': 1, 'life': 30},
 }
+
+def pd_get(pd_name, field, default=0):
+    """Get a field from projectile_db, with backward-compat for old tuple format."""
+    entry = projectile_db.get(pd_name, {})
+    if isinstance(entry, dict):
+        return entry.get(field, default)
+    # Legacy tuple: (impact, speed, lifetime)
+    if field == 'impact': return entry[0] if len(entry) > 0 else default
+    if field == 'speed': return entry[1] if len(entry) > 1 else default
+    if field == 'life': return entry[2] if len(entry) > 2 else default
+    return default
 
 
 # =============================================================================
@@ -105,46 +123,56 @@ projectile_db = {
 # Maps unit name → primary/secondary ProjectileData name
 # =============================================================================
 vehicle_projectiles = {
-    # Sol Light Factory
-    'Light Quad':     {'pri': 'ProjectileData_LMG_LightQuad'},
-    'Platoon Hauler': {'pri': 'ProjectileData_MMG_TroopHauler', 'sec': 'ProjectileData_MMG_TroopHauler'},
-    'Heavy Quad':     {'pri': 'ProjectileData_HMG_HeavyQuad'},
-    'Light Striker':  {'pri': 'ProjectileData_LMG_LightArmoredCar', 'sec': 'ProjectileData_Shell_LightArmoredCar'},
-    'Heavy Striker':  {'pri': 'ProjectileData_Shell_HeavyArmoredCar', 'sec': 'ProjectileData_HMG_OldHeavy'},
-    'AA Truck':       {'pri': 'ProjectileData_Rocket_AntiAirCar', 'sec': 'ProjectileData_Shell_LightArmoredCar'},
+    # Sol Light Factory (verified against dump vt_proj/vt2_proj)
+    'Light Quad':     {'pri': 'ProjectileData_MMG_LightQuad2'},
+    'Platoon Hauler': {'pri': 'ProjectileData_MMG_TroopHauler'},
+    'Heavy Quad':     {'pri': 'ProjectileData_MMG_HeavyQuad2'},
+    'Light Striker':  {'pri': 'ProjectileData_HMG_LightArmoredCar2'},
+    'Heavy Striker':  {'pri': 'ProjectileData_Shell_HeavyArmoredCar', 'sec': 'ProjectileData_MMG_HeavyArmoredCar'},
+    'AA Truck':       {'pri': 'ProjectileData_Rocket_AntiAirCar'},
     # Sol Heavy Factory
     'Hover Tank':     {'pri': 'ProjectileData_Shell_HoverTank', 'sec': 'ProjectileData_MMG_HoverTank'},
     'Barrage Truck':  {'pri': 'ProjectileData_Rocket_BarrageTruck'},
     'Railgun Tank':   {'pri': 'ProjectileData_Railgun_RailgunTank', 'sec': 'ProjectileData_Rocket_RailgunTank'},
     'Pulse Truck':    {'pri': 'ProjectileData_PulseTank'},
     # Sol Ultra Heavy Factory
-    'Siege Tank':     {'pri': 'ProjectileData_Plasma_SiegeTank', 'sec': 'ProjectileData_Shell_HoverTank'},
+    'Siege Tank':     {'pri': 'ProjectileData_Plasma_SiegeTank'},
     # Sol Air Factory
-    'Gunship':        {'pri': 'ProjectileData_Rocket_StealthGunship', 'sec': 'ProjectileData_HMG_Gunship'},
-    'Dropship':       {'pri': 'ProjectileData_HMG_StealthDropship', 'sec': 'ProjectileData_HMG_ArmedTransport'},
-    'Fighter':        {'pri': 'ProjectileData_Rocket_StealthFighter', 'sec': 'ProjectileData_HMG_StealthFighter'},
-    'Bomber':         {'pri': 'ProjectileData_Shell_StealthBomber', 'sec': 'ProjectileData_HMG_BomberCraft'},
+    'Gunship':        {'pri': 'ProjectileData_HMG_Gunship', 'sec': 'ProjectileData_Rocket_StealthGunship'},
+    'Dropship':       {'pri': 'ProjectileData_HMG_StealthDropship'},
+    'Fighter':        {'pri': 'ProjectileData_HMG_StealthFighter', 'sec': 'ProjectileData_Bomb_DiveBomb'},
+    'Bomber':         {'pri': 'ProjectileData_Shell_StealthBomber', 'sec': 'ProjectileData_Bomb_DropBomb'},
     # Centauri Light Factory
-    'Light Raider':   {'pri': 'ProjectileData_LMG_LightArmoredCar'},
-    'Squad Transport':{'pri': 'ProjectileData_MMG_TroopHauler', 'sec': 'ProjectileData_MMG_TroopHauler'},
-    'Heavy Raider':   {'pri': 'ProjectileData_LMG_LightArmoredCar'},
-    'Assault Car':    {'pri': 'ProjectileData_Shell_HeavyArmoredCar', 'sec': 'ProjectileData_HMG_LightArmoredCar2'},
-    'Strike Tank':    {'pri': 'ProjectileData_Shell_StrikeTank', 'sec': 'ProjectileData_Shell_StrikeTank'},
-    'Flak Car':       {'pri': 'ProjectileData_Flak_AAFlakCar', 'sec': 'ProjectileData_Rocket_AntiAirCar'},
+    'Light Raider':   {'pri': 'ProjectileData_LMG_LightQuad'},
+    'Squad Transport':{'pri': 'ProjectileData_HMG_ArmedTransport'},
+    'Heavy Raider':   {'pri': 'ProjectileData_HMG_HeavyQuad'},
+    'Assault Car':    {'pri': 'ProjectileData_Shell_LightArmoredCar', 'sec': 'ProjectileData_LMG_LightArmoredCar'},
+    'Strike Tank':    {'pri': 'ProjectileData_Shell_StrikeTank'},
+    'Flak Car':       {'pri': 'ProjectileData_Flak_AAFlakCar'},
     # Centauri Heavy Factory
     'Combat Tank':    {'pri': 'ProjectileData_Shell_CombatTank', 'sec': 'ProjectileData_SG_CombatTank'},
     'Rocket Tank':    {'pri': 'ProjectileData_Rocket_RocketTank'},
     'Heavy Tank':     {'pri': 'ProjectileData_Shell_HeavyTank', 'sec': 'ProjectileData_HMG_HeavyTank'},
     'Pyro Tank':      {'pri': 'ProjectileData_Flamethrower'},
     # Centauri Ultra Heavy Factory
-    'Crimson Tank':   {'pri': 'ProjectileData_Shell_CrimsonTank', 'sec': 'ProjectileData_LMG_CrimsonFreighter'},
+    'Crimson Tank':   {'pri': 'ProjectileData_Shell_CrimsonTank'},
     # Centauri Air Factory
-    'Shuttle':        {'pri': 'ProjectileData_Shell_ShuttleCannon'},
-    'Dreadnought':    {'pri': 'ProjectileData_Shell_Dreadnought', 'sec': 'ProjectileData_Shell_DreadnoughtCannon'},
-    'Interceptor':    {'pri': 'ProjectileData_Shell_Interceptor', 'sec': 'ProjectileData_DiveBomb'},
-    'Freighter':      {'pri': 'ProjectileData_LMG_CrimsonFreighter', 'sec': 'ProjectileData_ContainerBomb'},
-    # Hoverbike
-    'Hover Bike':     {'pri': 'ProjectileData_LMG_LightQuad'},
+    'Shuttle':        {'pri': 'ProjectileData_Shell_DreadnoughtCannon'},
+    'Dreadnought':    {'pri': 'ProjectileData_Shell_DreadnoughtCannon', 'sec': 'ProjectileData_Shell_Dreadnought'},
+    'Interceptor':    {'pri': 'ProjectileData_Shell_Interceptor', 'sec': 'ProjectileData_Bomb_DropTank'},
+    'Freighter':      {'pri': 'ProjectileData_Shell_Dreadnought', 'sec': 'ProjectileData_Bomb_ContainerBomb'},
+    # Hover Bike — no VehicleTurret (passengers use infantry weapons)
+}
+
+# Per-unit turret stat source from dump fields.
+# Default: pri from 'vt_', sec from 'vt2_'. Only list exceptions.
+# Multi-turret dump showed weapons on unexpected turret slots for these units.
+turret_stats_prefix = {
+    'Bomber':         {'pri': 'vt3_', 'sec': 'vt_'},    # cannon=vt3_(pri), bombs=vt_(sec)
+    'Freighter':      {'pri': 'vt3_', 'sec': 'vt_'},    # cannon=vt3_(pri), bomb=vt_(sec)
+    'Shuttle':        {'pri': 'vt3_'},                   # cannon=vt3_ (only weapon)
+    'Gunship':        {'pri': 'vt3_'},                   # gun=vt3_
+    'Platoon Hauler': {'pri': 'vt3_'},                   # weapon on 2nd VehicleTurret
 }
 
 # =============================================================================
@@ -221,42 +249,81 @@ vehicle_movement = {
 
 
 def get_proj_stats(pd_name):
-    """Get (damage, speed, lifetime) from projectile_db, or None."""
+    """Get projectile stats dict from projectile_db, or None."""
     return projectile_db.get(pd_name)
 
 
+def fmt_damage_parts(pd_name):
+    """Format damage sub-type annotation: 'imp:1000 spl:600/r15 pen:5000' (only non-zero)."""
+    stats = projectile_db.get(pd_name, {})
+    if isinstance(stats, tuple):
+        return f"dmg:{stats[0]}"  # legacy
+    parts = []
+    if stats.get('impact', 0) > 0: parts.append(f"imp:{int(stats['impact'])}")
+    if stats.get('splash', 0) > 0:
+        sr_max = stats.get('splash_r_max', 10)
+        parts.append(f"spl:{int(stats['splash'])}/r{sr_max:g}")
+    if stats.get('pen', 0) > 0: parts.append(f"pen:{int(stats['pen'])}")
+    if stats.get('ricochet', 0) > 0: parts.append(f"ric:{int(stats['ricochet'])}")
+    return ' '.join(parts) if parts else 'dmg:0'
+
+
 def fmt_weapon_vehicle(pd_name, vt_fi, vt_spread, vt_mag, vt_reload):
-    """Format weapon annotation with all 7 base values for vehicles (VehicleTurret).
-    Matches: damage_mult, proj_speed_mult, proj_lifetime_mult, accuracy_mult,
-             magazine_mult, fire_rate_mult, reload_time_mult
-    """
+    """Format weapon annotation with damage sub-types + 6 base values for vehicles."""
     clean = pd_name.replace('ProjectileData_', '') if pd_name else '?'
-    stats = get_proj_stats(pd_name) if pd_name else None
-    dmg = stats[0] if stats else '?'
-    spd = stats[1] if stats else '?'
-    life = stats[2] if stats else '?'
+    dmg_str = fmt_damage_parts(pd_name) if pd_name else 'dmg:?'
+    spd = int(pd_get(pd_name, 'speed')) if pd_name else '?'
+    life = pd_get(pd_name, 'life') if pd_name else '?'
     spread_s = vt_spread if vt_spread is not None else '?'
     mag_s = vt_mag if vt_mag is not None else '?'
     fi_s = vt_fi if vt_fi is not None else '?'
     reload_s = vt_reload if vt_reload is not None else '?'
-    return f"{clean} | dmg:{dmg} spd:{spd} life:{life} spread:{spread_s} mag:{mag_s} fi:{fi_s} reload:{reload_s}"
+    return f"{clean} | {dmg_str} spd:{spd} life:{life} spread:{spread_s} mag:{mag_s} fi:{fi_s} reload:{reload_s}"
 
 
 def fmt_weapon_infantry(proj_name, damage, speed, lifetime):
     """Format weapon annotation with 3 base values for infantry.
-    Matches: damage_mult, proj_speed_mult, proj_lifetime_mult
-    (accuracy/magazine/fire_rate/reload use CharacterAttachment — not overridable)
+    Infantry only have impact damage, so show as imp:X.
     """
-    return f"{proj_name} | dmg:{damage} spd:{speed} life:{lifetime}"
+    return f"{proj_name} | imp:{damage} spd:{speed} life:{lifetime}"
 
 
-def fmt_weapon_creature_ranged(pd_name, damage, speed, lifetime, spread):
-    """Format weapon annotation with 4 base values for creature ranged attacks.
-    Matches: damage_mult, proj_speed_mult, proj_lifetime_mult, accuracy_mult
-    (magazine/fire_rate/reload not applicable to creatures)
-    """
+def fmt_weapon_creature_ranged(pd_name, speed, lifetime, spread):
+    """Format weapon annotation with damage sub-types for creature ranged attacks."""
     clean = pd_name.replace('ProjectileData_', '') if pd_name else '?'
-    return f"{clean} | dmg:{damage} spd:{speed} life:{lifetime} spread:{spread}"
+    dmg_str = fmt_damage_parts(pd_name) if pd_name else 'dmg:?'
+    return f"{clean} | {dmg_str} spd:{speed} life:{lifetime} spread:{spread}"
+
+
+def emit_damage_keys(e, pd_name, prefix=''):
+    """Emit per-damage-subtype multiplier keys for a projectile, only for non-zero fields.
+    Also emits splash radius keys when splash damage exists.
+    prefix: '' for structures, 'pri_' or 'sec_' for vehicles/creatures.
+    """
+    stats = projectile_db.get(pd_name, {})
+    if isinstance(stats, tuple):
+        e[f'{prefix}damage_mult'] = 1.00
+        return
+    emitted = False
+    if stats.get('impact', 0) > 0:
+        e[f'{prefix}impact_damage_mult'] = 1.00
+        emitted = True
+    if stats.get('splash', 0) > 0:
+        e[f'{prefix}splash_damage_mult'] = 1.00
+        emitted = True
+    if stats.get('pen', 0) > 0:
+        e[f'{prefix}penetrating_damage_mult'] = 1.00
+        emitted = True
+    if stats.get('ricochet', 0) > 0:
+        e[f'{prefix}ricochet_damage_mult'] = 1.00
+        emitted = True
+    if not emitted:
+        e[f'{prefix}damage_mult'] = 1.00
+    # Splash radius keys (only if splash damage exists)
+    if stats.get('splash', 0) > 0:
+        e[f'{prefix}splash_radius_max_mult'] = 1.00
+        e[f'{prefix}splash_radius_min_mult'] = 1.00
+        e[f'{prefix}splash_radius_pow_mult'] = 1.00
 
 
 def build_unit(name, u, ctype):
@@ -306,7 +373,8 @@ def build_unit(name, u, ctype):
         iw = infantry_weapons.get(name, {})
         if iw:
             e['_pri_weapon'] = fmt_weapon_infantry(iw['proj'], iw['damage'], iw['speed'], iw['life'])
-            e['pri_damage_mult'] = 1.00
+            # Infantry only have impact damage
+            e['pri_impact_damage_mult'] = 1.00
             e['pri_proj_speed_mult'] = 1.00
             e['pri_proj_lifetime_mult'] = 1.00
 
@@ -314,13 +382,20 @@ def build_unit(name, u, ctype):
         # Vehicles: full 7 params per weapon slot via VehicleTurret
         vp = vehicle_projectiles.get(name, {})
 
+        # Turret field prefixes for reading dump stats (fi, spread, mag, reload)
+        # Default: pri→vt_, sec→vt2_. Override per-unit via turret_stats_prefix.
+        tsp = turret_stats_prefix.get(name, {})
+        pri_pf = tsp.get('pri', 'vt_')
+        sec_pf = tsp.get('sec', 'vt2_')
+
         # Primary weapon
-        if u['vt_fire_interval'] > 0 or vp.get('pri'):
+        if u.get(pri_pf + 'fire_interval', u.get('vt_fire_interval', 0)) > 0 or vp.get('pri'):
             pd_name = vp.get('pri', '')
             e['_pri_weapon'] = fmt_weapon_vehicle(
                 pd_name,
-                u['vt_fire_interval'], u['vt_spread'], u['vt_magazine'], u['vt_reload'])
-            e['pri_damage_mult'] = 1.00
+                u.get(pri_pf + 'fire_interval', 0), u.get(pri_pf + 'spread', 0),
+                u.get(pri_pf + 'magazine', 0), u.get(pri_pf + 'reload', 0))
+            emit_damage_keys(e, pd_name, 'pri_')
             e['pri_proj_speed_mult'] = 1.00
             e['pri_proj_lifetime_mult'] = 1.00
             e['pri_accuracy_mult'] = 1.00
@@ -328,15 +403,14 @@ def build_unit(name, u, ctype):
             e['pri_fire_rate_mult'] = 1.00
             e['pri_reload_time_mult'] = 1.00
 
-        # Secondary weapon — require explicit mapping or non-zero magazine
-        # (fire_interval alone with mag=0 means turret slot exists but has no usable weapon)
-        if vp.get('sec') or u['vt2_magazine'] > 0:
+        # Secondary weapon — require explicit mapping in vehicle_projectiles
+        if vp.get('sec'):
             pd_name = vp.get('sec', '')
             e['_sec_weapon'] = fmt_weapon_vehicle(
                 pd_name,
-                u['vt2_fire_interval'], u['vt2_spread'], u['vt2_magazine'],
-                u.get('vt2_reload', 0))
-            e['sec_damage_mult'] = 1.00
+                u.get(sec_pf + 'fire_interval', 0), u.get(sec_pf + 'spread', 0),
+                u.get(sec_pf + 'magazine', 0), u.get(sec_pf + 'reload', 0))
+            emit_damage_keys(e, pd_name, 'sec_')
             e['sec_proj_speed_mult'] = 1.00
             e['sec_proj_lifetime_mult'] = 1.00
             e['sec_accuracy_mult'] = 1.00
@@ -345,8 +419,7 @@ def build_unit(name, u, ctype):
             e['sec_reload_time_mult'] = 1.00
 
     elif ctype == 'creature_ranged':
-        # Ranged creatures: 4 functional params (dmg/spd/life/accuracy)
-        # magazine/fire_rate/reload not applicable
+        # Ranged creatures: dynamic damage sub-type keys + spd/life/accuracy
         ov = creature_projectile_override.get(name, {})
         atk_proj = ov.get('atk_proj', u.get('atk_proj', ''))
         proj_speed = ov.get('proj_speed', u.get('proj_speed', 0))
@@ -354,10 +427,8 @@ def build_unit(name, u, ctype):
         atk_spread = ov.get('atk_spread', u.get('atk_spread', 0))
 
         if atk_proj:
-            pd_stats = get_proj_stats(atk_proj)
-            dmg = pd_stats[0] if pd_stats else '?'
-            e['_pri_weapon'] = fmt_weapon_creature_ranged(atk_proj, dmg, proj_speed, proj_life, atk_spread)
-            e['pri_damage_mult'] = 1.00
+            e['_pri_weapon'] = fmt_weapon_creature_ranged(atk_proj, proj_speed, proj_life, atk_spread)
+            emit_damage_keys(e, atk_proj, 'pri_')
             e['pri_proj_speed_mult'] = 1.00
             e['pri_proj_lifetime_mult'] = 1.00
             e['pri_accuracy_mult'] = 1.00
@@ -395,8 +466,10 @@ def build_unit(name, u, ctype):
         # Same 7 multipliers as vehicles + range_mult (scales AimDistance)
         td = turret_data.get(name, {})
         if td:
-            e['_weapon'] = f"{td['proj']} | dmg:{td['damage']} spd:{td['speed']} life:{td['life']} range:{td['range']}"
-            e['damage_mult'] = 1.00
+            full_pd_name = f"ProjectileData_{td['proj']}"
+            dmg_str = fmt_damage_parts(full_pd_name)
+            e['_weapon'] = f"{td['proj']} | {dmg_str} spd:{td['speed']} life:{td['life']} range:{td['range']}"
+            emit_damage_keys(e, full_pd_name, '')
             e['proj_speed_mult'] = 1.00
             e['proj_lifetime_mult'] = 1.00
             e['range_mult'] = 1.00
@@ -531,7 +604,7 @@ for n in ['Barrage Truck', 'Railgun Tank', 'Pulse Truck']:
     uc[n] = build_unit(n, by_name[n], 'wheeled_vehicle')
 
 uc["_comment_sol_uhf"] = "========== SOL — Ultra Heavy Factory =========="
-uc['Harvester'] = build_unit('Harvester', by_name['Harvester'], 'wheeled_vehicle')
+uc['Sol Harvester'] = build_unit('Sol Harvester', by_name['Sol Harvester'], 'hovered_vehicle')
 uc['Siege Tank'] = build_unit('Siege Tank', by_name['Siege Tank'], 'wheeled_vehicle')
 
 uc["_comment_sol_air"] = "========== SOL — Air Factory =========="
@@ -539,7 +612,8 @@ for n in ['Gunship', 'Dropship', 'Fighter', 'Bomber']:
     uc[n] = build_unit(n, by_name[n], 'air_vehicle')
 
 uc["_comment_struct"] = "========== SOL/CENTAURI — Structures =========="
-for n in ['Headquarters', 'Refinery', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory']:
+uc['Headquarters'] = build_unit('Headquarters', by_name.get('Headquarters', by_name.get('Sol Headquarters')), 'structure')
+for n in ['Refinery', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory']:
     uc[n] = build_unit(n, by_name[n], 'structure')
 for n in ['Turret', 'Heavy Turret', 'Anti-Air Rocket Turret']:
     uc[n] = build_unit(n, by_name[n], 'structure_armed')
@@ -558,6 +632,7 @@ for n in ['Combat Tank', 'Rocket Tank', 'Heavy Tank', 'Pyro Tank']:
     uc[n] = build_unit(n, by_name[n], 'wheeled_vehicle')
 
 uc["_comment_cen_uhf"] = "========== CENTAURI — Ultra Heavy Factory =========="
+uc['Cent Harvester'] = build_unit('Cent Harvester', by_name['Cent Harvester'], 'wheeled_vehicle')
 uc['Crimson Tank'] = build_unit('Crimson Tank', by_name['Crimson Tank'], 'wheeled_vehicle')
 
 uc["_comment_cen_air"] = "========== CENTAURI — Air Factory =========="
@@ -617,10 +692,17 @@ print(f"Total parameter fields: {total_p}")
 print("\n=== AUDIT ===")
 
 # Define expected keys per unit type
+# Damage sub-type keys that count as "has damage multiplier"
+_damage_keys = {'damage_mult', 'impact_damage_mult', 'splash_damage_mult',
+                'penetrating_damage_mult', 'ricochet_damage_mult',
+                'pri_damage_mult', 'pri_impact_damage_mult', 'pri_splash_damage_mult',
+                'pri_penetrating_damage_mult', 'pri_ricochet_damage_mult',
+                'sec_damage_mult', 'sec_impact_damage_mult', 'sec_splash_damage_mult',
+                'sec_penetrating_damage_mult', 'sec_ricochet_damage_mult'}
+
 expected_keys = {
     'infantry': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier'],
-        'weapon_pri': ['pri_damage_mult', 'pri_proj_speed_mult', 'pri_proj_lifetime_mult'],
         'move': ['move_speed_mult', 'jump_speed_mult'],
         'sense': ['target_distance', 'fow_distance', 'visible_event_radius_mult'],
     },
@@ -659,7 +741,7 @@ expected_keys = {
     },
     'structure_armed': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier', 'build_radius'],
-        'weapon': ['damage_mult', 'proj_speed_mult', 'proj_lifetime_mult', 'range_mult',
+        'weapon_non_dmg': ['proj_speed_mult', 'proj_lifetime_mult', 'range_mult',
                    'accuracy_mult', 'magazine_mult', 'fire_rate_mult', 'reload_time_mult'],
     },
 }
@@ -686,11 +768,11 @@ unit_types = {}
 for n in ['Scout', 'Rifleman', 'Sniper', 'Heavy', 'Commando', 'Militia', 'Trooper', 'Marksman', 'Juggernaut', 'Templar']:
     unit_types[n] = 'infantry'
 for n in ['Light Quad', 'Platoon Hauler', 'Heavy Quad', 'Light Striker', 'Heavy Striker', 'AA Truck',
-          'Barrage Truck', 'Railgun Tank', 'Pulse Truck', 'Harvester', 'Siege Tank',
+          'Barrage Truck', 'Railgun Tank', 'Pulse Truck', 'Cent Harvester', 'Siege Tank',
           'Light Raider', 'Squad Transport', 'Heavy Raider', 'Assault Car', 'Strike Tank', 'Flak Car',
           'Combat Tank', 'Rocket Tank', 'Heavy Tank', 'Pyro Tank', 'Crimson Tank']:
     unit_types[n] = 'wheeled_vehicle'
-for n in ['Hover Tank', 'Hover Bike']:
+for n in ['Hover Tank', 'Hover Bike', 'Sol Harvester']:
     unit_types[n] = 'hovered_vehicle'
 for n in ['Gunship', 'Dropship', 'Fighter', 'Bomber', 'Shuttle', 'Dreadnought', 'Interceptor', 'Freighter']:
     unit_types[n] = 'air_vehicle'

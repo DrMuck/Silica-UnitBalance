@@ -170,6 +170,136 @@ namespace Si_UnitBalance
             return pdName;
         }
 
+        /// <summary>
+        /// Returns damage sub-type keys for only the non-zero damage fields on a ProjectileData object.
+        /// Falls back to ["damage_mult"] if pdObj is null or has no damage fields.
+        /// </summary>
+        private static string[] GetDamageKeysForProjectile(object pdObj)
+        {
+            if (pdObj == null) return new[] { "damage_mult" };
+            var keys = new List<string>();
+            if (GetFloatMember(pdObj, "m_fImpactDamage") > 0) keys.Add("impact_damage_mult");
+            // Only show splash damage/radius if m_bSplash is enabled (some projectiles have non-zero splash values but splash disabled)
+            bool hasSplash = GetBoolMember(pdObj, "m_bSplash") && GetFloatMember(pdObj, "m_fSplashDamageMax") > 0;
+            if (hasSplash) keys.Add("splash_damage_mult");
+            // Only show penetrating damage if m_bPenetrating is enabled (like m_bSplash)
+            if (GetBoolMember(pdObj, "m_bPenetrating") && GetFloatMember(pdObj, "m_fPenetratingDamage") > 0) keys.Add("penetrating_damage_mult");
+            if (GetFloatMember(pdObj, "m_fRicochetDamage") > 0) keys.Add("ricochet_damage_mult");
+            if (keys.Count == 0) return new[] { "damage_mult" };
+            // Add splash radius keys if this projectile has splash damage enabled
+            if (hasSplash)
+            {
+                keys.Add("splash_radius_max_mult");
+                keys.Add("splash_radius_min_mult");
+                keys.Add("splash_radius_pow_mult");
+            }
+            return keys.ToArray();
+        }
+
+        /// <summary>
+        /// Retrieves the actual ProjectileData objects for a unit's primary and secondary weapons.
+        /// Used by GetUnitParamGroups to determine which damage sub-types are relevant.
+        /// </summary>
+        private static void GetWeaponPDObjects(string unitName, out object priPD, out object secPD)
+        {
+            priPD = null;
+            secPD = null;
+            try
+            {
+                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                ObjectInfo matchedInfo = null;
+                foreach (var info in allInfos)
+                {
+                    if (info == null || info.Prefab == null) continue;
+                    if (MatchesUnitName(info, unitName)) { matchedInfo = info; break; }
+                }
+                if (matchedInfo == null) return;
+
+                var childComps = matchedInfo.Prefab.GetComponentsInChildren<Component>(true);
+                var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+
+                int vtIndex = 0;
+                foreach (var comp in childComps)
+                {
+                    if (comp == null) continue;
+                    string typeName = comp.GetType().Name;
+
+                    if (typeName == "VehicleTurret")
+                    {
+                        int priIdx = 0;
+                        _vtPriIndex.TryGetValue(unitName, out priIdx);
+                        var vtType = comp.GetType();
+                        foreach (string projPrefix in new[] { "Primary", "Secondary" })
+                        {
+                            foreach (string suffix in new[] { "Projectile", "ProjectileData" })
+                            {
+                                var f = vtType.GetField(projPrefix + suffix, flags);
+                                if (f == null) continue;
+                                var pd = f.GetValue(comp);
+                                if (pd == null) continue;
+                                if (projPrefix == "Primary")
+                                {
+                                    // Use turret mapping: pri-turret's Primary → priPD, others → secPD
+                                    if (vtIndex == priIdx)
+                                    {
+                                        if (priPD == null) priPD = pd;
+                                    }
+                                    else
+                                    {
+                                        if (secPD == null) secPD = pd;
+                                    }
+                                }
+                                else if (projPrefix == "Secondary" && secPD == null)
+                                {
+                                    secPD = pd;
+                                }
+                                break;
+                            }
+                        }
+                        vtIndex++;
+                    }
+                    else if (typeName == "TurretWeapon")
+                    {
+                        var twType = comp.GetType();
+                        foreach (string suffix in new[] { "Projectile", "ProjectileData" })
+                        {
+                            var f = twType.GetField(suffix, flags);
+                            if (f == null) continue;
+                            var pd = f.GetValue(comp);
+                            if (pd != null && priPD == null) { priPD = pd; break; }
+                        }
+                    }
+                    else if (typeName == "CreatureDecapod")
+                    {
+                        var compType = comp.GetType();
+                        foreach (string atkName in new[] { "AttackPrimary", "AttackSecondary" })
+                        {
+                            object attackObj = null;
+                            var atkField = compType.GetField(atkName, BindingFlags.Public | BindingFlags.Instance);
+                            if (atkField != null) try { attackObj = atkField.GetValue(comp); } catch { }
+                            if (attackObj == null)
+                            {
+                                var atkProp = compType.GetProperty(atkName, BindingFlags.Public | BindingFlags.Instance);
+                                if (atkProp != null) try { attackObj = atkProp.GetValue(comp); } catch { }
+                            }
+                            if (attackObj == null) continue;
+                            var pdField = attackObj.GetType().GetField("AttackProjectileData", BindingFlags.Public | BindingFlags.Instance);
+                            if (pdField == null) continue;
+                            object pd = null;
+                            try { pd = pdField.GetValue(attackObj); } catch { }
+                            if (pd != null)
+                            {
+                                if (atkName == "AttackPrimary" && priPD == null) priPD = pd;
+                                else if (atkName == "AttackSecondary" && secPD == null) secPD = pd;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            catch { }
+        }
+
         private static void GetUnitWeaponInfo(string unitName, out bool hasPrimary, out bool hasSecondary,
             out string priName, out string secName)
         {
@@ -293,6 +423,7 @@ namespace Si_UnitBalance
         private static void GetUnitParamGroups(string unitName, out string[] groupNames, out string[][] groupKeys)
         {
             GetUnitWeaponInfo(unitName, out bool hasPri, out bool hasSec, out string priName, out string secName);
+            GetWeaponPDObjects(unitName, out object priPDObj, out object secPDObj);
 
             // Detect component types on the prefab for dynamic param selection
             bool hasSoldier = false, hasVT = false, hasWheeled = false, hasHovered = false, hasAir = false, hasDecapod = false;
@@ -342,42 +473,56 @@ namespace Si_UnitBalance
             // Armed structures must be checked first: they have VT but use non-prefixed keys
             if (isStructure && hasVT)
             {
-                // Armed structure: full weapon params (non-prefixed shared keys)
+                // Armed structure: dynamic damage sub-type keys (non-prefixed) + standard weapon params
                 string label = "Damage & Weapons";
                 if (!string.IsNullOrEmpty(priName)) label += " (" + priName + ")";
                 names.Add(label);
-                keys.Add(new[] { "damage_mult", "proj_speed_mult", "proj_lifetime_mult", "range_mult",
-                                 "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult" });
+                var wk = new List<string>();
+                wk.AddRange(GetDamageKeysForProjectile(priPDObj));
+                wk.AddRange(new[] { "proj_speed_mult", "proj_lifetime_mult", "range_mult",
+                                    "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult" });
+                keys.Add(wk.ToArray());
             }
             else if (hasPri && hasVT)
             {
-                // Vehicle primary weapon: all 7 params
+                // Vehicle primary weapon: dynamic damage keys + standard vehicle weapon params
                 string label = "Primary Weapon";
                 if (!string.IsNullOrEmpty(priName)) label += " (" + priName + ")";
                 names.Add(label);
-                var wk = new string[_weaponParamKeys.Length];
-                for (int i = 0; i < _weaponParamKeys.Length; i++) wk[i] = "pri_" + _weaponParamKeys[i];
-                keys.Add(wk);
+                var wk = new List<string>();
+                foreach (string dk in GetDamageKeysForProjectile(priPDObj)) wk.Add("pri_" + dk);
+                wk.AddRange(new[] { "pri_proj_speed_mult", "pri_proj_lifetime_mult",
+                                    "pri_accuracy_mult", "pri_magazine_mult",
+                                    "pri_fire_rate_mult", "pri_reload_time_mult" });
+                keys.Add(wk.ToArray());
             }
             else if (hasPri && hasDecapod)
             {
-                // Creature primary weapon: 4 params if ranged, 1 if melee
+                // Creature primary weapon: dynamic damage keys if ranged, single damage_mult if melee
                 string label = "Primary Weapon";
                 if (!string.IsNullOrEmpty(priName)) label += " (" + priName + ")";
                 names.Add(label);
                 bool isMelee = string.Equals(priName, "Melee", StringComparison.OrdinalIgnoreCase);
-                var paramSet = isMelee ? _weaponParamKeysCreatureMelee : _weaponParamKeysCreatureRanged;
-                var wk = new string[paramSet.Length];
-                for (int i = 0; i < paramSet.Length; i++) wk[i] = "pri_" + paramSet[i];
-                keys.Add(wk);
+                var wk = new List<string>();
+                if (isMelee)
+                {
+                    wk.Add("pri_damage_mult");
+                }
+                else
+                {
+                    foreach (string dk in GetDamageKeysForProjectile(priPDObj)) wk.Add("pri_" + dk);
+                    wk.AddRange(new[] { "pri_proj_speed_mult", "pri_proj_lifetime_mult", "pri_accuracy_mult" });
+                }
+                keys.Add(wk.ToArray());
             }
             else if (!hasPri && hasSoldier)
             {
-                // Infantry primary weapon: 3 params (dmg/spd/life only)
+                // Infantry primary weapon: dynamic damage keys + speed/lifetime
                 names.Add("Primary Weapon");
-                var wk = new string[_weaponParamKeysInfantry.Length];
-                for (int i = 0; i < _weaponParamKeysInfantry.Length; i++) wk[i] = "pri_" + _weaponParamKeysInfantry[i];
-                keys.Add(wk);
+                var wk = new List<string>();
+                foreach (string dk in GetDamageKeysForProjectile(priPDObj)) wk.Add("pri_" + dk);
+                wk.AddRange(new[] { "pri_proj_speed_mult", "pri_proj_lifetime_mult" });
+                keys.Add(wk.ToArray());
             }
 
             // Secondary weapon: only for mobile units (structures don't use pri_/sec_ prefixes)
@@ -385,25 +530,35 @@ namespace Si_UnitBalance
             {
                 if (hasSec && hasVT)
                 {
-                    // Vehicle secondary weapon: all 7 params
+                    // Vehicle secondary weapon: dynamic damage keys + standard params
                     string label = "Secondary Weapon";
                     if (!string.IsNullOrEmpty(secName)) label += " (" + secName + ")";
                     names.Add(label);
-                    var wk = new string[_weaponParamKeys.Length];
-                    for (int i = 0; i < _weaponParamKeys.Length; i++) wk[i] = "sec_" + _weaponParamKeys[i];
-                    keys.Add(wk);
+                    var wk = new List<string>();
+                    foreach (string dk in GetDamageKeysForProjectile(secPDObj)) wk.Add("sec_" + dk);
+                    wk.AddRange(new[] { "sec_proj_speed_mult", "sec_proj_lifetime_mult",
+                                        "sec_accuracy_mult", "sec_magazine_mult",
+                                        "sec_fire_rate_mult", "sec_reload_time_mult" });
+                    keys.Add(wk.ToArray());
                 }
                 else if (hasSec && hasDecapod)
                 {
-                    // Creature secondary weapon: melee → 1 param (damage only)
+                    // Creature secondary weapon: melee → damage_mult, ranged → dynamic damage keys
                     string label = "Secondary Weapon";
                     if (!string.IsNullOrEmpty(secName)) label += " (" + secName + ")";
                     names.Add(label);
                     bool isMelee = string.Equals(secName, "Melee", StringComparison.OrdinalIgnoreCase);
-                    var paramSet = isMelee ? _weaponParamKeysCreatureMelee : _weaponParamKeysCreatureRanged;
-                    var wk = new string[paramSet.Length];
-                    for (int i = 0; i < paramSet.Length; i++) wk[i] = "sec_" + paramSet[i];
-                    keys.Add(wk);
+                    var wk = new List<string>();
+                    if (isMelee)
+                    {
+                        wk.Add("sec_damage_mult");
+                    }
+                    else
+                    {
+                        foreach (string dk in GetDamageKeysForProjectile(secPDObj)) wk.Add("sec_" + dk);
+                        wk.AddRange(new[] { "sec_proj_speed_mult", "sec_proj_lifetime_mult", "sec_accuracy_mult" });
+                    }
+                    keys.Add(wk.ToArray());
                 }
             }
 
@@ -777,6 +932,62 @@ namespace Si_UnitBalance
                                 }
                                 break;
                             }
+                            case "impact_damage_mult":
+                            case "splash_damage_mult":
+                            case "penetrating_damage_mult":
+                            case "ricochet_damage_mult":
+                            {
+                                string dmgField = key == "impact_damage_mult" ? "m_fImpactDamage"
+                                    : key == "splash_damage_mult" ? "m_fSplashDamageMax"
+                                    : key == "penetrating_damage_mult" ? "m_fPenetratingDamage"
+                                    : "m_fRicochetDamage";
+                                if (vtComp != null)
+                                {
+                                    var pdField = vtComp.GetType().GetField("PrimaryProjectile", flags);
+                                    if (pdField != null)
+                                    {
+                                        var pd = pdField.GetValue(vtComp);
+                                        if (pd != null)
+                                        {
+                                            float dmg = GetFloatMember(pd, dmgField);
+                                            if (dmg > 0) val = dmg.ToString("F0");
+                                        }
+                                    }
+                                }
+                                if (val == null && twPD != null)
+                                {
+                                    float dmg = GetFloatMember(twPD, dmgField);
+                                    if (dmg > 0) val = dmg.ToString("F0");
+                                }
+                                break;
+                            }
+                            case "splash_radius_max_mult":
+                            case "splash_radius_min_mult":
+                            case "splash_radius_pow_mult":
+                            {
+                                string srField = key == "splash_radius_max_mult" ? "m_fSplashDamageRadiusMax"
+                                    : key == "splash_radius_min_mult" ? "m_fSplashDamageRadiusMin"
+                                    : "m_fSplashDamageRadiusPow";
+                                if (vtComp != null)
+                                {
+                                    var pdField = vtComp.GetType().GetField("PrimaryProjectile", flags);
+                                    if (pdField != null)
+                                    {
+                                        var pd = pdField.GetValue(vtComp);
+                                        if (pd != null)
+                                        {
+                                            float v = GetFloatMember(pd, srField);
+                                            if (v > 0) val = v.ToString("F1");
+                                        }
+                                    }
+                                }
+                                if (val == null && twPD != null)
+                                {
+                                    float v = GetFloatMember(twPD, srField);
+                                    if (v > 0) val = v.ToString("F1");
+                                }
+                                break;
+                            }
                             case "range_mult":
                                 if (vtComp != null)
                                 {
@@ -1130,6 +1341,78 @@ namespace Si_UnitBalance
                                             }
                                         }
                                         break;
+                                    case "impact_damage_mult":
+                                    case "splash_damage_mult":
+                                    case "penetrating_damage_mult":
+                                    case "ricochet_damage_mult":
+                                    {
+                                        string pdField2 = baseKey == "impact_damage_mult" ? "m_fImpactDamage"
+                                            : baseKey == "splash_damage_mult" ? "m_fSplashDamageMax"
+                                            : baseKey == "penetrating_damage_mult" ? "m_fPenetratingDamage"
+                                            : "m_fRicochetDamage";
+                                        if (weaponPD != null)
+                                        {
+                                            float dmg = GetFloatMember(weaponPD, pdField2);
+                                            if (dmg > 0) val = dmg.ToString("F0");
+                                        }
+                                        if (val == null && decapodComp != null)
+                                        {
+                                            var af = decapodComp.GetType().GetField(atkField, BindingFlags.Public | BindingFlags.Instance);
+                                            if (af != null)
+                                            {
+                                                var atk = af.GetValue(decapodComp);
+                                                if (atk != null)
+                                                {
+                                                    var pdF3 = atk.GetType().GetField("AttackProjectileData", BindingFlags.Public | BindingFlags.Instance);
+                                                    if (pdF3 != null)
+                                                    {
+                                                        var pd = pdF3.GetValue(atk);
+                                                        if (pd != null)
+                                                        {
+                                                            float dmg = GetFloatMember(pd, pdField2);
+                                                            if (dmg > 0) val = dmg.ToString("F0");
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    }
+                                    case "splash_radius_max_mult":
+                                    case "splash_radius_min_mult":
+                                    case "splash_radius_pow_mult":
+                                    {
+                                        string srField2 = baseKey == "splash_radius_max_mult" ? "m_fSplashDamageRadiusMax"
+                                            : baseKey == "splash_radius_min_mult" ? "m_fSplashDamageRadiusMin"
+                                            : "m_fSplashDamageRadiusPow";
+                                        if (weaponPD != null)
+                                        {
+                                            float v = GetFloatMember(weaponPD, srField2);
+                                            if (v > 0) val = v.ToString("F1");
+                                        }
+                                        if (val == null && decapodComp != null)
+                                        {
+                                            var af = decapodComp.GetType().GetField(atkField, BindingFlags.Public | BindingFlags.Instance);
+                                            if (af != null)
+                                            {
+                                                var atk = af.GetValue(decapodComp);
+                                                if (atk != null)
+                                                {
+                                                    var pdF4 = atk.GetType().GetField("AttackProjectileData", BindingFlags.Public | BindingFlags.Instance);
+                                                    if (pdF4 != null)
+                                                    {
+                                                        var pd = pdF4.GetValue(atk);
+                                                        if (pd != null)
+                                                        {
+                                                            float v = GetFloatMember(pd, srField2);
+                                                            if (v > 0) val = v.ToString("F1");
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    }
                                     case "proj_speed_mult":
                                         if (weaponPD != null)
                                         {

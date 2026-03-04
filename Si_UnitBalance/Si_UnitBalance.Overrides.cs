@@ -191,9 +191,101 @@ namespace Si_UnitBalance
             "m_fImpactDamage", "m_fRicochetDamage", "m_fSplashDamageMax", "m_fPenetratingDamage"
         };
 
+        // Mapping from ProjectileData field name to sub-type key prefix for composite key lookup
+        private static readonly Dictionary<string, string> _damageFieldToSubtype = new Dictionary<string, string> {
+            { "m_fImpactDamage",      "impact:" },
+            { "m_fRicochetDamage",    "ricochet:" },
+            { "m_fSplashDamageMax",   "splash:" },
+            { "m_fPenetratingDamage", "penetrating:" }
+        };
+
+        // Units where the primary weapon is NOT on the first VehicleTurret (vtIndex 0).
+        // Maps unit name → vtIndex of the primary weapon's VehicleTurret.
+        // Default (not listed) = 0 (first VT is primary).
+        private static readonly Dictionary<string, int> _vtPriIndex = new Dictionary<string, int> {
+            { "Bomber", 1 },         // cannon on 2nd VT, bombs on 1st
+            { "Freighter", 1 },      // cannon on 2nd VT, bomb on 1st
+            { "Shuttle", 1 },        // cannon on 2nd VT (only weapon)
+            { "Gunship", 1 },        // gun on 2nd VT
+            { "Platoon Hauler", 1 }, // weapon on 2nd VT
+        };
+
+        /// <summary>
+        /// Resolve the effective damage multiplier for a specific damage field.
+        /// Priority: pri_impact_damage_mult > impact_damage_mult > pri_damage_mult > damage_mult > 1.0
+        /// </summary>
+        private static float GetDamageFieldMult(string unitName, string weapon, string fieldName)
+        {
+            string subtype = _damageFieldToSubtype[fieldName];
+
+            // 1. Most specific: weapon + subtype (e.g., "pri:impact:Hover Tank")
+            if (!string.IsNullOrEmpty(weapon) && _damageMultipliers.TryGetValue(weapon + ":" + subtype + unitName, out float v1))
+                return v1;
+            // 2. Subtype only (e.g., "impact:Hover Tank")
+            if (_damageMultipliers.TryGetValue(subtype + unitName, out float v2))
+                return v2;
+            // 3. Weapon blanket (e.g., "pri:Hover Tank")
+            if (!string.IsNullOrEmpty(weapon) && _damageMultipliers.TryGetValue(weapon + ":" + unitName, out float v3))
+                return v3;
+            // 4. Unit blanket (e.g., "Hover Tank")
+            if (_damageMultipliers.TryGetValue(unitName, out float v4))
+                return v4;
+            return 1f;
+        }
+
+        /// <summary>
+        /// Checks if any damage multiplier (blanket or sub-type) or splash radius multiplier is set for a unit.
+        /// </summary>
+        private static bool HasAnyDamageMult(string unitName)
+        {
+            string[] dmgPrefixes = { "", "pri:", "sec:", "impact:", "ricochet:", "splash:", "penetrating:",
+                                  "pri:impact:", "pri:ricochet:", "pri:splash:", "pri:penetrating:",
+                                  "sec:impact:", "sec:ricochet:", "sec:splash:", "sec:penetrating:" };
+            foreach (string prefix in dmgPrefixes)
+            {
+                if (_damageMultipliers.ContainsKey(prefix + unitName))
+                    return true;
+            }
+            string[] splashPrefixes = { "max:", "min:", "pow:", "pri:max:", "pri:min:", "pri:pow:",
+                                        "sec:max:", "sec:min:", "sec:pow:" };
+            foreach (string prefix in splashPrefixes)
+            {
+                if (_splashRadiusMultipliers.ContainsKey(prefix + unitName))
+                    return true;
+            }
+            return false;
+        }
+
+        // Splash radius fields to scale on ProjectileData (only when splash damage exists)
+        private static readonly string[] _splashRadiusFields = {
+            "m_fSplashDamageRadiusMax", "m_fSplashDamageRadiusMin", "m_fSplashDamageRadiusPow"
+        };
+
+        private static readonly Dictionary<string, string> _splashRadiusFieldToKey = new Dictionary<string, string> {
+            { "m_fSplashDamageRadiusMax", "max:" },
+            { "m_fSplashDamageRadiusMin", "min:" },
+            { "m_fSplashDamageRadiusPow", "pow:" }
+        };
+
+        /// <summary>
+        /// Resolve the effective splash radius multiplier for a specific field.
+        /// Priority: pri_splash_radius_max_mult > splash_radius_max_mult > 1.0
+        /// </summary>
+        private static float GetSplashRadiusMult(string unitName, string weapon, string fieldName)
+        {
+            string key = _splashRadiusFieldToKey[fieldName];
+            // 1. Weapon-specific (e.g., "pri:max:Hover Tank")
+            if (!string.IsNullOrEmpty(weapon) && _splashRadiusMultipliers.TryGetValue(weapon + ":" + key + unitName, out float v1))
+                return v1;
+            // 2. Shared (e.g., "max:Hover Tank")
+            if (_splashRadiusMultipliers.TryGetValue(key + unitName, out float v2))
+                return v2;
+            return 1f;
+        }
+
         private static void ApplyProjectileDamageOverrides(bool useOM)
         {
-            if (_damageMultipliers.Count == 0 && _projectileOverrides.Count == 0) return;
+            if (_damageMultipliers.Count == 0 && _splashRadiusMultipliers.Count == 0 && _projectileOverrides.Count == 0) return;
 
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
             int applied = 0;
@@ -205,12 +297,13 @@ namespace Si_UnitBalance
                 string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
 
-                bool hasDamageMult = HasAnyWeaponMult(_damageMultipliers, name);
+                bool hasDamageMult = HasAnyDamageMult(name);
                 bool hasProjOverrides = _projectileOverrides.TryGetValue(name, out var unitProjOverrides);
                 if (!hasDamageMult && !hasProjOverrides) continue;
 
                 var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
                 bool anyApplied = false;
+                int vtIndex = 0; // Track VehicleTurret index for multi-turret units
 
                 foreach (var comp in childComps)
                 {
@@ -252,14 +345,16 @@ namespace Si_UnitBalance
                             }
                             else if (hasDamageMult)
                             {
-                                // Resolve per-weapon damage mult (pri_/sec_ override, then shared fallback)
-                                string weapon = projFieldName.StartsWith("Primary") ? "pri" : "sec";
-                                float effectiveDmgMult = GetWeaponMult(_damageMultipliers, name, weapon);
-                                if (Math.Abs(effectiveDmgMult - 1f) > 0.001f)
-                                {
-                                    ScaleProjectileDamage(pdObj, pdName, effectiveDmgMult, modifiedPD, useOM, name);
-                                    anyApplied = true;
-                                }
+                                // Determine weapon slot based on VT index and turret mapping
+                                int priIdx = 0;
+                                _vtPriIndex.TryGetValue(name, out priIdx);
+                                string weapon;
+                                if (vtIndex == priIdx)
+                                    weapon = projFieldName.StartsWith("Primary") ? "pri" : "sec";
+                                else
+                                    weapon = "sec";
+                                ScaleProjectileDamage(pdObj, pdName, name, weapon, modifiedPD, useOM);
+                                anyApplied = true;
                             }
                         }
                     }
@@ -312,12 +407,8 @@ namespace Si_UnitBalance
                                     else if (hasDamageMult)
                                     {
                                         string weapon = attackFieldName == "AttackPrimary" ? "pri" : "sec";
-                                        float effectiveDmgMult = GetWeaponMult(_damageMultipliers, name, weapon);
-                                        if (Math.Abs(effectiveDmgMult - 1f) > 0.001f)
-                                        {
-                                            ScaleProjectileDamage(pdObj, pdName, effectiveDmgMult, modifiedPD, useOM, name);
-                                            anyApplied = true;
-                                        }
+                                        ScaleProjectileDamage(pdObj, pdName, name, weapon, modifiedPD, useOM);
+                                        anyApplied = true;
                                     }
                                 }
                             }
@@ -349,26 +440,51 @@ namespace Si_UnitBalance
                 MelonLogger.Msg($"[DMG] Applied projectile/melee damage overrides to {applied} units");
         }
 
-        private static void ScaleProjectileDamage(object pdObj, string pdName, float dmgMult, HashSet<string> modifiedPD, bool useOM, string unitName)
+        private static void ScaleProjectileDamage(object pdObj, string pdName, string unitName, string weapon, HashSet<string> modifiedPD, bool useOM)
         {
             string pdTarget = useOM ? $"A:{pdName}.asset" : null;
             int scaled = 0;
+            bool hasSplash = GetBoolMember(pdObj, "m_bSplash");
+            bool hasPen = GetBoolMember(pdObj, "m_bPenetrating");
 
             foreach (string fieldName in _damageFields)
             {
+                // Skip splash damage field if m_bSplash is disabled (splash not active even if value > 0)
+                if (!hasSplash && fieldName == "m_fSplashDamageMax") continue;
+                // Skip penetrating damage field if m_bPenetrating is disabled
+                if (!hasPen && fieldName == "m_fPenetratingDamage") continue;
                 float orig = GetFloatMember(pdObj, fieldName);
                 if (orig <= 0) continue;
-                float newVal = orig * dmgMult;
+                float fieldMult = GetDamageFieldMult(unitName, weapon, fieldName);
+                if (Math.Abs(fieldMult - 1f) <= 0.001f) continue;
+                float newVal = orig * fieldMult;
                 if (useOM)
                     OMSetFloat(pdTarget, fieldName, newVal);
                 else
                     SetFloatMember(pdObj, fieldName, newVal);
-                MelonLogger.Msg($"[DMG] {unitName} -> {pdName}.{fieldName}: {orig:F1} -> {newVal:F1} (x{dmgMult:F2}){(useOM ? " (OM)" : "")}");
+                MelonLogger.Msg($"[DMG] {unitName} -> {pdName}.{fieldName}: {orig:F1} -> {newVal:F1} (x{fieldMult:F2}){(useOM ? " (OM)" : "")}");
                 scaled++;
             }
 
-            if (scaled == 0)
-                MelonLogger.Warning($"[DMG] {unitName} -> {pdName}: no damage fields found to scale");
+            // Scale splash radius fields (only if m_bSplash is enabled and has splash damage)
+            float splashDmg = GetFloatMember(pdObj, "m_fSplashDamageMax");
+            if (hasSplash && splashDmg > 0 && _splashRadiusMultipliers.Count > 0)
+            {
+                foreach (string srField in _splashRadiusFields)
+                {
+                    float origSR = GetFloatMember(pdObj, srField);
+                    if (origSR <= 0) continue;
+                    float srMult = GetSplashRadiusMult(unitName, weapon, srField);
+                    if (Math.Abs(srMult - 1f) <= 0.001f) continue;
+                    float newSR = origSR * srMult;
+                    if (useOM)
+                        OMSetFloat(pdTarget, srField, newSR);
+                    else
+                        SetFloatMember(pdObj, srField, newSR);
+                    MelonLogger.Msg($"[DMG] {unitName} -> {pdName}.{srField}: {origSR:F1} -> {newSR:F1} (x{srMult:F2}){(useOM ? " (OM)" : "")}");
+                    scaled++;
+                }
+            }
 
             modifiedPD.Add(pdName);
         }
@@ -418,6 +534,7 @@ namespace Si_UnitBalance
 
                 bool foundProjectileOnComponent = false;
                 var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
+                int vtIndex = 0; // Track VehicleTurret index for multi-turret units
 
                 foreach (var comp in childComps)
                 {
@@ -429,10 +546,13 @@ namespace Si_UnitBalance
                         // NOTE: Sensor.TargetingDistance is NOT scaled by range_mult.
                         // Use the explicit "target_distance" config param to set it.
 
-                        // VehicleTurret.AimDistance (shared field — use primary range mult)
+                        // VehicleTurret.AimDistance (per-turret — use weapon mapping)
                         if (typeName == "VehicleTurret")
                         {
-                            float vtRangeMult = GetWeaponMult(_rangeMultipliers, name, "pri");
+                            int priIdx = 0;
+                            _vtPriIndex.TryGetValue(name, out priIdx);
+                            string vtWeapon = (vtIndex == priIdx) ? "pri" : "sec";
+                            float vtRangeMult = GetWeaponMult(_rangeMultipliers, name, vtWeapon);
                             if (Math.Abs(vtRangeMult - 1f) > 0.001f)
                             {
                                 var adField = comp.GetType().GetField("AimDistance",
@@ -611,7 +731,14 @@ namespace Si_UnitBalance
 
                         foreach (string prefix in new[] { "Primary", "Secondary" })
                         {
-                            string weapon = prefix == "Primary" ? "pri" : "sec";
+                            // Determine weapon slot based on VT index and turret mapping
+                            int priIdx = 0;
+                            _vtPriIndex.TryGetValue(name, out priIdx);
+                            string weapon;
+                            if (vtIndex == priIdx)
+                                weapon = prefix == "Primary" ? "pri" : "sec";
+                            else
+                                weapon = "sec";
 
                             if (hasReload)
                             {
@@ -685,6 +812,7 @@ namespace Si_UnitBalance
                                 }
                             }
                         }
+                        vtIndex++;
                     }
 
                     // Find ProjectileData references on components (per-weapon resolution by field name)
@@ -703,8 +831,22 @@ namespace Si_UnitBalance
                             try { pdName = ((UnityEngine.Object)pdObj).name; } catch { continue; }
                             if (string.IsNullOrEmpty(pdName) || modifiedPD.Contains(pdName)) continue;
 
-                            // Determine weapon slot from field name (Secondary* -> sec, else pri)
-                            string weapon = field.Name.StartsWith("Secondary") ? "sec" : "pri";
+                            // Determine weapon slot from turret mapping and field name
+                            string weapon;
+                            if (typeName == "VehicleTurret")
+                            {
+                                int priIdx = 0;
+                                _vtPriIndex.TryGetValue(name, out priIdx);
+                                int currentVtIdx = vtIndex - 1; // vtIndex already incremented
+                                if (currentVtIdx == priIdx)
+                                    weapon = field.Name.StartsWith("Secondary") ? "sec" : "pri";
+                                else
+                                    weapon = "sec";
+                            }
+                            else
+                            {
+                                weapon = field.Name.StartsWith("Secondary") ? "sec" : "pri";
+                            }
                             float effRange = GetWeaponMult(_rangeMultipliers, name, weapon);
                             float effSpeed = GetWeaponMult(_speedMultipliers, name, weapon);
                             float effLifetime = GetWeaponMult(_lifetimeMultipliers, name, weapon);
@@ -1492,6 +1634,17 @@ namespace Si_UnitBalance
             }
 
             return totalModified;
+        }
+
+        // Helper: get bool field or property (Il2Cpp exposes fields as properties)
+        private static bool GetBoolMember(object obj, string name)
+        {
+            var type = obj.GetType();
+            var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null) return (bool)field.GetValue(obj);
+            var prop = type.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (prop != null) return (bool)prop.GetValue(obj);
+            return false;
         }
 
         // Helper: get/set float field or property (Il2Cpp exposes fields as properties)

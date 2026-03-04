@@ -560,7 +560,8 @@ namespace Si_UnitBalance
                     // Detection
                     float fowView = 0, targetDist = 0;
 
-                    // Vehicle turret
+                    // Vehicle turret (first VehicleTurret found)
+                    int vtCount = 0;
                     float vtFireInterval = 0, vtMuzzleSpread = 0;
                     int vtMagazine = 0, vtShotCount = 0;
                     float vtReloadTime = 0;
@@ -574,6 +575,14 @@ namespace Si_UnitBalance
                     float vtImpactDmg2 = 0, vtRicochetDmg2 = 0, vtSplashDmg2 = 0, vtPenDmg2 = 0;
                     bool vtHasSplash2 = false, vtHasPen2 = false, vtInstantHit2 = false;
                     float vtProjSpeed2 = 0, vtProjLifetime2 = 0;
+                    // Second VehicleTurret (vt3_ = its primary weapon)
+                    float vt3FireInterval = 0, vt3MuzzleSpread = 0;
+                    int vt3Magazine = 0, vt3ShotCount = 0;
+                    float vt3ReloadTime = 0;
+                    string vt3ProjName = "";
+                    float vt3ImpactDmg = 0, vt3RicochetDmg = 0, vt3SplashDmg = 0, vt3PenDmg = 0;
+                    bool vt3HasSplash = false, vt3HasPen = false, vt3InstantHit = false;
+                    float vt3ProjSpeed = 0, vt3ProjLifetime = 0;
                     // Creature projectile damage
                     float projImpactDmg = 0, projRicochetDmg = 0, projSplashDmg = 0;
                     float projImpactDmg2 = 0, projRicochetDmg2 = 0, projSplashDmg2 = 0;
@@ -708,88 +717,98 @@ namespace Si_UnitBalance
                             }
 
                             // VehicleTurret: weapon data + projectile damage
+                            // Supports up to 2 VehicleTurrets: first → vt_/vt2_, second → vt3_
                             if (tn == "VehicleTurret")
                             {
-                                try { var f = ct.GetField("PrimaryFireInterval", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtFireInterval = (float)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("PrimaryMuzzleSpread", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMuzzleSpread = (float)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("PrimaryMagazineSize", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMagazine = (int)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("PrimaryReloadTime", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtReloadTime = (float)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("PrimaryShotCount", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtShotCount = (int)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("SecondaryFireInterval", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtFireIntervalSec = (float)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("SecondaryMuzzleSpread", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMuzzleSpreadSec = (float)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("SecondaryMagazineSize", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMagazineSec = (int)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("SecondaryReloadTime", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtReloadTimeSec = (float)f.GetValue(comp); } catch { }
-                                try { var f = ct.GetField("SecondaryShotCount", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtShotCountSec = (int)f.GetValue(comp); } catch { }
-
-                                // Read PrimaryProjectileData
-                                try
+                                vtCount++;
+                                if (vtCount == 1)
                                 {
-                                    object pdObj = null;
-                                    var pf = ct.GetField("PrimaryProjectileData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                    if (pf != null) pdObj = pf.GetValue(comp);
-                                    if (pdObj != null)
-                                    {
-                                        vtProjName = (pdObj as UnityEngine.Object)?.name ?? "";
-                                        var pdt = pdObj.GetType();
-                                        try { vtImpactDmg = GetFloatField(pdt, pdObj, "m_fImpactDamage"); } catch { }
-                                        try { vtRicochetDmg = GetFloatField(pdt, pdObj, "m_fRicochetDamage"); } catch { }
-                                        try { vtSplashDmg = GetFloatField(pdt, pdObj, "m_fSplashDamageMax"); } catch { }
-                                        try { vtPenDmg = GetFloatField(pdt, pdObj, "m_fPenetratingDamage"); } catch { }
-                                        try { vtProjSpeed = GetFloatField(pdt, pdObj, "m_fBaseSpeed"); } catch { }
-                                        try { vtProjLifetime = GetFloatField(pdt, pdObj, "m_fLifeTime"); } catch { }
-                                        try
-                                        {
-                                            var ihf = pdt.GetField("m_bSplash", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                            if (ihf != null) vtHasSplash = (bool)ihf.GetValue(pdObj);
-                                        } catch { }
-                                        try
-                                        {
-                                            var ihf = pdt.GetField("m_bPenetrating", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                            if (ihf != null) vtHasPen = (bool)ihf.GetValue(pdObj);
-                                        } catch { }
-                                        try
-                                        {
-                                            var ihf = pdt.GetField("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                            if (ihf != null) vtInstantHit = (bool)ihf.GetValue(pdObj);
-                                            else { var ihp = pdt.GetProperty("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihp != null) vtInstantHit = (bool)ihp.GetValue(pdObj); }
-                                        } catch { }
-                                    }
-                                } catch { }
+                                    // First VehicleTurret → vt_ (primary) and vt2_ (secondary of same turret)
+                                    try { var f = ct.GetField("PrimaryFireInterval", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtFireInterval = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryMuzzleSpread", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMuzzleSpread = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryMagazineSize", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMagazine = (int)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryReloadTime", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtReloadTime = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryShotCount", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtShotCount = (int)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("SecondaryFireInterval", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtFireIntervalSec = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("SecondaryMuzzleSpread", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMuzzleSpreadSec = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("SecondaryMagazineSize", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtMagazineSec = (int)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("SecondaryReloadTime", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtReloadTimeSec = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("SecondaryShotCount", BindingFlags.Public | BindingFlags.Instance); if (f != null) vtShotCountSec = (int)f.GetValue(comp); } catch { }
 
-                                // Read SecondaryProjectileData
-                                try
-                                {
-                                    object pdObj = null;
-                                    var pf = ct.GetField("SecondaryProjectileData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                    if (pf != null) pdObj = pf.GetValue(comp);
-                                    if (pdObj != null)
+                                    // Read PrimaryProjectileData
+                                    try
                                     {
-                                        vtProjName2 = (pdObj as UnityEngine.Object)?.name ?? "";
-                                        var pdt = pdObj.GetType();
-                                        try { vtImpactDmg2 = GetFloatField(pdt, pdObj, "m_fImpactDamage"); } catch { }
-                                        try { vtRicochetDmg2 = GetFloatField(pdt, pdObj, "m_fRicochetDamage"); } catch { }
-                                        try { vtSplashDmg2 = GetFloatField(pdt, pdObj, "m_fSplashDamageMax"); } catch { }
-                                        try { vtPenDmg2 = GetFloatField(pdt, pdObj, "m_fPenetratingDamage"); } catch { }
-                                        try { vtProjSpeed2 = GetFloatField(pdt, pdObj, "m_fBaseSpeed"); } catch { }
-                                        try { vtProjLifetime2 = GetFloatField(pdt, pdObj, "m_fLifeTime"); } catch { }
-                                        try
+                                        object pdObj = null;
+                                        var pf = ct.GetField("PrimaryProjectileData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                        if (pf != null) pdObj = pf.GetValue(comp);
+                                        if (pdObj != null)
                                         {
-                                            var ihf = pdt.GetField("m_bSplash", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                            if (ihf != null) vtHasSplash2 = (bool)ihf.GetValue(pdObj);
-                                        } catch { }
-                                        try
+                                            vtProjName = (pdObj as UnityEngine.Object)?.name ?? "";
+                                            var pdt = pdObj.GetType();
+                                            try { vtImpactDmg = GetFloatField(pdt, pdObj, "m_fImpactDamage"); } catch { }
+                                            try { vtRicochetDmg = GetFloatField(pdt, pdObj, "m_fRicochetDamage"); } catch { }
+                                            try { vtSplashDmg = GetFloatField(pdt, pdObj, "m_fSplashDamageMax"); } catch { }
+                                            try { vtPenDmg = GetFloatField(pdt, pdObj, "m_fPenetratingDamage"); } catch { }
+                                            try { vtProjSpeed = GetFloatField(pdt, pdObj, "m_fBaseSpeed"); } catch { }
+                                            try { vtProjLifetime = GetFloatField(pdt, pdObj, "m_fLifeTime"); } catch { }
+                                            try { var ihf = pdt.GetField("m_bSplash", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vtHasSplash = (bool)ihf.GetValue(pdObj); } catch { }
+                                            try { var ihf = pdt.GetField("m_bPenetrating", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vtHasPen = (bool)ihf.GetValue(pdObj); } catch { }
+                                            try { var ihf = pdt.GetField("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vtInstantHit = (bool)ihf.GetValue(pdObj); else { var ihp = pdt.GetProperty("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihp != null) vtInstantHit = (bool)ihp.GetValue(pdObj); } } catch { }
+                                        }
+                                    } catch { }
+
+                                    // Read SecondaryProjectileData
+                                    try
+                                    {
+                                        object pdObj = null;
+                                        var pf = ct.GetField("SecondaryProjectileData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                        if (pf != null) pdObj = pf.GetValue(comp);
+                                        if (pdObj != null)
                                         {
-                                            var ihf = pdt.GetField("m_bPenetrating", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                            if (ihf != null) vtHasPen2 = (bool)ihf.GetValue(pdObj);
-                                        } catch { }
-                                        try
+                                            vtProjName2 = (pdObj as UnityEngine.Object)?.name ?? "";
+                                            var pdt = pdObj.GetType();
+                                            try { vtImpactDmg2 = GetFloatField(pdt, pdObj, "m_fImpactDamage"); } catch { }
+                                            try { vtRicochetDmg2 = GetFloatField(pdt, pdObj, "m_fRicochetDamage"); } catch { }
+                                            try { vtSplashDmg2 = GetFloatField(pdt, pdObj, "m_fSplashDamageMax"); } catch { }
+                                            try { vtPenDmg2 = GetFloatField(pdt, pdObj, "m_fPenetratingDamage"); } catch { }
+                                            try { vtProjSpeed2 = GetFloatField(pdt, pdObj, "m_fBaseSpeed"); } catch { }
+                                            try { vtProjLifetime2 = GetFloatField(pdt, pdObj, "m_fLifeTime"); } catch { }
+                                            try { var ihf = pdt.GetField("m_bSplash", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vtHasSplash2 = (bool)ihf.GetValue(pdObj); } catch { }
+                                            try { var ihf = pdt.GetField("m_bPenetrating", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vtHasPen2 = (bool)ihf.GetValue(pdObj); } catch { }
+                                            try { var ihf = pdt.GetField("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vtInstantHit2 = (bool)ihf.GetValue(pdObj); else { var ihp = pdt.GetProperty("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihp != null) vtInstantHit2 = (bool)ihp.GetValue(pdObj); } } catch { }
+                                        }
+                                    } catch { }
+                                }
+                                else if (vtCount == 2)
+                                {
+                                    // Second VehicleTurret → vt3_ (its primary weapon only)
+                                    try { var f = ct.GetField("PrimaryFireInterval", BindingFlags.Public | BindingFlags.Instance); if (f != null) vt3FireInterval = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryMuzzleSpread", BindingFlags.Public | BindingFlags.Instance); if (f != null) vt3MuzzleSpread = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryMagazineSize", BindingFlags.Public | BindingFlags.Instance); if (f != null) vt3Magazine = (int)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryReloadTime", BindingFlags.Public | BindingFlags.Instance); if (f != null) vt3ReloadTime = (float)f.GetValue(comp); } catch { }
+                                    try { var f = ct.GetField("PrimaryShotCount", BindingFlags.Public | BindingFlags.Instance); if (f != null) vt3ShotCount = (int)f.GetValue(comp); } catch { }
+
+                                    try
+                                    {
+                                        object pdObj = null;
+                                        var pf = ct.GetField("PrimaryProjectileData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                        if (pf != null) pdObj = pf.GetValue(comp);
+                                        if (pdObj != null)
                                         {
-                                            var ihf = pdt.GetField("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                                            if (ihf != null) vtInstantHit2 = (bool)ihf.GetValue(pdObj);
-                                            else { var ihp = pdt.GetProperty("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihp != null) vtInstantHit2 = (bool)ihp.GetValue(pdObj); }
-                                        } catch { }
-                                    }
-                                } catch { }
+                                            vt3ProjName = (pdObj as UnityEngine.Object)?.name ?? "";
+                                            var pdt = pdObj.GetType();
+                                            try { vt3ImpactDmg = GetFloatField(pdt, pdObj, "m_fImpactDamage"); } catch { }
+                                            try { vt3RicochetDmg = GetFloatField(pdt, pdObj, "m_fRicochetDamage"); } catch { }
+                                            try { vt3SplashDmg = GetFloatField(pdt, pdObj, "m_fSplashDamageMax"); } catch { }
+                                            try { vt3PenDmg = GetFloatField(pdt, pdObj, "m_fPenetratingDamage"); } catch { }
+                                            try { vt3ProjSpeed = GetFloatField(pdt, pdObj, "m_fBaseSpeed"); } catch { }
+                                            try { vt3ProjLifetime = GetFloatField(pdt, pdObj, "m_fLifeTime"); } catch { }
+                                            try { var ihf = pdt.GetField("m_bSplash", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vt3HasSplash = (bool)ihf.GetValue(pdObj); } catch { }
+                                            try { var ihf = pdt.GetField("m_bPenetrating", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vt3HasPen = (bool)ihf.GetValue(pdObj); } catch { }
+                                            try { var ihf = pdt.GetField("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihf != null) vt3InstantHit = (bool)ihf.GetValue(pdObj); else { var ihp = pdt.GetProperty("m_InstantHit", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); if (ihp != null) vt3InstantHit = (bool)ihp.GetValue(pdObj); } } catch { }
+                                        }
+                                    } catch { }
+                                }
                             }
 
                             // CreatureTurret: additional turret for creatures
@@ -998,6 +1017,26 @@ namespace Si_UnitBalance
                     sb.Append($"\"vt2_instant_hit\":{(vtInstantHit2 ? "true" : "false")},");
                     sb.Append($"\"vt2_proj_speed\":{vtProjSpeed2:F1},");
                     sb.Append($"\"vt2_proj_lifetime\":{vtProjLifetime2:F2},");
+                    // Second VehicleTurret (if present)
+                    sb.Append($"\"vt_count\":{vtCount},");
+                    if (vtCount >= 2)
+                    {
+                        sb.Append($"\"vt3_proj\":\"{EscJson(vt3ProjName)}\",");
+                        sb.Append($"\"vt3_fire_interval\":{vt3FireInterval:F4},");
+                        sb.Append($"\"vt3_spread\":{vt3MuzzleSpread:F3},");
+                        sb.Append($"\"vt3_magazine\":{vt3Magazine},");
+                        sb.Append($"\"vt3_reload\":{vt3ReloadTime:F1},");
+                        sb.Append($"\"vt3_shot_count\":{vt3ShotCount},");
+                        sb.Append($"\"vt3_impact_dmg\":{vt3ImpactDmg:F1},");
+                        sb.Append($"\"vt3_ricochet_dmg\":{vt3RicochetDmg:F1},");
+                        sb.Append($"\"vt3_splash_dmg\":{vt3SplashDmg:F1},");
+                        sb.Append($"\"vt3_has_splash\":{(vt3HasSplash ? "true" : "false")},");
+                        sb.Append($"\"vt3_pen_dmg\":{vt3PenDmg:F1},");
+                        sb.Append($"\"vt3_has_pen\":{(vt3HasPen ? "true" : "false")},");
+                        sb.Append($"\"vt3_instant_hit\":{(vt3InstantHit ? "true" : "false")},");
+                        sb.Append($"\"vt3_proj_speed\":{vt3ProjSpeed:F1},");
+                        sb.Append($"\"vt3_proj_lifetime\":{vt3ProjLifetime:F2},");
+                    }
                     // Creature projectile damage
                     sb.Append($"\"proj_impact_dmg\":{projImpactDmg:F1},");
                     sb.Append($"\"proj_ricochet_dmg\":{projRicochetDmg:F1},");

@@ -152,6 +152,9 @@ namespace Si_UnitBalance
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _flySpeedMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // Splash radius multipliers: composite keys like "max:unitName", "pri:max:unitName"
+        private static readonly Dictionary<string, float> _splashRadiusMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         // Tech tier number (1-8) -> build time in seconds
         private static readonly Dictionary<int, float> _techTierTimes = new Dictionary<int, float>();
 
@@ -407,6 +410,7 @@ namespace Si_UnitBalance
                 _lifetimeMultipliers.Clear();
                 _strafeSpeedMultipliers.Clear();
                 _flySpeedMultipliers.Clear();
+                _splashRadiusMultipliers.Clear();
                 _projectileOverrides.Clear();
                 _techTierTimes.Clear();
                 _teleportCooldown = -1f;
@@ -454,6 +458,31 @@ namespace Si_UnitBalance
                         float strafeSpeedMult = overrides["strafe_speed_mult"]?.Value<float>() ?? 1.0f;
                         float flySpeedMult = overrides["fly_speed_mult"]?.Value<float>() ?? 1.0f;
                         float dispenseTimeout = overrides["dispense_timeout"]?.Value<float>() ?? -1f;
+
+                        // Per-damage-subtype multipliers (4 sub-types × 3 scopes)
+                        float impactDmgMult = overrides["impact_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float splashDmgMult = overrides["splash_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float penDmgMult = overrides["penetrating_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float ricochetDmgMult = overrides["ricochet_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float priImpactDmgMult = overrides["pri_impact_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float priSplashDmgMult = overrides["pri_splash_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float priPenDmgMult = overrides["pri_penetrating_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float priRicochetDmgMult = overrides["pri_ricochet_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float secImpactDmgMult = overrides["sec_impact_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float secSplashDmgMult = overrides["sec_splash_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float secPenDmgMult = overrides["sec_penetrating_damage_mult"]?.Value<float>() ?? 1.0f;
+                        float secRicochetDmgMult = overrides["sec_ricochet_damage_mult"]?.Value<float>() ?? 1.0f;
+
+                        // Splash radius multipliers (3 fields × 3 scopes)
+                        float splashRadMaxMult = overrides["splash_radius_max_mult"]?.Value<float>() ?? 1.0f;
+                        float splashRadMinMult = overrides["splash_radius_min_mult"]?.Value<float>() ?? 1.0f;
+                        float splashRadPowMult = overrides["splash_radius_pow_mult"]?.Value<float>() ?? 1.0f;
+                        float priSplashRadMaxMult = overrides["pri_splash_radius_max_mult"]?.Value<float>() ?? 1.0f;
+                        float priSplashRadMinMult = overrides["pri_splash_radius_min_mult"]?.Value<float>() ?? 1.0f;
+                        float priSplashRadPowMult = overrides["pri_splash_radius_pow_mult"]?.Value<float>() ?? 1.0f;
+                        float secSplashRadMaxMult = overrides["sec_splash_radius_max_mult"]?.Value<float>() ?? 1.0f;
+                        float secSplashRadMinMult = overrides["sec_splash_radius_min_mult"]?.Value<float>() ?? 1.0f;
+                        float secSplashRadPowMult = overrides["sec_splash_radius_pow_mult"]?.Value<float>() ?? 1.0f;
 
                         // Per-weapon multipliers (pri_/sec_ prefixed)
                         float priDamageMult = overrides["pri_damage_mult"]?.Value<float>() ?? 1.0f;
@@ -523,6 +552,29 @@ namespace Si_UnitBalance
                         // Store per-weapon multipliers with "pri:"/"sec:" prefix keys
                         if (Math.Abs(priDamageMult - 1.0f) > 0.001f) _damageMultipliers["pri:" + unitName] = priDamageMult;
                         if (Math.Abs(secDamageMult - 1.0f) > 0.001f) _damageMultipliers["sec:" + unitName] = secDamageMult;
+                        // Per-damage-subtype composite keys: "subtype:unitName" and "weapon:subtype:unitName"
+                        if (Math.Abs(impactDmgMult - 1.0f) > 0.001f) _damageMultipliers["impact:" + unitName] = impactDmgMult;
+                        if (Math.Abs(splashDmgMult - 1.0f) > 0.001f) _damageMultipliers["splash:" + unitName] = splashDmgMult;
+                        if (Math.Abs(penDmgMult - 1.0f) > 0.001f) _damageMultipliers["penetrating:" + unitName] = penDmgMult;
+                        if (Math.Abs(ricochetDmgMult - 1.0f) > 0.001f) _damageMultipliers["ricochet:" + unitName] = ricochetDmgMult;
+                        if (Math.Abs(priImpactDmgMult - 1.0f) > 0.001f) _damageMultipliers["pri:impact:" + unitName] = priImpactDmgMult;
+                        if (Math.Abs(priSplashDmgMult - 1.0f) > 0.001f) _damageMultipliers["pri:splash:" + unitName] = priSplashDmgMult;
+                        if (Math.Abs(priPenDmgMult - 1.0f) > 0.001f) _damageMultipliers["pri:penetrating:" + unitName] = priPenDmgMult;
+                        if (Math.Abs(priRicochetDmgMult - 1.0f) > 0.001f) _damageMultipliers["pri:ricochet:" + unitName] = priRicochetDmgMult;
+                        if (Math.Abs(secImpactDmgMult - 1.0f) > 0.001f) _damageMultipliers["sec:impact:" + unitName] = secImpactDmgMult;
+                        if (Math.Abs(secSplashDmgMult - 1.0f) > 0.001f) _damageMultipliers["sec:splash:" + unitName] = secSplashDmgMult;
+                        if (Math.Abs(secPenDmgMult - 1.0f) > 0.001f) _damageMultipliers["sec:penetrating:" + unitName] = secPenDmgMult;
+                        if (Math.Abs(secRicochetDmgMult - 1.0f) > 0.001f) _damageMultipliers["sec:ricochet:" + unitName] = secRicochetDmgMult;
+                        // Splash radius composite keys: "field:unitName" and "weapon:field:unitName"
+                        if (Math.Abs(splashRadMaxMult - 1.0f) > 0.001f) _splashRadiusMultipliers["max:" + unitName] = splashRadMaxMult;
+                        if (Math.Abs(splashRadMinMult - 1.0f) > 0.001f) _splashRadiusMultipliers["min:" + unitName] = splashRadMinMult;
+                        if (Math.Abs(splashRadPowMult - 1.0f) > 0.001f) _splashRadiusMultipliers["pow:" + unitName] = splashRadPowMult;
+                        if (Math.Abs(priSplashRadMaxMult - 1.0f) > 0.001f) _splashRadiusMultipliers["pri:max:" + unitName] = priSplashRadMaxMult;
+                        if (Math.Abs(priSplashRadMinMult - 1.0f) > 0.001f) _splashRadiusMultipliers["pri:min:" + unitName] = priSplashRadMinMult;
+                        if (Math.Abs(priSplashRadPowMult - 1.0f) > 0.001f) _splashRadiusMultipliers["pri:pow:" + unitName] = priSplashRadPowMult;
+                        if (Math.Abs(secSplashRadMaxMult - 1.0f) > 0.001f) _splashRadiusMultipliers["sec:max:" + unitName] = secSplashRadMaxMult;
+                        if (Math.Abs(secSplashRadMinMult - 1.0f) > 0.001f) _splashRadiusMultipliers["sec:min:" + unitName] = secSplashRadMinMult;
+                        if (Math.Abs(secSplashRadPowMult - 1.0f) > 0.001f) _splashRadiusMultipliers["sec:pow:" + unitName] = secSplashRadPowMult;
                         if (Math.Abs(priRangeMult - 1.0f) > 0.001f) _rangeMultipliers["pri:" + unitName] = priRangeMult;
                         if (Math.Abs(secRangeMult - 1.0f) > 0.001f) _rangeMultipliers["sec:" + unitName] = secRangeMult;
                         if (Math.Abs(priSpeedMult - 1.0f) > 0.001f) _speedMultipliers["pri:" + unitName] = priSpeedMult;
