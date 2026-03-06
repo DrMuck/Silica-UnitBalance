@@ -4,6 +4,32 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-06 — LivePropagation Fix, Menu Shortcuts, Run/Sprint Speed
+
+### LivePropagation Il2Cpp Fix
+- **Bug**: `LiveScaleFieldDeclaredOnlyLog` and `LiveScaleFieldDeclaredOnly` only used `GetField()` — on Il2Cpp, Soldier speed fields (`WalkSpeed`, `RunSpeed`, `SprintSpeed`) are properties, not fields
+- Server-side instances of Soldier units never had their speed updated after `!rebalance` (no `[LIVE-DBG]` log entries for Heavy)
+- **Fix**: Added property fallback (`GetProperty()`) to both methods, matching the pattern already used in `ApplyMoveSpeedOverrides`
+- This also fixes accuracy (`MuzzleSpread`) propagation to existing server instances
+
+### Menu Shortcuts Extended
+- Registered `/10` through `/20` as shortcut commands (was `/1`-`/9` only)
+- Unit lists with 10+ items (e.g. Sol structures: 12) can now be selected via shortcuts
+- Error message updated to reflect `/1-/20` range
+
+### Run/Sprint Speed Multipliers
+- Added `run_speed_mult` and `sprint_speed_mult` config params for Soldier (infantry) units
+- `RunSpeed` uses `run_speed_mult` if set, falls back to `move_speed_mult`
+- `SprintSpeed` uses `sprint_speed_mult` if set, falls back to `move_speed_mult`
+- Same pattern as `turbo_speed_mult` / `fly_speed_mult` for vehicles
+- Soldier Movement menu now shows: `move_speed_mult`, `run_speed_mult`, `sprint_speed_mult`, `jump_speed_mult`
+- Applied in both `ApplyMoveSpeedOverrides` (OM path) and `PropagateToLiveInstances`
+
+### Missing Structures (from earlier)
+- Added Research Facility, Radar Station, Silo to Menu.cs, gen_default_config.py, schema.js, default config JSON
+
+---
+
 ## 2026-03-06 — Health Mult Server-Only Limitation
 
 ### Investigation

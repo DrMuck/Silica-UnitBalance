@@ -566,7 +566,7 @@ namespace Si_UnitBalance
             if (hasSoldier)
             {
                 names.Add("Movement");
-                keys.Add(new[] { "move_speed_mult", "jump_speed_mult" });
+                keys.Add(new[] { "move_speed_mult", "run_speed_mult", "sprint_speed_mult", "jump_speed_mult" });
             }
             else if (hasWheeled)
             {
@@ -1140,6 +1140,20 @@ namespace Si_UnitBalance
                                             if (v > 0) { val = v.ToString("F1"); break; }
                                         }
                                     }
+                                }
+                                break;
+                            case "run_speed_mult":
+                                if (soldierComp != null)
+                                {
+                                    float v = GetFloatMember(soldierComp, "RunSpeed");
+                                    if (v > 0) val = v.ToString("F1");
+                                }
+                                break;
+                            case "sprint_speed_mult":
+                                if (soldierComp != null)
+                                {
+                                    float v = GetFloatMember(soldierComp, "SprintSpeed");
+                                    if (v > 0) val = v.ToString("F1");
                                 }
                                 break;
                             case "jump_speed_mult":

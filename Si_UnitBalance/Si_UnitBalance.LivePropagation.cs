@@ -65,13 +65,16 @@ namespace Si_UnitBalance
             bool hasTurboSpeed = _turboSpeedMultipliers.TryGetValue(name, out float turboMult);
             bool hasStrafeSpeed = _strafeSpeedMultipliers.TryGetValue(name, out float strafeMult);
             bool hasFlySpeed = _flySpeedMultipliers.TryGetValue(name, out float flySpeedMult);
+            bool hasRunSpeed = _runSpeedMultipliers.TryGetValue(name, out float runMult);
+            bool hasSprintSpeed = _sprintSpeedMultipliers.TryGetValue(name, out float sprintMult);
             bool hasTurnRadius = _turnRadiusMultipliers.TryGetValue(name, out float turnMult);
             bool hasTargetDist = _targetDistanceOverrides.TryGetValue(name, out float targetDist);
             bool hasFoW = _fowDistanceOverrides.TryGetValue(name, out float fowDist);
             bool hasJump = _jumpSpeedMultipliers.TryGetValue(name, out float jumpMult);
 
             if (!hasRange && !hasReload && !hasAccuracy && !hasMagazine && !hasFireRate
-                && !hasMoveSpeed && !hasTurboSpeed && !hasFlySpeed && !hasStrafeSpeed && !hasTurnRadius
+                && !hasMoveSpeed && !hasTurboSpeed && !hasFlySpeed && !hasRunSpeed && !hasSprintSpeed
+                && !hasStrafeSpeed && !hasTurnRadius
                 && !hasTargetDist && !hasFoW && !hasJump) return;
 
             // Build prefab component lookup by type (for reading vanilla values)
@@ -206,7 +209,7 @@ namespace Si_UnitBalance
                 }
 
                 // --- Any component with speed fields (VehicleHovered, VehicleAir, CreatureDecapod, etc.) ---
-                if ((hasMoveSpeed || hasTurboSpeed || hasFlySpeed) && prefabComp != null)
+                if ((hasMoveSpeed || hasTurboSpeed || hasFlySpeed || hasRunSpeed || hasSprintSpeed) && prefabComp != null)
                 {
                     foreach (string fn in _speedFieldNames)
                     {
@@ -220,6 +223,18 @@ namespace Si_UnitBalance
                         else if (fn == "TurboSpeed")
                         {
                             if (hasTurboSpeed) fieldMult = turboMult;
+                            else if (hasMoveSpeed) fieldMult = moveMult;
+                            else continue;
+                        }
+                        else if (fn == "RunSpeed")
+                        {
+                            if (hasRunSpeed) fieldMult = runMult;
+                            else if (hasMoveSpeed) fieldMult = moveMult;
+                            else continue;
+                        }
+                        else if (fn == "SprintSpeed")
+                        {
+                            if (hasSprintSpeed) fieldMult = sprintMult;
                             else if (hasMoveSpeed) fieldMult = moveMult;
                             else continue;
                         }
@@ -266,18 +281,33 @@ namespace Si_UnitBalance
         }
 
         // Same but DeclaredOnly (for speed fields that need type-specific binding)
+        // Il2Cpp: serialized fields may be properties — try field first, then property
         private static int LiveScaleFieldDeclaredOnly(Component prefab, Component live, string fieldName, float multiplier)
         {
             try
             {
                 var flags = BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance;
+                float vanilla;
+                // Try field first, then property (Il2Cpp fallback)
                 var pfField = prefab.GetType().GetField(fieldName, flags);
-                if (pfField == null || pfField.FieldType != typeof(float)) return 0;
-                var liveField = live.GetType().GetField(fieldName, flags);
-                if (liveField == null) return 0;
-                float vanilla = (float)pfField.GetValue(prefab);
-                if (vanilla <= 0) return 0;
-                liveField.SetValue(live, vanilla * multiplier);
+                if (pfField != null && pfField.FieldType == typeof(float))
+                {
+                    var liveField = live.GetType().GetField(fieldName, flags);
+                    if (liveField == null) return 0;
+                    vanilla = (float)pfField.GetValue(prefab);
+                    if (vanilla <= 0) return 0;
+                    liveField.SetValue(live, vanilla * multiplier);
+                }
+                else
+                {
+                    var pfProp = prefab.GetType().GetProperty(fieldName, flags);
+                    if (pfProp == null || pfProp.PropertyType != typeof(float)) return 0;
+                    var liveProp = live.GetType().GetProperty(fieldName, flags);
+                    if (liveProp == null || !liveProp.CanWrite) return 0;
+                    vanilla = (float)pfProp.GetValue(prefab);
+                    if (vanilla <= 0) return 0;
+                    liveProp.SetValue(live, vanilla * multiplier);
+                }
                 return 1;
             }
             catch { return 0; }
@@ -327,21 +357,42 @@ namespace Si_UnitBalance
         }
 
         // Logging version for DeclaredOnly speed fields
+        // Il2Cpp: serialized fields may be properties — try field first, then property
         private static int LiveScaleFieldDeclaredOnlyLog(Component prefab, Component live, string fieldName, float multiplier, string unitName)
         {
             try
             {
                 var flags = BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance;
+                float vanilla, oldLive, newVal, verify;
+
+                // Try field first
                 var pfField = prefab.GetType().GetField(fieldName, flags);
-                if (pfField == null || pfField.FieldType != typeof(float)) return 0;
-                var liveField = live.GetType().GetField(fieldName, flags);
-                if (liveField == null) return 0;
-                float vanilla = (float)pfField.GetValue(prefab);
-                if (vanilla <= 0) return 0;
-                float oldLive = (float)liveField.GetValue(live);
-                float newVal = vanilla * multiplier;
-                liveField.SetValue(live, newVal);
-                float verify = (float)liveField.GetValue(live);
+                if (pfField != null && pfField.FieldType == typeof(float))
+                {
+                    var liveField = live.GetType().GetField(fieldName, flags);
+                    if (liveField == null) return 0;
+                    vanilla = (float)pfField.GetValue(prefab);
+                    if (vanilla <= 0) return 0;
+                    oldLive = (float)liveField.GetValue(live);
+                    newVal = vanilla * multiplier;
+                    liveField.SetValue(live, newVal);
+                    verify = (float)liveField.GetValue(live);
+                }
+                else
+                {
+                    // Il2Cpp fallback: try property
+                    var pfProp = prefab.GetType().GetProperty(fieldName, flags);
+                    if (pfProp == null || pfProp.PropertyType != typeof(float)) return 0;
+                    var liveProp = live.GetType().GetProperty(fieldName, flags);
+                    if (liveProp == null || !liveProp.CanWrite) return 0;
+                    vanilla = (float)pfProp.GetValue(prefab);
+                    if (vanilla <= 0) return 0;
+                    oldLive = (float)liveProp.GetValue(live);
+                    newVal = vanilla * multiplier;
+                    liveProp.SetValue(live, newVal);
+                    verify = (float)liveProp.GetValue(live);
+                }
+
                 MelonLogger.Msg($"[LIVE-DBG] {unitName}: {fieldName} prefab={vanilla:F2} old={oldLive:F2} -> new={newVal:F2} verify={verify:F2}");
                 return 1;
             }

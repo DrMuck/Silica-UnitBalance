@@ -155,6 +155,10 @@ namespace Si_UnitBalance
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _flySpeedMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _runSpeedMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _sprintSpeedMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         // Splash radius multipliers: composite keys like "max:unitName", "pri:max:unitName"
         private static readonly Dictionary<string, float> _splashRadiusMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
@@ -334,7 +338,7 @@ namespace Si_UnitBalance
                             // These let admins navigate the menu without typing "/b " prefix
                             // Using / prefix hides chat from other players (AdminMod feature)
                             var shortcutShim = MakeShim("MenuShortcutShim", "OnMenuShortcut");
-                            string[] shortcuts = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "back" };
+                            string[] shortcuts = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "0", "back" };
                             foreach (var sc in shortcuts)
                             {
                                 try
@@ -344,7 +348,7 @@ namespace Si_UnitBalance
                                 }
                                 catch { }
                             }
-                            MelonLogger.Msg("Registered /1-/9, /0, /back shortcut commands");
+                            MelonLogger.Msg("Registered /1-/20, /0, /back shortcut commands");
                         }
                         else
                             MelonLogger.Warning("Could not find CommandCallback or RegisterAdminCommand in AdminMod");
@@ -415,6 +419,8 @@ namespace Si_UnitBalance
                 _lifetimeMultipliers.Clear();
                 _strafeSpeedMultipliers.Clear();
                 _flySpeedMultipliers.Clear();
+                _runSpeedMultipliers.Clear();
+                _sprintSpeedMultipliers.Clear();
                 _splashRadiusMultipliers.Clear();
                 _projectileOverrides.Clear();
                 _techTierTimes.Clear();
@@ -462,6 +468,8 @@ namespace Si_UnitBalance
                         float lifetimeMult = overrides["proj_lifetime_mult"]?.Value<float>() ?? 1.0f;
                         float strafeSpeedMult = overrides["strafe_speed_mult"]?.Value<float>() ?? 1.0f;
                         float flySpeedMult = overrides["fly_speed_mult"]?.Value<float>() ?? 1.0f;
+                        float runSpeedMult = overrides["run_speed_mult"]?.Value<float>() ?? 1.0f;
+                        float sprintSpeedMult = overrides["sprint_speed_mult"]?.Value<float>() ?? 1.0f;
                         float dispenseTimeout = overrides["dispense_timeout"]?.Value<float>() ?? -1f;
 
                         // Per-damage-subtype multipliers (4 sub-types × 3 scopes)
@@ -551,6 +559,10 @@ namespace Si_UnitBalance
                             _strafeSpeedMultipliers[unitName] = strafeSpeedMult;
                         if (Math.Abs(flySpeedMult - 1.0f) > 0.001f)
                             _flySpeedMultipliers[unitName] = flySpeedMult;
+                        if (Math.Abs(runSpeedMult - 1.0f) > 0.001f)
+                            _runSpeedMultipliers[unitName] = runSpeedMult;
+                        if (Math.Abs(sprintSpeedMult - 1.0f) > 0.001f)
+                            _sprintSpeedMultipliers[unitName] = sprintSpeedMult;
                         if (dispenseTimeout >= 0)
                             _dispenseTimeout = dispenseTimeout; // global — applies to all dispensers of this unit
 

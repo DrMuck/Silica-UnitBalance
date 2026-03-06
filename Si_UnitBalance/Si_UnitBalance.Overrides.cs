@@ -1157,7 +1157,8 @@ namespace Si_UnitBalance
 
         private static void ApplyMoveSpeedOverrides(bool useOM)
         {
-            if (_moveSpeedMultipliers.Count == 0 && _turboSpeedMultipliers.Count == 0 && _flySpeedMultipliers.Count == 0) return;
+            if (_moveSpeedMultipliers.Count == 0 && _turboSpeedMultipliers.Count == 0 && _flySpeedMultipliers.Count == 0
+                && _runSpeedMultipliers.Count == 0 && _sprintSpeedMultipliers.Count == 0) return;
 
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
             int applied = 0;
@@ -1171,7 +1172,9 @@ namespace Si_UnitBalance
                 bool hasMoveSpeed = _moveSpeedMultipliers.TryGetValue(name, out float mult);
                 bool hasTurboSpeed = _turboSpeedMultipliers.TryGetValue(name, out float turboMult);
                 bool hasFlySpeed = _flySpeedMultipliers.TryGetValue(name, out float flyMult);
-                if (!hasMoveSpeed && !hasTurboSpeed && !hasFlySpeed) continue;
+                bool hasRunSpeed = _runSpeedMultipliers.TryGetValue(name, out float runMult);
+                bool hasSprintSpeed = _sprintSpeedMultipliers.TryGetValue(name, out float sprintMult);
+                if (!hasMoveSpeed && !hasTurboSpeed && !hasFlySpeed && !hasRunSpeed && !hasSprintSpeed) continue;
 
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
                 if (hasMoveSpeed)
@@ -1180,6 +1183,10 @@ namespace Si_UnitBalance
                     MelonLogger.Msg($"[MOVESPEED] Applying fly_speed_mult x{flyMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
                 if (hasTurboSpeed)
                     MelonLogger.Msg($"[MOVESPEED] Applying turbo_speed_mult x{turboMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                if (hasRunSpeed)
+                    MelonLogger.Msg($"[MOVESPEED] Applying run_speed_mult x{runMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                if (hasSprintSpeed)
+                    MelonLogger.Msg($"[MOVESPEED] Applying sprint_speed_mult x{sprintMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
 
                 if (useOM)
                 {
@@ -1192,9 +1199,7 @@ namespace Si_UnitBalance
                         var compType = comp.GetType();
                         foreach (string fieldName in _speedFieldNames)
                         {
-                            // FlyMoveSpeed uses fly_speed_mult (or fallback to move_speed_mult)
-                            // TurboSpeed uses turbo_speed_mult (or fallback to move_speed_mult)
-                            // All others use move_speed_mult
+                            // Each speed field uses its specific mult if set, else falls back to move_speed_mult
                             float fieldMult;
                             if (fieldName == "FlyMoveSpeed")
                             {
@@ -1205,6 +1210,18 @@ namespace Si_UnitBalance
                             else if (fieldName == "TurboSpeed")
                             {
                                 if (hasTurboSpeed) fieldMult = turboMult;
+                                else if (hasMoveSpeed) fieldMult = mult;
+                                else continue;
+                            }
+                            else if (fieldName == "RunSpeed")
+                            {
+                                if (hasRunSpeed) fieldMult = runMult;
+                                else if (hasMoveSpeed) fieldMult = mult;
+                                else continue;
+                            }
+                            else if (fieldName == "SprintSpeed")
+                            {
+                                if (hasSprintSpeed) fieldMult = sprintMult;
                                 else if (hasMoveSpeed) fieldMult = mult;
                                 else continue;
                             }

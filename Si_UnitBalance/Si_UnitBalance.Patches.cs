@@ -391,7 +391,7 @@ namespace Si_UnitBalance
             // Parse number
             if (!int.TryParse(arg, out int selection) || selection < 1)
             {
-                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use /1-/9, /back, or /0 to exit</color>");
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use /1-/20, /back, or /0 to exit</color>");
                 return;
             }
 
