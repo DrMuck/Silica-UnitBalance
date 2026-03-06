@@ -4,6 +4,26 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-06 — Health Mult Server-Only Limitation
+
+### Investigation
+- Testers reported health bars showing vanilla values despite `health_mult` being applied
+- Root cause: `DamageManagerData` is NOT registered in the game's built-in OverrideManager (`BuildSources()` only registers 7 types: GameModeInfo, LevelInfo, Team, ConstructionData, Resource, ProjectileData, ObjectInfo)
+- All alternative paths to sync health to clients are blocked:
+  - `DamageManager.MaxHealth` — read-only computed property (no setter)
+  - `ObjectInfo.MaxHealth` — `[NonSerialized]` field (filtered by `IsMemberValid`)
+  - `DamageManager.Health` setter clamps to `MaxHealth` — even if server sets HP=500000, client clamps to vanilla MaxHealth
+- **Conclusion**: Health multiplier works server-side only. Cannot sync to clients without a client-side mod.
+
+### Changes
+- Added `health_mult_enabled` config setting (default: `false`) — must be explicitly enabled since it's server-only
+- HTP menu item 9: toggle Health Mult ON/OFF with "(server-only)" remark
+- Discord webhook: reports `health_mult_enabled` toggle changes
+- Si_UnitBalance_Interactive: `health_mult` tooltip updated with server-only warning
+- Default config: `health_mult_enabled: false` with server-only comment
+
+---
+
 ## 2026-03-06 — Structure Vision & Turret Target Range
 
 ### Starter HQ FOW Fix — `revert_on_round_end` config setting

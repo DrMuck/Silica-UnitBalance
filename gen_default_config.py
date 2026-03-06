@@ -579,6 +579,7 @@ config = {
     "dump_fields": False,
     "shrimp_disable_aim": False,
     "revert_on_round_end": True,
+    "health_mult_enabled": False,  # Server-only: health changes are NOT synced to clients (health bars/cheat mode show vanilla values)
     "description": "Vanilla base config. All multipliers at 1.00 = no change. _base/_pri_weapon/_sec_weapon show actual game values. Use !rebalance to hot-reload.",
 }
 

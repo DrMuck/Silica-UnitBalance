@@ -137,14 +137,15 @@ namespace Si_UnitBalance
                     if (!omReady)
                         omReady = InitOverrideManager();
 
-                    if (omReady && _healthMultipliers.Count > 0)
+                    if (omReady && _healthMultEnabled && _healthMultipliers.Count > 0)
                         RegisterDamageManagerDataInOM();
 
                     // Snapshot vanilla base values before overrides modify them
                     CacheVanillaBaseValues();
 
                     ApplyConstructionDataOverrides(omReady);
-                    ApplyHealthOverrides(omReady);
+                    if (_healthMultEnabled)
+                        ApplyHealthOverrides(omReady);
                     ApplyProjectileDamageOverrides(omReady);
                     ApplyRangeOverrides(omReady);
                     ApplyTargetDistanceOverrides(omReady);
@@ -514,7 +515,7 @@ namespace Si_UnitBalance
 
                 // ── HTP Menu ──────────────────────────────────────────
                 case MenuLevel.HTPMenu:
-                    if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
+                    if (selection < 1 || selection > 9) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-9.</color>"); return; }
                     if (selection == 1) state.Level = MenuLevel.HTPHoverbike;
                     else if (selection == 2) state.Level = MenuLevel.HTPTier;
                     else if (selection == 3) state.Level = MenuLevel.HTPTeleport;
@@ -555,7 +556,7 @@ namespace Si_UnitBalance
                         WriteAuditLog(playerName3, steamId3, "htp", "watchdog_enabled", (!_watchdogEnabled).ToString(), _watchdogEnabled.ToString());
                         MelonLogger.Msg($"[BAL] {playerName3} ({steamId3}): watchdog_enabled -> {_watchdogEnabled}");
                     }
-                    else // selection == 8
+                    else if (selection == 8)
                     {
                         // Toggle revert on round end
                         _revertOnRoundEnd = !_revertOnRoundEnd;
@@ -566,6 +567,18 @@ namespace Si_UnitBalance
                         string steamId4 = GetPlayerSteamId(player);
                         WriteAuditLog(playerName4, steamId4, "htp", "revert_on_round_end", (!_revertOnRoundEnd).ToString(), _revertOnRoundEnd.ToString());
                         MelonLogger.Msg($"[BAL] {playerName4} ({steamId4}): revert_on_round_end -> {_revertOnRoundEnd}");
+                    }
+                    else // selection == 9
+                    {
+                        // Toggle health mult
+                        _healthMultEnabled = !_healthMultEnabled;
+                        WriteBoolToJson("health_mult_enabled", _healthMultEnabled);
+                        string hmStatus = _healthMultEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Health Mult: " + hmStatus + " " + _dimColor + "(server-only, use !rebalance to apply)</color>");
+                        string playerName5 = GetPlayerName(player);
+                        string steamId5 = GetPlayerSteamId(player);
+                        WriteAuditLog(playerName5, steamId5, "htp", "health_mult_enabled", (!_healthMultEnabled).ToString(), _healthMultEnabled.ToString());
+                        MelonLogger.Msg($"[BAL] {playerName5} ({steamId5}): health_mult_enabled -> {_healthMultEnabled}");
                     }
                     break;
 

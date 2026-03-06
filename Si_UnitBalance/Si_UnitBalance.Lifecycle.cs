@@ -293,15 +293,16 @@ namespace Si_UnitBalance
 
                     if (!skipApply)
                     {
-                        // Register DamageManagerData in OM so health syncs to clients
-                        if (omReady && _healthMultipliers.Count > 0)
+                        // Register DamageManagerData in OM (server-only — clients don't have this type registered)
+                        if (omReady && _healthMultEnabled && _healthMultipliers.Count > 0)
                             RegisterDamageManagerDataInOM();
 
                         // Snapshot vanilla base values before overrides modify them
                         CacheVanillaBaseValues();
 
                         ApplyConstructionDataOverrides(omReady);
-                        ApplyHealthOverrides(omReady);
+                        if (_healthMultEnabled)
+                            ApplyHealthOverrides(omReady);
                         ApplyProjectileDamageOverrides(omReady);
                         ApplyRangeOverrides(omReady);
                         ApplyTargetDistanceOverrides(omReady);
