@@ -310,6 +310,11 @@ namespace Si_UnitBalance
                     if (_shrimpDisableAim)
                         ApplyShrimpAimDisable();
 
+                    // Propagate overrides to already-spawned instances (starter HQs, etc.)
+                    // OM only modifies prefab data — live instances have independent component copies
+                    try { PropagateToLiveInstances(); }
+                    catch (Exception pex) { MelonLogger.Warning($"[LIVE] Propagation error on game start: {pex.Message}"); }
+
                     MelonLogger.Msg($"Unit Balance active (OverrideManager={omReady}): " +
                         $"{_damageMultipliers.Count} damage, {_healthMultipliers.Count} health, " +
                         $"{_costMultipliers.Count} cost, {_buildTimeMultipliers.Count} buildTime, " +
