@@ -90,7 +90,7 @@ namespace Si_UnitBalance
                 new[] { "Hover Tank", "Barrage Truck", "Railgun Tank", "Pulse Truck" },
                 new[] { "Sol Harvester", "Siege Tank" },
                 new[] { "Gunship", "Dropship", "Fighter", "Bomber" },
-                new[] { "Sol Headquarters", "Refinery", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
+                new[] { "Sol Headquarters", "Refinery", "Research Facility", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Silo", "Radar Station", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
             },
             // Centauri
             new[] {
@@ -99,7 +99,7 @@ namespace Si_UnitBalance
                 new[] { "Combat Tank", "Rocket Tank", "Heavy Tank", "Pyro Tank" },
                 new[] { "Cent Harvester", "Crimson Tank" },
                 new[] { "Shuttle", "Dreadnought", "Interceptor", "Freighter" },
-                new[] { "Cent Headquarters", "Refinery", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
+                new[] { "Cent Headquarters", "Refinery", "Research Facility", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Silo", "Radar Station", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
             },
             // Alien
             new[] {

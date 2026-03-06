@@ -617,7 +617,7 @@ for n in ['Gunship', 'Dropship', 'Fighter', 'Bomber']:
 
 uc["_comment_struct"] = "========== SOL/CENTAURI — Structures =========="
 uc['Headquarters'] = build_unit('Headquarters', by_name.get('Headquarters', by_name.get('Sol Headquarters')), 'structure')
-for n in ['Refinery', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory']:
+for n in ['Refinery', 'Research Facility', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory', 'Silo', 'Radar Station']:
     uc[n] = build_unit(n, by_name[n], 'structure')
 for n in ['Turret', 'Heavy Turret', 'Anti-Air Rocket Turret']:
     uc[n] = build_unit(n, by_name[n], 'structure_armed')
@@ -788,7 +788,7 @@ for n in ['Shrimp', 'Shocker', 'Dragonfly', 'Behemoth', 'Scorpion', 'Firebug', '
     unit_types[n] = 'creature_ranged'
 for n in ['Wasp', 'Squid']:
     unit_types[n] = 'creature_flying_melee'
-for n in ['Headquarters', 'Refinery', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory',
+for n in ['Headquarters', 'Refinery', 'Research Facility', 'Barracks', 'Light Factory', 'Air Factory', 'Heavy Factory', 'Ultra Heavy Factory', 'Silo', 'Radar Station',
           'Nest', 'Node', 'Bio Cache', 'Lesser Spawning Cyst', 'Greater Spawning Cyst',
           'Grand Spawning Cyst', 'Colossal Spawning Cyst', 'Quantum Cortex']:
     unit_types[n] = 'structure'

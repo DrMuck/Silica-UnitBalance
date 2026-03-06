@@ -592,6 +592,16 @@
             "_base_sense": "FOW:200 Target:300",
             "fow_distance": 200
         },
+        "Research Facility": {
+            "_base": "HP:40000 Cost:3500 Build:30.0s T0",
+            "health_mult": 1.0,
+            "cost_mult": 1.0,
+            "build_time_mult": 1.0,
+            "min_tier": -1,
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
+        },
         "Barracks": {
             "_base": "HP:40000 Cost:1000 Build:30.0s T0",
             "health_mult": 1.0,
@@ -638,6 +648,26 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 7,
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
+        },
+        "Silo": {
+            "_base": "HP:20000 Cost:500 Build:15.0s T0",
+            "health_mult": 1.0,
+            "cost_mult": 1.0,
+            "build_time_mult": 1.0,
+            "min_tier": -1,
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
+        },
+        "Radar Station": {
+            "_base": "HP:20000 Cost:1000 Build:30.0s T2",
+            "health_mult": 1.0,
+            "cost_mult": 1.0,
+            "build_time_mult": 1.0,
+            "min_tier": 2,
             "build_radius": 600,
             "_base_sense": "FOW:200 Target:300",
             "fow_distance": 200
