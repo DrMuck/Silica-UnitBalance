@@ -6,6 +6,15 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ## 2026-03-06 — Structure Vision & Turret Target Range
 
+### Starter HQ FOW Fix — `revert_on_round_end` config setting
+- **Problem**: `OMRevertAll()` on game end resets prefabs to vanilla → starter HQs spawn from vanilla prefab before `OnGameStartedLogic()` runs, so they miss FOW/target overrides
+- **Solution**: Added `revert_on_round_end` JSON config setting (default: `true`)
+  - When `false`, `OMRevertAll()` is skipped on game end — overrides persist between rounds
+  - Fixes starter HQ FOW/target issue since prefabs keep modified values across rounds
+  - Toggleable in-game via `!b` → HTP menu → option 8
+- Previous attempts (PropagateToLiveInstances, FOW re-apply after revert) removed in favor of this cleaner approach
+- **Note**: With `revert_on_round_end=false`, `!rebalance` still works (it always reverts before re-applying). However, multiplier-based overrides would compound if re-applied without revert, so `OnGameStartedLogic` skips Apply* on subsequent rounds when overrides are already active (`_overridesApplied` flag).
+
 ### Changes
 - **Added**: `fow_distance` for all buildings (structures + armed structures) — controls Fog of War reveal range
 - **Added**: `target_distance` for armed structures (turrets: Turret, Heavy Turret, AA Rocket Turret, Hive Spire, Thorn Spire) — controls AI targeting range

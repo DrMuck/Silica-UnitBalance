@@ -286,29 +286,43 @@ namespace Si_UnitBalance
                     if (!omReady)
                         MelonLogger.Warning("OverrideManager not available — falling back to direct mutation (no client sync)");
 
-                    // Register DamageManagerData in OM so health syncs to clients
-                    if (omReady && _healthMultipliers.Count > 0)
-                        RegisterDamageManagerDataInOM();
+                    // When revert_on_round_end=false and overrides are already applied,
+                    // skip re-applying to avoid compounding multiplier-based overrides.
+                    // Still propagate to live instances and sync to clients.
+                    bool skipApply = !_revertOnRoundEnd && _overridesApplied;
 
-                    // Snapshot vanilla base values before overrides modify them
-                    CacheVanillaBaseValues();
+                    if (!skipApply)
+                    {
+                        // Register DamageManagerData in OM so health syncs to clients
+                        if (omReady && _healthMultipliers.Count > 0)
+                            RegisterDamageManagerDataInOM();
 
-                    ApplyConstructionDataOverrides(omReady);
-                    ApplyHealthOverrides(omReady);
-                    ApplyProjectileDamageOverrides(omReady);
-                    ApplyRangeOverrides(omReady);
-                    ApplyTargetDistanceOverrides(omReady);
-                    ApplyFoWDistanceOverrides(omReady);
-                    ApplyJumpSpeedOverrides(omReady);
-                    ApplyVisibleEventRadiusOverrides(omReady);
-                    ApplyMoveSpeedOverrides(omReady);
-                    ApplyStrafeSpeedOverrides(omReady);
-                    ApplyTurnRadiusOverrides(omReady);
-                    ApplyTeleportOverrides(omReady);
-                    ApplyDispenserTimeoutOverrides(omReady);
+                        // Snapshot vanilla base values before overrides modify them
+                        CacheVanillaBaseValues();
 
-                    if (_shrimpDisableAim)
-                        ApplyShrimpAimDisable();
+                        ApplyConstructionDataOverrides(omReady);
+                        ApplyHealthOverrides(omReady);
+                        ApplyProjectileDamageOverrides(omReady);
+                        ApplyRangeOverrides(omReady);
+                        ApplyTargetDistanceOverrides(omReady);
+                        ApplyFoWDistanceOverrides(omReady);
+                        ApplyJumpSpeedOverrides(omReady);
+                        ApplyVisibleEventRadiusOverrides(omReady);
+                        ApplyMoveSpeedOverrides(omReady);
+                        ApplyStrafeSpeedOverrides(omReady);
+                        ApplyTurnRadiusOverrides(omReady);
+                        ApplyTeleportOverrides(omReady);
+                        ApplyDispenserTimeoutOverrides(omReady);
+
+                        if (_shrimpDisableAim)
+                            ApplyShrimpAimDisable();
+
+                        _overridesApplied = true;
+                    }
+                    else
+                    {
+                        MelonLogger.Msg("[UnitBalance] Overrides already active (revert_on_round_end=false) — skipping re-apply");
+                    }
 
                     // Propagate overrides to already-spawned instances (starter HQs, etc.)
                     // OM only modifies prefab data — live instances have independent component copies
@@ -543,9 +557,15 @@ namespace Si_UnitBalance
                 _originalMoveSpeeds.Clear();
 
                 // Revert all OverrideManager overrides (restores originals, notifies clients)
-                if (_omInitialized && _overrideManagerType != null)
+                // When disabled, overrides persist between rounds — fixes starter HQs missing FOW/target values
+                if (_revertOnRoundEnd && _omInitialized && _overrideManagerType != null)
                 {
                     OMRevertAll();
+                    _overridesApplied = false;
+                }
+                else if (!_revertOnRoundEnd)
+                {
+                    MelonLogger.Msg("[UnitBalance] Skipping OMRevertAll (revert_on_round_end=false)");
                 }
 
                 // Start watchdog — if no new game starts within timeout, force recovery (once only)

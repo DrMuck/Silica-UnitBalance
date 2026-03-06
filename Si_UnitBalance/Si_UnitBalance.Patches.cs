@@ -103,6 +103,7 @@ namespace Si_UnitBalance
                 if (_omInitialized && _overrideManagerType != null)
                 {
                     OMRevertAll();
+                    _overridesApplied = false;
                     MelonLogger.Msg("[Rebalance] Reverted all overrides");
                 }
 
@@ -513,7 +514,7 @@ namespace Si_UnitBalance
 
                 // ── HTP Menu ──────────────────────────────────────────
                 case MenuLevel.HTPMenu:
-                    if (selection < 1 || selection > 7) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-7.</color>"); return; }
+                    if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
                     if (selection == 1) state.Level = MenuLevel.HTPHoverbike;
                     else if (selection == 2) state.Level = MenuLevel.HTPTier;
                     else if (selection == 3) state.Level = MenuLevel.HTPTeleport;
@@ -542,7 +543,7 @@ namespace Si_UnitBalance
                         WriteAuditLog(playerName2, steamId2, "htp", "additional_spawn", (!_additionalSpawn).ToString(), _additionalSpawn.ToString());
                         MelonLogger.Msg($"[BAL] {playerName2} ({steamId2}): additional_spawn -> {_additionalSpawn}");
                     }
-                    else // selection == 7
+                    else if (selection == 7)
                     {
                         // Toggle watchdog
                         _watchdogEnabled = !_watchdogEnabled;
@@ -553,6 +554,18 @@ namespace Si_UnitBalance
                         string steamId3 = GetPlayerSteamId(player);
                         WriteAuditLog(playerName3, steamId3, "htp", "watchdog_enabled", (!_watchdogEnabled).ToString(), _watchdogEnabled.ToString());
                         MelonLogger.Msg($"[BAL] {playerName3} ({steamId3}): watchdog_enabled -> {_watchdogEnabled}");
+                    }
+                    else // selection == 8
+                    {
+                        // Toggle revert on round end
+                        _revertOnRoundEnd = !_revertOnRoundEnd;
+                        WriteBoolToJson("revert_on_round_end", _revertOnRoundEnd);
+                        string rvStatus = _revertOnRoundEnd ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Revert on Round End: " + rvStatus);
+                        string playerName4 = GetPlayerName(player);
+                        string steamId4 = GetPlayerSteamId(player);
+                        WriteAuditLog(playerName4, steamId4, "htp", "revert_on_round_end", (!_revertOnRoundEnd).ToString(), _revertOnRoundEnd.ToString());
+                        MelonLogger.Msg($"[BAL] {playerName4} ({steamId4}): revert_on_round_end -> {_revertOnRoundEnd}");
                     }
                     break;
 

@@ -223,6 +223,7 @@ namespace Si_UnitBalance
             // Bool toggles
             CompareBoolSetting("additional_spawn", "Additional Spawn", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("shrimp_disable_aim", "Shrimp Disable Aim", defaultCfg, activeCfg, lastPushCfg, changes);
+            CompareBoolSetting("revert_on_round_end", "Revert on Round End", defaultCfg, activeCfg, lastPushCfg, changes);
         }
 
         private static void CompareBoolSetting(string key, string displayName, JObject defaultCfg, JObject activeCfg, JObject lastPushCfg, List<BalanceChange> changes)

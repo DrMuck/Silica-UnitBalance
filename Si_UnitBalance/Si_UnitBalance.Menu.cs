@@ -1666,8 +1666,9 @@ namespace Si_UnitBalance
                     string spawnStatus = _additionalSpawn ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Hoverbike  " + _itemColor + "2.</color> Tier  " + _itemColor + "3.</color> Teleportation  " + _itemColor + "4.</color> Shrimp Aim [" + shrimpStatus + "]");
                     string watchdogStatus = _watchdogEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]");
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "6.</color> Discord  " + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]");
+                    string revertStatus = _revertOnRoundEnd ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]  " + _itemColor + "6.</color> Discord");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]  " + _itemColor + "8.</color> Revert on Round End [" + revertStatus + "]");
                     break;
                 }
 

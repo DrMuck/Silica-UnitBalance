@@ -50,6 +50,8 @@ namespace Si_UnitBalance
         private static bool _dumpFields = true;
         private static bool _shrimpDisableAim = false;
         private static bool _additionalSpawn = false;
+        private static bool _revertOnRoundEnd = true;
+        private static bool _overridesApplied; // tracks if OM overrides are currently active (for no-revert mode)
         private static bool _discordAutoPost = false;
         private static string _discordWebhookUrl = "";
         private static bool _harmonyApplied; // true when SilicaCore found (server)
@@ -387,6 +389,7 @@ namespace Si_UnitBalance
                 _discordAutoPost = config["discord_auto_post"]?.Value<bool>() ?? false;
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
+                _revertOnRoundEnd = config["revert_on_round_end"]?.Value<bool>() ?? true;
 
                 _damageMultipliers.Clear();
                 _healthMultipliers.Clear();
