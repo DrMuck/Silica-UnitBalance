@@ -4,6 +4,25 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-06 — Structure Vision & Turret Target Range
+
+### Changes
+- **Added**: `fow_distance` for all buildings (structures + armed structures) — controls Fog of War reveal range
+- **Added**: `target_distance` for armed structures (turrets: Turret, Heavy Turret, AA Rocket Turret, Hive Spire, Thorn Spire) — controls AI targeting range
+- Buildings now have a "Vision & Sense" section in the in-game menu
+- `gen_default_config.py` — removed structure exclusion from vision section; added `_base_sense` annotation for buildings
+- `Si_UnitBalance.Menu.cs` — extended `BuildGroupsForUnit()` to show vision group for structures (fow only) and armed structures (fow + target)
+- Default config: 1290 params (+10 from 1280)
+
+### Base Values (from dump)
+- HQ: FOW 600, Target 300
+- Most buildings: FOW 200, Target 300
+- Turrets: FOW 300, Target 400–600
+- Nest: FOW 300, Target 800
+- Thorn Spire: FOW 200, Target 650
+
+---
+
 ## 2026-03-04 — Pri/Sec Turret Weapon Mapping (`_vtPriIndex`)
 
 ### Problem

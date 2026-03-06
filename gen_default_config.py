@@ -546,25 +546,27 @@ def build_unit(name, u, ctype):
     # structures: no movement section
 
     # ── VISION & SENSE ──
-    # target_distance + fow_distance for all mobile units
+    # target_distance + fow_distance for all units (including structures)
     # visible_event_radius_mult only for units with VehicleTurret (vehicles)
-    # No vision section for structures
 
-    if ctype not in ('structure', 'structure_armed'):
-        # All mobile units: target + fow + VER
-        # VER scales ProjectileData.VisibleEventRadius (render distance of projectiles)
-        # VER base value is only known at runtime (read from ProjectileData on prefab)
-        fow = u.get('fow_view', 0)
-        tgt = u.get('target_dist', 0)
-        sense_parts = []
-        if fow: sense_parts.append(f"FOW:{fow}")
-        if tgt: sense_parts.append(f"Target:{tgt}")
+    fow = u.get('fow_view', 0)
+    tgt = u.get('target_dist', 0)
+    sense_parts = []
+    if fow: sense_parts.append(f"FOW:{fow}")
+    if tgt: sense_parts.append(f"Target:{tgt}")
+    if sense_parts:
         e['_base_sense'] = ' '.join(sense_parts)
+
+    if ctype in ('structure', 'structure_armed'):
+        # Buildings: fow_distance for all, target_distance for armed structures (turrets)
+        e['fow_distance'] = fow if fow else -1
+        if ctype == 'structure_armed':
+            e['target_distance'] = tgt if tgt else -1
+    else:
+        # Mobile units: target + fow + VER
         e['target_distance'] = tgt if tgt else -1
         e['fow_distance'] = fow if fow else -1
         e['visible_event_radius_mult'] = 1.00
-
-    # structures: no vision section
 
     return e
 
@@ -738,11 +740,13 @@ expected_keys = {
     },
     'structure': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier', 'build_radius'],
+        'sense': ['fow_distance'],
     },
     'structure_armed': {
         'hp': ['health_mult', 'cost_mult', 'build_time_mult', 'min_tier', 'build_radius'],
         'weapon_non_dmg': ['proj_speed_mult', 'proj_lifetime_mult', 'range_mult',
                    'accuracy_mult', 'magazine_mult', 'fire_rate_mult', 'reload_time_mult'],
+        'sense': ['target_distance', 'fow_distance'],
     },
 }
 
@@ -758,9 +762,9 @@ forbidden_keys = {
                         'pri_magazine_mult', 'pri_fire_rate_mult', 'pri_reload_time_mult'],
     'creature_flying_melee': ['build_radius', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult'],
     'structure': ['move_speed_mult', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult', 'fly_speed_mult',
-                  'target_distance', 'fow_distance', 'visible_event_radius_mult'],
+                  'target_distance', 'visible_event_radius_mult'],
     'structure_armed': ['move_speed_mult', 'jump_speed_mult', 'turbo_speed_mult', 'turn_radius_mult', 'fly_speed_mult',
-                        'target_distance', 'fow_distance', 'visible_event_radius_mult'],
+                        'visible_event_radius_mult'],
 }
 
 # Map unit names to their types

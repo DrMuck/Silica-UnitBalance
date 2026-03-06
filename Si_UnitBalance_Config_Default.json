@@ -578,7 +578,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 5,
-            "build_radius": 1500
+            "build_radius": 1500,
+            "_base_sense": "FOW:600 Target:300",
+            "fow_distance": 600
         },
         "Refinery": {
             "_base": "HP:80000 Cost:3000 Build:30.0s T0",
@@ -586,7 +588,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": -1,
-            "build_radius": 600
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Barracks": {
             "_base": "HP:40000 Cost:1000 Build:30.0s T0",
@@ -594,7 +598,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": -1,
-            "build_radius": 600
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Light Factory": {
             "_base": "HP:40000 Cost:3000 Build:30.0s T1",
@@ -602,7 +608,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 1,
-            "build_radius": 600
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Air Factory": {
             "_base": "HP:80000 Cost:5000 Build:90.0s T6",
@@ -610,7 +618,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 6,
-            "build_radius": 600
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Heavy Factory": {
             "_base": "HP:80000 Cost:4500 Build:60.0s T4",
@@ -618,7 +628,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 4,
-            "build_radius": 600
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Ultra Heavy Factory": {
             "_base": "HP:150000 Cost:6000 Build:120.0s T7",
@@ -626,7 +638,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 7,
-            "build_radius": 600
+            "build_radius": 600,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Turret": {
             "_base": "HP:5000 Cost:750 Build:35.0s T2",
@@ -643,7 +657,10 @@
             "accuracy_mult": 1.0,
             "magazine_mult": 1.0,
             "fire_rate_mult": 1.0,
-            "reload_time_mult": 1.0
+            "reload_time_mult": 1.0,
+            "_base_sense": "FOW:300 Target:400",
+            "fow_distance": 300,
+            "target_distance": 400
         },
         "Heavy Turret": {
             "_base": "HP:7000 Cost:1500 Build:35.0s T4",
@@ -660,7 +677,10 @@
             "accuracy_mult": 1.0,
             "magazine_mult": 1.0,
             "fire_rate_mult": 1.0,
-            "reload_time_mult": 1.0
+            "reload_time_mult": 1.0,
+            "_base_sense": "FOW:300 Target:600",
+            "fow_distance": 300,
+            "target_distance": 600
         },
         "Anti-Air Rocket Turret": {
             "_base": "HP:5000 Cost:2000 Build:35.0s T6",
@@ -681,7 +701,10 @@
             "accuracy_mult": 1.0,
             "magazine_mult": 1.0,
             "fire_rate_mult": 1.0,
-            "reload_time_mult": 1.0
+            "reload_time_mult": 1.0,
+            "_base_sense": "FOW:300 Target:600",
+            "fow_distance": 300,
+            "target_distance": 600
         },
         "_comment_cen_barracks": "========== CENTAURI \u2014 Barracks ==========",
         "Militia": {
@@ -1260,7 +1283,6 @@
             "_base_speed": "Move:37.5 Turbo:30",
             "move_speed_mult": 1.0,
             "turbo_speed_mult": 1.0,
-            "_base_sense": "",
             "target_distance": -1,
             "fow_distance": -1,
             "visible_event_radius_mult": 1.0
@@ -1624,7 +1646,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 3,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:300 Target:800",
+            "fow_distance": 300
         },
         "Node": {
             "_base": "HP:300 Cost:100 Build:6.0s T0",
@@ -1632,7 +1656,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": -1,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:100 Target:300",
+            "fow_distance": 100
         },
         "Bio Cache": {
             "_base": "HP:3000 Cost:500 Build:10.0s T0",
@@ -1640,7 +1666,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": -1,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Lesser Spawning Cyst": {
             "_base": "HP:8000 Cost:1500 Build:20.0s T0",
@@ -1648,7 +1676,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": -1,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Greater Spawning Cyst": {
             "_base": "HP:16000 Cost:3000 Build:25.0s T2",
@@ -1656,7 +1686,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 2,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Grand Spawning Cyst": {
             "_base": "HP:30000 Cost:4000 Build:30.0s T4",
@@ -1664,7 +1696,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 4,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Colossal Spawning Cyst": {
             "_base": "HP:60000 Cost:6000 Build:30.0s T7",
@@ -1672,7 +1706,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": 7,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Quantum Cortex": {
             "_base": "HP:12000 Cost:2000 Build:25.0s T0",
@@ -1680,7 +1716,9 @@
             "cost_mult": 1.0,
             "build_time_mult": 1.0,
             "min_tier": -1,
-            "build_radius": 100
+            "build_radius": 100,
+            "_base_sense": "FOW:200 Target:300",
+            "fow_distance": 200
         },
         "Hive Spire": {
             "_base": "HP:3000 Cost:1000 Build:35.0s T3",
@@ -1697,7 +1735,10 @@
             "accuracy_mult": 1.0,
             "magazine_mult": 1.0,
             "fire_rate_mult": 1.0,
-            "reload_time_mult": 1.0
+            "reload_time_mult": 1.0,
+            "_base_sense": "FOW:200 Target:450",
+            "fow_distance": 200,
+            "target_distance": 450
         },
         "Thorn Spire": {
             "_base": "HP:3000 Cost:1000 Build:35.0s T2",
@@ -1714,7 +1755,10 @@
             "accuracy_mult": 1.0,
             "magazine_mult": 1.0,
             "fire_rate_mult": 1.0,
-            "reload_time_mult": 1.0
+            "reload_time_mult": 1.0,
+            "_base_sense": "FOW:200 Target:650",
+            "fow_distance": 200,
+            "target_distance": 650
         }
     }
 }

@@ -585,13 +585,24 @@ namespace Si_UnitBalance
             }
             // structures: no movement group
 
-            // ── Vision & Sense (all mobile units get target + fow + VER) ──
+            // ── Vision & Sense ──
             if (isMobile)
             {
                 names.Add("Vision & Sense");
                 keys.Add(new[] { "target_distance", "fow_distance", "visible_event_radius_mult" });
             }
-            // structures: no vision group
+            else if (isStructure && hasVT)
+            {
+                // Armed structures (turrets): fow + target distance
+                names.Add("Vision & Sense");
+                keys.Add(new[] { "target_distance", "fow_distance" });
+            }
+            else if (isStructure)
+            {
+                // Unarmed structures: fow distance only
+                names.Add("Vision & Sense");
+                keys.Add(new[] { "fow_distance" });
+            }
 
             groupNames = names.ToArray();
             groupKeys = keys.ToArray();
