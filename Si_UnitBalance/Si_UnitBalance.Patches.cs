@@ -145,7 +145,10 @@ namespace Si_UnitBalance
 
                     ApplyConstructionDataOverrides(omReady);
                     if (_healthMultEnabled)
+                    {
                         ApplyHealthOverrides(omReady);
+                        ReclampLiveHealth();
+                    }
                     ApplyProjectileDamageOverrides(omReady);
                     ApplyRangeOverrides(omReady);
                     ApplyTargetDistanceOverrides(omReady);
@@ -568,18 +571,7 @@ namespace Si_UnitBalance
                         WriteAuditLog(playerName4, steamId4, "htp", "revert_on_round_end", (!_revertOnRoundEnd).ToString(), _revertOnRoundEnd.ToString());
                         MelonLogger.Msg($"[BAL] {playerName4} ({steamId4}): revert_on_round_end -> {_revertOnRoundEnd}");
                     }
-                    else // selection == 9
-                    {
-                        // Toggle health mult
-                        _healthMultEnabled = !_healthMultEnabled;
-                        WriteBoolToJson("health_mult_enabled", _healthMultEnabled);
-                        string hmStatus = _healthMultEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                        SendChatToPlayer(player, _chatPrefix + "Health Mult: " + hmStatus + " " + _dimColor + "(server-only, use !rebalance to apply)</color>");
-                        string playerName5 = GetPlayerName(player);
-                        string steamId5 = GetPlayerSteamId(player);
-                        WriteAuditLog(playerName5, steamId5, "htp", "health_mult_enabled", (!_healthMultEnabled).ToString(), _healthMultEnabled.ToString());
-                        MelonLogger.Msg($"[BAL] {playerName5} ({steamId5}): health_mult_enabled -> {_healthMultEnabled}");
-                    }
+                    // (menu item 9 removed — health mult is always enabled)
                     break;
 
                 case MenuLevel.HTPHoverbike:

@@ -51,7 +51,7 @@ namespace Si_UnitBalance
         private static bool _shrimpDisableAim = false;
         private static bool _additionalSpawn = false;
         private static bool _revertOnRoundEnd = true;
-        private static bool _healthMultEnabled = false; // health_mult is server-only (client health bar won't reflect changes)
+        private static bool _healthMultEnabled = true; // always enabled — client mod handles sync
         private static bool _overridesApplied; // tracks if OM overrides are currently active (for no-revert mode)
         private static bool _discordAutoPost = false;
         private static string _discordWebhookUrl = "";
@@ -395,7 +395,7 @@ namespace Si_UnitBalance
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
                 _revertOnRoundEnd = config["revert_on_round_end"]?.Value<bool>() ?? true;
-                _healthMultEnabled = config["health_mult_enabled"]?.Value<bool>() ?? false;
+                _healthMultEnabled = config["health_mult_enabled"]?.Value<bool>() ?? true;
 
                 _damageMultipliers.Clear();
                 _healthMultipliers.Clear();

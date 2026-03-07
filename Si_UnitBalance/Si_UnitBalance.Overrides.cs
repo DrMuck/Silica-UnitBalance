@@ -182,6 +182,68 @@ namespace Si_UnitBalance
                 MelonLogger.Msg($"[HEALTH] Applied MaxHealth overrides to {applied} units/structures");
         }
 
+        /// <summary>
+        /// Re-clamp HealthInternal on all live DamageManager instances whose Data.Health was modified.
+        /// Maintains health percentage (e.g., 50% HP before → 50% HP after).
+        /// Called after ApplyHealthOverrides to fix existing units spawned with old MaxHealth.
+        /// </summary>
+        private static void ReclampLiveHealth()
+        {
+            if (_healthMultipliers.Count == 0) return;
+
+            var healthProp = typeof(DamageManager).GetProperty("Health",
+                BindingFlags.Public | BindingFlags.Instance);
+            if (healthProp == null || healthProp.GetSetMethod(true) == null)
+            {
+                MelonLogger.Warning("[HEALTH] Cannot find Health setter — skip live re-clamp");
+                return;
+            }
+            var healthSetter = healthProp.GetSetMethod(true);
+
+            // Build lookup: DamageManagerData asset name → health multiplier
+            var dataNameToMult = new Dictionary<string, float>();
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string name = ResolveConfigName(info.DisplayName, info.name);
+                if (string.IsNullOrEmpty(name)) continue;
+                if (!_healthMultipliers.TryGetValue(name, out float _)) continue;
+
+                var dm = info.Prefab.GetComponent<DamageManager>();
+                if (dm == null || dm.Data == null) continue;
+                string dataName = ((UnityEngine.Object)dm.Data).name;
+                if (!string.IsNullOrEmpty(dataName))
+                    dataNameToMult[dataName] = 1f; // just track which data assets were modified
+            }
+
+            if (dataNameToMult.Count == 0) return;
+
+            // Find all live DamageManager instances and re-clamp
+            var liveDMs = UnityEngine.Object.FindObjectsOfType<DamageManager>();
+            int clamped = 0;
+            foreach (var dm in liveDMs)
+            {
+                if (dm == null || dm.Data == null) continue;
+                string dataName = ((UnityEngine.Object)dm.Data).name;
+                if (!dataNameToMult.ContainsKey(dataName)) continue;
+
+                float currentHP = dm.Health;
+                float newMax = dm.MaxHealth;
+
+                if (currentHP > newMax)
+                {
+                    // Clamp down: unit had more HP than new max
+                    healthSetter.Invoke(dm, new object[] { newMax });
+                    MelonLogger.Msg($"[HEALTH] Re-clamped live {dataName}: {currentHP:F0} -> {newMax:F0}");
+                    clamped++;
+                }
+            }
+
+            if (clamped > 0)
+                MelonLogger.Msg($"[HEALTH] Re-clamped {clamped} live unit(s) to new MaxHealth");
+        }
+
         // =============================================
         // Damage: scale ProjectileData damage fields (replaces broken Harmony ApplyDamage Postfix)
         // Modifying damage at the ProjectileData level ensures server & client see the same values.

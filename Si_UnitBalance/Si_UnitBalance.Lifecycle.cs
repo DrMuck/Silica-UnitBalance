@@ -24,10 +24,13 @@ namespace Si_UnitBalance
         {
             public static void Postfix()
             {
-                // Fires on first map load (GameMode.OnEnable) — cancel any pending watchdog
+                // Fires on map load (GameMode.OnEnable) — fresh prefabs loaded
                 _watchdogGeneration++;
                 _watchdogFired = false;
-                MelonLogger.Msg("[UnitBalance] Game init (lobby) — watchdog cancelled");
+                // Fresh map = fresh prefabs — must apply overrides before starters spawn
+                _overridesApplied = false;
+                MelonLogger.Msg("[UnitBalance] Game init — applying overrides to fresh prefabs");
+                ApplyOverridesLogic();
             }
         }
 
@@ -38,7 +41,11 @@ namespace Si_UnitBalance
                 // Fires on ENDED → INIT within same map (round restart/voting) — cancel watchdog
                 _watchdogGeneration++;
                 _watchdogFired = false;
-                MelonLogger.Msg("[UnitBalance] Game restart (voting) — watchdog cancelled");
+                MelonLogger.Msg("[UnitBalance] Game restart (voting)");
+                // Prefabs still modified from previous round (no revert at game end)
+                // Just ensure overrides are applied in case of edge cases
+                if (!_overridesApplied)
+                    ApplyOverridesLogic();
             }
         }
 
@@ -266,10 +273,23 @@ namespace Si_UnitBalance
             }
         }
 
-        private static void OnGameStartedLogic()
+        /// <summary>
+        /// Apply all overrides to prefab/asset data. Called during voting phase
+        /// (OnGameRestart) so overrides are active before starter units spawn.
+        /// Safe to call multiple times — skips if already applied.
+        /// </summary>
+        private static void ApplyOverridesLogic()
         {
             try
             {
+                if (!_enabled || !_configLoaded) return;
+
+                if (_overridesApplied)
+                {
+                    MelonLogger.Msg("[UnitBalance] Overrides already active — skipping re-apply");
+                    return;
+                }
+
                 _nameCache.Clear();
 
                 if (_dumpFields && !_fieldsDumped)
@@ -279,81 +299,97 @@ namespace Si_UnitBalance
                     _fieldsDumped = true;
                 }
 
-                if (_enabled && _configLoaded)
+                // Initialize OverrideManager reflection wrapper
+                bool omReady = InitOverrideManager();
+                if (!omReady)
+                    MelonLogger.Warning("OverrideManager not available — falling back to direct mutation (no client sync)");
+
+                // Always revert OM overrides before re-applying — ensures CacheVanillaBaseValues
+                // reads true vanilla values (prevents multiplier compounding on same-map restarts).
+                // On fresh map loads this is a no-op (prefabs already vanilla).
+                if (omReady && _overrideManagerType != null)
+                    OMRevertAll();
+
+                // Register DamageManagerData in OM (server-only — clients don't have this type registered)
+                if (omReady && _healthMultEnabled && _healthMultipliers.Count > 0)
+                    RegisterDamageManagerDataInOM();
+
+                // Snapshot vanilla base values before overrides modify them
+                CacheVanillaBaseValues();
+
+                ApplyConstructionDataOverrides(omReady);
+                if (_healthMultEnabled)
                 {
-                    // Initialize OverrideManager reflection wrapper
-                    bool omReady = InitOverrideManager();
-                    if (!omReady)
-                        MelonLogger.Warning("OverrideManager not available — falling back to direct mutation (no client sync)");
-
-                    // When revert_on_round_end=false and overrides are already applied,
-                    // skip re-applying to avoid compounding multiplier-based overrides.
-                    // Still propagate to live instances and sync to clients.
-                    bool skipApply = !_revertOnRoundEnd && _overridesApplied;
-
-                    if (!skipApply)
-                    {
-                        // Register DamageManagerData in OM (server-only — clients don't have this type registered)
-                        if (omReady && _healthMultEnabled && _healthMultipliers.Count > 0)
-                            RegisterDamageManagerDataInOM();
-
-                        // Snapshot vanilla base values before overrides modify them
-                        CacheVanillaBaseValues();
-
-                        ApplyConstructionDataOverrides(omReady);
-                        if (_healthMultEnabled)
-                            ApplyHealthOverrides(omReady);
-                        ApplyProjectileDamageOverrides(omReady);
-                        ApplyRangeOverrides(omReady);
-                        ApplyTargetDistanceOverrides(omReady);
-                        ApplyFoWDistanceOverrides(omReady);
-                        ApplyJumpSpeedOverrides(omReady);
-                        ApplyVisibleEventRadiusOverrides(omReady);
-                        ApplyMoveSpeedOverrides(omReady);
-                        ApplyStrafeSpeedOverrides(omReady);
-                        ApplyTurnRadiusOverrides(omReady);
-                        ApplyTeleportOverrides(omReady);
-                        ApplyDispenserTimeoutOverrides(omReady);
-
-                        if (_shrimpDisableAim)
-                            ApplyShrimpAimDisable();
-
-                        _overridesApplied = true;
-                    }
-                    else
-                    {
-                        MelonLogger.Msg("[UnitBalance] Overrides already active (revert_on_round_end=false) — skipping re-apply");
-                    }
-
-                    // Propagate overrides to already-spawned instances (starter HQs, etc.)
-                    // OM only modifies prefab data — live instances have independent component copies
-                    try { PropagateToLiveInstances(); }
-                    catch (Exception pex) { MelonLogger.Warning($"[LIVE] Propagation error on game start: {pex.Message}"); }
-
-                    MelonLogger.Msg($"Unit Balance active (OverrideManager={omReady}): " +
-                        $"{_damageMultipliers.Count} damage, {_healthMultipliers.Count} health, " +
-                        $"{_costMultipliers.Count} cost, {_buildTimeMultipliers.Count} buildTime, " +
-                        $"{_rangeMultipliers.Count} range, {_moveSpeedMultipliers.Count} moveSpeed, " +
-                        $"{_projectileOverrides.Count} projOverrides, " +
-                        $"{_minTierOverrides.Count} minTier, {_techTierTimes.Count} techTime");
-
-                    // Subscribe to tier change events for dispenser LocalTimeout reset
-                    if (_minTierOverrides.Count > 0)
-                    {
-                        _dispenserTierResets.Clear();
-                        GameEvents.OnTeamTechnologyTierChanged += OnTeamTierChanged;
-                        MelonLogger.Msg("[DISPENSER] Subscribed to tier change events for min_tier unlock");
-                    }
-
-                    // Spawn additional units if enabled
-                    if (_additionalSpawn)
-                        MelonCoroutines.Start(SpawnAdditionalUnits(5f));
-
-                    // Send overrides to all connected players who joined before game start
-                    // (they missed the overrides because notify=false during bulk setup)
-                    if (omReady)
-                        MelonCoroutines.Start(SyncOverridesToAllPlayers(2f));
+                    ApplyHealthOverrides(omReady);
+                    ReclampLiveHealth();
                 }
+                ApplyProjectileDamageOverrides(omReady);
+                ApplyRangeOverrides(omReady);
+                ApplyTargetDistanceOverrides(omReady);
+                ApplyFoWDistanceOverrides(omReady);
+                ApplyJumpSpeedOverrides(omReady);
+                ApplyVisibleEventRadiusOverrides(omReady);
+                ApplyMoveSpeedOverrides(omReady);
+                ApplyStrafeSpeedOverrides(omReady);
+                ApplyTurnRadiusOverrides(omReady);
+                ApplyTeleportOverrides(omReady);
+                ApplyDispenserTimeoutOverrides(omReady);
+
+                if (_shrimpDisableAim)
+                    ApplyShrimpAimDisable();
+
+                _overridesApplied = true;
+
+                MelonLogger.Msg($"[UnitBalance] Overrides applied (OverrideManager={omReady}): " +
+                    $"{_damageMultipliers.Count} damage, {_healthMultipliers.Count} health, " +
+                    $"{_costMultipliers.Count} cost, {_buildTimeMultipliers.Count} buildTime, " +
+                    $"{_rangeMultipliers.Count} range, {_moveSpeedMultipliers.Count} moveSpeed, " +
+                    $"{_projectileOverrides.Count} projOverrides, " +
+                    $"{_minTierOverrides.Count} minTier, {_techTierTimes.Count} techTime");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"ApplyOverridesLogic error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Game start: apply overrides, propagate to live instances, spawn extra units, sync clients.
+        /// </summary>
+        private static void OnGameStartedLogic()
+        {
+            try
+            {
+                if (!_enabled || !_configLoaded) return;
+
+                // Safety net: apply if not already done (e.g. first round after server start)
+                ApplyOverridesLogic();
+
+                bool omReady = _omInitialized;
+
+                // Propagate overrides to already-spawned instances (starter HQs, etc.)
+                // OM only modifies prefab data — live instances have independent component copies
+                try { PropagateToLiveInstances(); }
+                catch (Exception pex) { MelonLogger.Warning($"[LIVE] Propagation error on game start: {pex.Message}"); }
+
+                MelonLogger.Msg($"[UnitBalance] Game started — propagation complete");
+
+                // Subscribe to tier change events for dispenser LocalTimeout reset
+                if (_minTierOverrides.Count > 0)
+                {
+                    _dispenserTierResets.Clear();
+                    GameEvents.OnTeamTechnologyTierChanged += OnTeamTierChanged;
+                    MelonLogger.Msg("[DISPENSER] Subscribed to tier change events for min_tier unlock");
+                }
+
+                // Spawn additional units if enabled
+                if (_additionalSpawn)
+                    MelonCoroutines.Start(SpawnAdditionalUnits(5f));
+
+                // Send overrides to all connected players who joined before game start
+                // (they missed the overrides because notify=false during bulk setup)
+                if (omReady)
+                    MelonCoroutines.Start(SyncOverridesToAllPlayers(2f));
             }
             catch (Exception ex)
             {
@@ -456,9 +492,16 @@ namespace Si_UnitBalance
 
         private static readonly (string faction, string unitName, int count)[] _additionalSpawnMap =
         {
-            ("Sol", "Platoon Hauler", 3),
-            ("Centauri", "Squad Transport", 3),
-            ("Alien", "Hunter", 1),
+            ("Sol", "Platoon Hauler", 2),
+            ("Sol", "Light Striker", 2),
+            ("Sol", "Heavy Quad", 2),
+            ("Centauri", "Squad Transport", 2),
+            ("Centauri", "Assault Car", 2),
+            ("Centauri", "Heavy Raider", 2),
+            ("Alien", "Hunter", 3),
+            ("Alien", "Squid", 2),
+            ("Alien", "Shocker", 4),
+            ("Alien", "Wasp", 1),
         };
 
         private static IEnumerator SpawnAdditionalUnits(float delay)
@@ -481,63 +524,90 @@ namespace Si_UnitBalance
 
             int totalSpawned = 0;
 
-            foreach (var team in Team.Teams)
+            // Disable damage during spawn to prevent fall damage on spawned units
+            DamageManager.DamageDisabled = true;
+            try
             {
-                if (team == null || team.Structures == null || team.Structures.Count == 0) continue;
-
-                // Determine faction from team name
-                string teamId = team.TeamShortName ?? team.name ?? "";
-                string matchedFaction = null;
-                foreach (var entry in _additionalSpawnMap)
+                foreach (var team in Team.Teams)
                 {
-                    if (teamId.IndexOf(entry.faction, StringComparison.OrdinalIgnoreCase) >= 0)
+                    if (team == null || team.Structures == null || team.Structures.Count == 0) continue;
+
+                    // Determine faction from team name
+                    string teamId = team.TeamShortName ?? team.name ?? "";
+                    string matchedFaction = null;
+                    foreach (var entry in _additionalSpawnMap)
                     {
-                        matchedFaction = entry.faction;
-                        break;
+                        if (teamId.IndexOf(entry.faction, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            matchedFaction = entry.faction;
+                            break;
+                        }
                     }
-                }
-                if (matchedFaction == null) continue;
+                    if (matchedFaction == null) continue;
 
-                Structure baseStruct = team.Structures[0];
-                if (baseStruct == null) continue;
-                Vector3 hqPos = baseStruct.transform.position;
-                Vector3 hqForward = baseStruct.transform.forward;
+                    Structure baseStruct = team.Structures[0];
+                    if (baseStruct == null) continue;
+                    Vector3 hqPos = baseStruct.transform.position;
+                    Vector3 hqForward = baseStruct.transform.forward;
 
-                foreach (var entry in _additionalSpawnMap)
-                {
-                    if (!string.Equals(entry.faction, matchedFaction, StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    if (!infoByName.TryGetValue(entry.unitName, out ObjectInfo unitInfo))
+                    // Flatten spawn list for this faction so we can distribute evenly
+                    var spawnList = new List<(string unitName, ObjectInfo info)>();
+                    foreach (var entry in _additionalSpawnMap)
                     {
-                        MelonLogger.Warning($"[SPAWN] ObjectInfo not found for '{entry.unitName}'");
-                        continue;
+                        if (!string.Equals(entry.faction, matchedFaction, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (!infoByName.TryGetValue(entry.unitName, out ObjectInfo unitInfo))
+                        {
+                            MelonLogger.Warning($"[SPAWN] ObjectInfo not found for '{entry.unitName}'");
+                            continue;
+                        }
+                        for (int i = 0; i < entry.count; i++)
+                            spawnList.Add((entry.unitName, unitInfo));
                     }
 
-                    for (int i = 0; i < entry.count; i++)
+                    // Distribute all units evenly in a circle around HQ
+                    float radius = 120f;
+                    int totalForFaction = spawnList.Count;
+                    for (int i = 0; i < totalForFaction; i++)
                     {
                         try
                         {
-                            // Spread units in different directions from HQ (120° apart)
-                            float angleDeg = (360f / entry.count) * i;
-                            float angleRad = angleDeg * Mathf.Deg2Rad;
+                            float angleDeg = (360f / totalForFaction) * i;
                             Vector3 dir = Quaternion.Euler(0f, angleDeg, 0f) * hqForward;
-                            Vector3 pos = hqPos + dir * 150f;
+                            Vector3 pos = hqPos + dir * radius;
+
+                            // Sample terrain height at spawn position
+                            float bestY = pos.y;
+                            foreach (var terrain in Terrain.activeTerrains)
+                            {
+                                if (terrain == null) continue;
+                                float ty = terrain.SampleHeight(pos) + terrain.transform.position.y;
+                                if (ty > bestY) bestY = ty;
+                            }
+                            pos.y = bestY + 1f;
+
                             Quaternion rot = Quaternion.LookRotation(dir, Vector3.up);
-                            Game.SpawnPrefab(unitInfo.Prefab, null, team, pos, rot);
+                            Game.SpawnPrefab(spawnList[i].info.Prefab, null, team, pos, rot);
                             totalSpawned++;
                         }
                         catch (Exception ex)
                         {
-                            MelonLogger.Warning($"[SPAWN] Failed to spawn '{entry.unitName}' for {teamId}: {ex.Message}");
+                            MelonLogger.Warning($"[SPAWN] Failed to spawn '{spawnList[i].unitName}' for {teamId}: {ex.Message}");
                         }
                     }
 
-                    MelonLogger.Msg($"[SPAWN] Spawned {entry.count}x {entry.unitName} for {teamId}");
+                    MelonLogger.Msg($"[SPAWN] Spawned {totalForFaction} units for {teamId}");
                 }
             }
+            finally
+            {
+                // Keep damage disabled for 20s so spawned units can land without fall damage
+                MelonLogger.Msg($"[SPAWN] Additional spawn complete: {totalSpawned} units — damage disabled for 20s");
+            }
 
-            MelonLogger.Msg($"[SPAWN] Additional spawn complete: {totalSpawned} units");
+            yield return new WaitForSeconds(20f);
+            DamageManager.DamageDisabled = false;
+            MelonLogger.Msg("[SPAWN] Damage re-enabled");
         }
 
         private static class Patch_GameEnded
@@ -557,17 +627,9 @@ namespace Si_UnitBalance
                 _originalProjectileSpeeds.Clear();
                 _originalMoveSpeeds.Clear();
 
-                // Revert all OverrideManager overrides (restores originals, notifies clients)
-                // When disabled, overrides persist between rounds — fixes starter HQs missing FOW/target values
-                if (_revertOnRoundEnd && _omInitialized && _overrideManagerType != null)
-                {
-                    OMRevertAll();
-                    _overridesApplied = false;
-                }
-                else if (!_revertOnRoundEnd)
-                {
-                    MelonLogger.Msg("[UnitBalance] Skipping OMRevertAll (revert_on_round_end=false)");
-                }
+                // Don't revert OM or reset _overridesApplied here — prefabs must stay
+                // modified between rounds so starter structures inherit overrides.
+                // Only Patch_GameInit (map change) resets _overridesApplied for fresh prefabs.
 
                 // Start watchdog — if no new game starts within timeout, force recovery (once only)
                 if (_watchdogEnabled && !_watchdogFired)

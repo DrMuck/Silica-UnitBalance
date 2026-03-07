@@ -4,6 +4,30 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-07 — Additional Spawn Overhaul, Voting-Phase Overrides
+
+### Additional Spawn Units Updated
+- **Sol**: 2x Platoon Hauler, 2x Light Striker, 2x Heavy Quad (was 3x Platoon Hauler)
+- **Centauri**: 2x Squad Transport, 2x Assault Car, 2x Heavy Raider (was 3x Squad Transport)
+- **Alien**: 3x Hunter, 2x Squid, 4x Shocker, 1x Wasp (was 1x Hunter)
+
+### Spawn Fall Damage Fix
+- `DamageManager.DamageDisabled = true` during spawn, kept active for 20 seconds (try/finally for safety)
+- Units distributed evenly in a circle around HQ (360°/totalUnits) instead of per-entry circles that caused overlapping
+- Terrain height sampling via `Terrain.SampleHeight()` — units spawn 1m above ground instead of at HQ altitude
+
+### Override Lifecycle Fix (Starter Structures)
+- **Problem**: Starter HQ/Nest spawned with vanilla values (especially FOW) on rounds after the first. Only expansion structures got modded values.
+- **Root cause**: Overrides applied too late (`OnGameStarted`, after starters already spawned). On map change, fresh prefabs had no overrides when starters spawned.
+- **Fix**: Overrides now apply in `Patch_GameInit` (map load, before starters spawn) — replicating the working first-game-after-server-start behavior.
+  - `Patch_GameInit`: Resets flag + calls `ApplyOverridesLogic()` on fresh prefabs
+  - `Patch_GameRestart`: Safety net for same-map restarts (applies only if not already done)
+  - `Patch_GameEnded`: No longer calls `OMRevertAll()` or resets `_overridesApplied` — prefabs stay modified between rounds so same-map restarts keep modded values on starters
+  - `ApplyOverridesLogic`: Always does atomic `OMRevertAll` + re-apply to prevent multiplier compounding (only called on map change or first round)
+  - `OnGameStartedLogic`: Now only handles propagation to live instances, additional spawns, and client sync
+
+---
+
 ## 2026-03-06 — LivePropagation Fix, Menu Shortcuts, Run/Sprint Speed
 
 ### LivePropagation Il2Cpp Fix

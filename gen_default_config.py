@@ -182,13 +182,13 @@ infantry_weapons = {
     'Scout':      {'proj': 'SMG',             'speed': 350, 'life': 3, 'damage': 27},
     'Rifleman':   {'proj': 'Rifle',           'speed': 500, 'life': 3, 'damage': 45},
     'Sniper':     {'proj': 'SniperRifle',     'speed': 800, 'life': 5, 'damage': 700},
-    'Heavy':      {'proj': 'Minigun',         'speed': 500, 'life': 3, 'damage': 55},
-    'Commando':   {'proj': 'SMG2',            'speed': 450, 'life': 3, 'damage': 85},
+    'Heavy':      {'proj': 'Human_Rocket',     'speed': 200, 'life': 4.125, 'damage': 700, 'splash': 500, 'splash_r': 10},
+    'Commando':   {'proj': 'BalteriumRifle',  'speed': 500, 'life': 5, 'damage': 70},
     'Militia':    {'proj': 'SMG',             'speed': 350, 'life': 3, 'damage': 27},
     'Trooper':    {'proj': 'Bullpup',         'speed': 450, 'life': 3, 'damage': 36},
     'Marksman':   {'proj': 'MarksmanRifle',   'speed': 600, 'life': 5, 'damage': 300},
-    'Juggernaut': {'proj': 'BalteriumRifle',  'speed': 500, 'life': 5, 'damage': 70},
-    'Templar':    {'proj': 'RGXRifle',        'speed': 500, 'life': 3, 'damage': 55},
+    'Juggernaut': {'proj': 'Human_Rocket',    'speed': 200, 'life': 4.125, 'damage': 700, 'splash': 500, 'splash_r': 10},
+    'Templar':    {'proj': 'Minigun',         'speed': 500, 'life': 3, 'damage': 55},
 }
 
 infantry_speed = {n: {'walk': 2, 'run': 4, 'sprint': 7, 'jump': 4.25} for n in infantry_weapons}

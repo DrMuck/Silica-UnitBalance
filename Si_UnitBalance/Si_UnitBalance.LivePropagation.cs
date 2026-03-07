@@ -154,7 +154,13 @@ namespace Si_UnitBalance
                     if (hasTargetDist)
                         fieldsSet += LiveSetAbsolute(liveComp, "TargetingDistance", targetDist);
                     if (hasFoW)
+                    {
+                        var fowDbg = liveComp.GetType().GetField("FogOfWarViewDistance",
+                            BindingFlags.Public | BindingFlags.Instance);
+                        float curFow = fowDbg != null ? (float)fowDbg.GetValue(liveComp) : -1f;
+                        MelonLogger.Msg($"[LIVE-FOW] {name}: current={curFow}, target={fowDist}");
                         fieldsSet += LiveSetAbsolute(liveComp, "FogOfWarViewDistance", fowDist);
+                    }
                 }
 
                 // --- Soldier / movement: JumpSpeed + speed fields ---
