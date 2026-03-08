@@ -14,6 +14,15 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 - Hard-coded `_revertOnRoundEnd = false` — reverting at round end breaks starter structure overrides and is no longer needed.
 - Removed from: HTP in-game menu, config JSON loading, Discord comparison, Interactive web tool (state.js + editor.js).
 
+### Map Change Detection via Scene Name
+- **Problem**: `Patch_GameInit` may not fire on all map changes, leaving `_overridesApplied = true` and skipping overrides entirely on the new map. Also, Apply* methods read current prefab values and multiply — re-applying on same-map restarts caused multiplier compounding.
+- **Fix**: Track map name via `SceneManager.GetActiveScene().name`. On map change, clear vanilla cache and re-apply from fresh prefabs. On same-map restart, skip re-apply (prefabs already modified).
+  - `OMRevertAll` in `ApplyOverridesLogic` ensures clean OM state on map change (notify=true syncs clients); never fires on same-map restarts since `_overridesApplied = true` skips entire function
+  - `CacheVanillaBaseValues` only runs when cache is empty (first call or after map change)
+  - `Patch_GameRestart` and `OnGameStartedLogic` both detect map changes as safety nets
+  - Game end no longer resets `_overridesApplied`
+  - Key insight (databomb): game calls `OverrideManager.RevertAll` inside `GameLevelLoader.LoadAsyncScene` during map changes — overrides must be re-applied after this
+
 ---
 
 ## 2026-03-07 — Additional Spawn Overhaul, Voting-Phase Overrides

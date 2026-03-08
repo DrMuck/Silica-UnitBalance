@@ -5,6 +5,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Si_UnitBalance
 {
@@ -19,17 +20,32 @@ namespace Si_UnitBalance
         private const float WatchdogTimeoutSeconds = 60f; // time after game end before forcing recovery
         private static bool _watchdogEnabled = true;
         private static bool _watchdogFired; // prevents re-triggering after recovery EndRound
+        private static string _lastMapName = ""; // tracks current map to detect map changes
+
+        private static string GetCurrentMapName()
+        {
+            try
+            {
+                return SceneManager.GetActiveScene().name ?? "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
 
         private static class Patch_GameInit
         {
             public static void Postfix()
             {
-                // Fires on map load (GameMode.OnEnable) — fresh prefabs loaded
+                // Fires on map load — fresh prefabs loaded
                 _watchdogGeneration++;
                 _watchdogFired = false;
-                // Fresh map = fresh prefabs — must apply overrides before starters spawn
+                _lastMapName = GetCurrentMapName();
+                // Fresh map = fresh prefabs — clear vanilla cache so it re-reads from clean prefabs
                 _overridesApplied = false;
-                MelonLogger.Msg("[UnitBalance] Game init — applying overrides to fresh prefabs");
+                _vanillaBaseCache.Clear();
+                MelonLogger.Msg($"[UnitBalance] Game init ({_lastMapName}) — applying overrides to fresh prefabs");
                 ApplyOverridesLogic();
             }
         }
@@ -38,14 +54,27 @@ namespace Si_UnitBalance
         {
             public static void Postfix()
             {
-                // Fires on ENDED → INIT within same map (round restart/voting) — cancel watchdog
                 _watchdogGeneration++;
                 _watchdogFired = false;
-                MelonLogger.Msg("[UnitBalance] Game restart (voting)");
-                // Prefabs still modified from previous round (no revert at game end)
-                // Just ensure overrides are applied in case of edge cases
-                if (!_overridesApplied)
+
+                // Detect map change by comparing current map name
+                string currentMap = GetCurrentMapName();
+                bool mapChanged = !string.Equals(currentMap, _lastMapName, StringComparison.OrdinalIgnoreCase);
+                if (mapChanged)
+                {
+                    MelonLogger.Msg($"[UnitBalance] Game restart — map changed ({_lastMapName} → {currentMap}), re-applying overrides");
+                    _lastMapName = currentMap;
+                    _overridesApplied = false;
+                    _vanillaBaseCache.Clear();
                     ApplyOverridesLogic();
+                }
+                else
+                {
+                    MelonLogger.Msg("[UnitBalance] Game restart (same map) — prefabs already modified");
+                    // Prefabs still modified from previous round, no re-apply needed
+                    if (!_overridesApplied)
+                        ApplyOverridesLogic();
+                }
             }
         }
 
@@ -304,9 +333,11 @@ namespace Si_UnitBalance
                 if (!omReady)
                     MelonLogger.Warning("OverrideManager not available — falling back to direct mutation (no client sync)");
 
-                // Always revert OM overrides before re-applying — ensures CacheVanillaBaseValues
-                // reads true vanilla values (prevents multiplier compounding on same-map restarts).
-                // On fresh map loads this is a no-op (prefabs already vanilla).
+                // Revert OM overrides to ensure clean state before applying.
+                // On map change: game already reverted in LoadAsyncScene, this ensures
+                // our OM state is consistent (notify=true cleans up client state too).
+                // On same-map restart: ApplyOverridesLogic is skipped (_overridesApplied=true),
+                // so this never fires — no compounding risk.
                 if (omReady && _overrideManagerType != null)
                     OMRevertAll();
 
@@ -314,8 +345,10 @@ namespace Si_UnitBalance
                 if (omReady && _healthMultEnabled && _healthMultipliers.Count > 0)
                     RegisterDamageManagerDataInOM();
 
-                // Snapshot vanilla base values before overrides modify them
-                CacheVanillaBaseValues();
+                // Snapshot vanilla base values from fresh prefabs (OMRevertAll ensures vanilla state).
+                // Only re-read when cache is empty (map change clears it, same-map restart preserves it).
+                if (_vanillaBaseCache.Count == 0)
+                    CacheVanillaBaseValues();
 
                 ApplyConstructionDataOverrides(omReady);
                 if (_healthMultEnabled)
@@ -362,7 +395,16 @@ namespace Si_UnitBalance
             {
                 if (!_enabled || !_configLoaded) return;
 
-                // Safety net: apply if not already done (e.g. first round after server start)
+                // Safety net: detect map change if Patch_GameInit didn't fire
+                string currentMap = GetCurrentMapName();
+                if (!string.Equals(currentMap, _lastMapName, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(currentMap))
+                {
+                    MelonLogger.Msg($"[UnitBalance] GameStarted detected map change ({_lastMapName} → {currentMap})");
+                    _lastMapName = currentMap;
+                    _overridesApplied = false;
+                    _vanillaBaseCache.Clear();
+                }
+                // Apply if not already done
                 ApplyOverridesLogic();
 
                 bool omReady = _omInitialized;
@@ -627,9 +669,9 @@ namespace Si_UnitBalance
                 _originalProjectileSpeeds.Clear();
                 _originalMoveSpeeds.Clear();
 
-                // Don't revert OM or reset _overridesApplied here — prefabs must stay
-                // modified between rounds so starter structures inherit overrides.
-                // Only Patch_GameInit (map change) resets _overridesApplied for fresh prefabs.
+                // Don't reset _overridesApplied or call OMRevertAll — prefabs stay modified
+                // between rounds so starter structures inherit overrides on same-map restarts.
+                // Map changes are detected via _lastMapName in Patch_GameRestart/GameStarted.
 
                 // Start watchdog — if no new game starts within timeout, force recovery (once only)
                 if (_watchdogEnabled && !_watchdogFired)
