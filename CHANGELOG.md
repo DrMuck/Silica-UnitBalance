@@ -4,6 +4,18 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-08 — Same-Map Restart Fix, Remove Revert on Round End
+
+### Same-Map Restart Fix
+- **Problem**: After `!rebalance`, `_overridesApplied` was not set back to `true`, causing `ApplyOverridesLogic` (with `OMRevertAll`) to fire on the next same-map restart — reverting prefabs and breaking starter structure overrides.
+- **Fix**: `!rebalance` now sets `_overridesApplied = true` after re-applying overrides.
+
+### Remove "Revert on Round End" Setting
+- Hard-coded `_revertOnRoundEnd = false` — reverting at round end breaks starter structure overrides and is no longer needed.
+- Removed from: HTP in-game menu, config JSON loading, Discord comparison, Interactive web tool (state.js + editor.js).
+
+---
+
 ## 2026-03-07 — Additional Spawn Overhaul, Voting-Phase Overrides
 
 ### Additional Spawn Units Updated

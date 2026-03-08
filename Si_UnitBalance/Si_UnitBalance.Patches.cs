@@ -169,6 +169,7 @@ namespace Si_UnitBalance
                     try { PropagateToLiveInstances(); }
                     catch (Exception pex) { MelonLogger.Warning($"[Rebalance] Live propagation error: {pex.Message}"); }
 
+                    _overridesApplied = true;
                     MelonLogger.Msg("[Rebalance] All overrides re-applied");
 
                     // 5. Sync to all connected players
@@ -559,19 +560,7 @@ namespace Si_UnitBalance
                         WriteAuditLog(playerName3, steamId3, "htp", "watchdog_enabled", (!_watchdogEnabled).ToString(), _watchdogEnabled.ToString());
                         MelonLogger.Msg($"[BAL] {playerName3} ({steamId3}): watchdog_enabled -> {_watchdogEnabled}");
                     }
-                    else if (selection == 8)
-                    {
-                        // Toggle revert on round end
-                        _revertOnRoundEnd = !_revertOnRoundEnd;
-                        WriteBoolToJson("revert_on_round_end", _revertOnRoundEnd);
-                        string rvStatus = _revertOnRoundEnd ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                        SendChatToPlayer(player, _chatPrefix + "Revert on Round End: " + rvStatus);
-                        string playerName4 = GetPlayerName(player);
-                        string steamId4 = GetPlayerSteamId(player);
-                        WriteAuditLog(playerName4, steamId4, "htp", "revert_on_round_end", (!_revertOnRoundEnd).ToString(), _revertOnRoundEnd.ToString());
-                        MelonLogger.Msg($"[BAL] {playerName4} ({steamId4}): revert_on_round_end -> {_revertOnRoundEnd}");
-                    }
-                    // (menu item 9 removed — health mult is always enabled)
+                    // (menu items 8-9 removed — revert on round end always off, health mult always enabled)
                     break;
 
                 case MenuLevel.HTPHoverbike:

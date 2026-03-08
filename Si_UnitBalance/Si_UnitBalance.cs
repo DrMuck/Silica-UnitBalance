@@ -50,7 +50,7 @@ namespace Si_UnitBalance
         private static bool _dumpFields = true;
         private static bool _shrimpDisableAim = false;
         private static bool _additionalSpawn = false;
-        private static bool _revertOnRoundEnd = true;
+        // _revertOnRoundEnd removed — always false (reverting breaks starter structure overrides)
         private static bool _healthMultEnabled = true; // always enabled — client mod handles sync
         private static bool _overridesApplied; // tracks if OM overrides are currently active (for no-revert mode)
         private static bool _discordAutoPost = false;
@@ -394,7 +394,7 @@ namespace Si_UnitBalance
                 _discordAutoPost = config["discord_auto_post"]?.Value<bool>() ?? false;
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
-                _revertOnRoundEnd = config["revert_on_round_end"]?.Value<bool>() ?? true;
+                // _revertOnRoundEnd removed — always false (reverting breaks starter structure overrides)
                 _healthMultEnabled = config["health_mult_enabled"]?.Value<bool>() ?? true;
 
                 _damageMultipliers.Clear();
