@@ -367,6 +367,7 @@ namespace Si_UnitBalance
                 ApplyTurnRadiusOverrides(omReady);
                 ApplyTeleportOverrides(omReady);
                 ApplyDispenserTimeoutOverrides(omReady);
+                ApplyProximityDetonationOverrides();
 
                 if (_shrimpDisableAim)
                     ApplyShrimpAimDisable();
@@ -377,7 +378,7 @@ namespace Si_UnitBalance
                     $"{_damageMultipliers.Count} damage, {_healthMultipliers.Count} health, " +
                     $"{_costMultipliers.Count} cost, {_buildTimeMultipliers.Count} buildTime, " +
                     $"{_rangeMultipliers.Count} range, {_moveSpeedMultipliers.Count} moveSpeed, " +
-                    $"{_projectileOverrides.Count} projOverrides, " +
+                    $"{_projectileOverrides.Count} projOverrides, {_proximityOverrides.Count} proximity, " +
                     $"{_minTierOverrides.Count} minTier, {_techTierTimes.Count} techTime");
             }
             catch (Exception ex)
@@ -668,6 +669,8 @@ namespace Si_UnitBalance
                 _originalProjectileLifetimes.Clear();
                 _originalProjectileSpeeds.Clear();
                 _originalMoveSpeeds.Clear();
+                _originalHealth.Clear();
+                _originalAimAngle.Clear();
 
                 // Don't reset _overridesApplied or call OMRevertAll — prefabs stay modified
                 // between rounds so starter structures inherit overrides on same-map restarts.

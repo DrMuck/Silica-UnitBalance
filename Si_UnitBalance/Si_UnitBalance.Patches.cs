@@ -112,7 +112,12 @@ namespace Si_UnitBalance
                 _originalSpread.Clear();
                 _originalProjectileLifetimes.Clear();
                 _originalProjectileSpeeds.Clear();
+                _originalAimLeadVelocity.Clear();
+                _originalAimLeadGravity.Clear();
+                _originalAimLeadDrag.Clear();
                 _originalMoveSpeeds.Clear();
+                _originalHealth.Clear();
+                _originalAimAngle.Clear();
                 _nameCache.Clear();
 
                 if (defaultMode)
@@ -160,6 +165,7 @@ namespace Si_UnitBalance
                     ApplyTurnRadiusOverrides(omReady);
                     ApplyTeleportOverrides(omReady);
                     ApplyDispenserTimeoutOverrides(omReady);
+                    ApplyProximityDetonationOverrides();
 
                     if (_shrimpDisableAim)
                         ApplyShrimpAimDisable();
@@ -223,6 +229,8 @@ namespace Si_UnitBalance
                     bool ok;
                     if (state.PendingTechTierKey != null)
                         ok = WriteTechTierToJson(state.PendingTechTierKey, state.PendingValue);
+                    else if (state.PendingParamKey.StartsWith("prox_"))
+                        ok = WriteProximityToJson(unitName, state.PendingParamKey.Substring(5), state.PendingValue);
                     else
                         ok = WriteParamToJson(unitName, state.PendingParamKey, state.PendingValue);
                     state.PendingConfirm = false;
@@ -616,6 +624,44 @@ namespace Si_UnitBalance
             }
 
             ShowCurrentMenu(player, state);
+        }
+
+        // Fix vanilla construction health transfer bug:
+        // ConstructionSite.SpawnObject transfers Health01 (ratio) to the spawned building.
+        // If DamageManagerData.Health changed between Init and completion (e.g., due to OM overrides),
+        // HealthAddRemaining was computed with old MaxHealth but Health01 divides by new MaxHealth → ratio < 1.0.
+        // Fix: ensure construction site's health is at MaxHealth right before spawn.
+        private static class Patch_ConstructionSpawn
+        {
+            private static MethodInfo _healthSetter;
+
+            public static void Prefix(object __instance)
+            {
+                try
+                {
+                    var dm = ((UnityEngine.Component)__instance).GetComponent<DamageManager>();
+                    if (dm == null) return;
+
+                    float maxHP = dm.MaxHealth;
+                    if (maxHP <= 0) return;
+                    float health01 = dm.Health / maxHP;
+                    if (health01 >= 0.999f) return; // Already at full — nothing to fix
+
+                    // Force health to max before spawn transfer via reflection (setter is private)
+                    if (_healthSetter == null)
+                    {
+                        var prop = typeof(DamageManager).GetProperty("Health",
+                            BindingFlags.Public | BindingFlags.Instance);
+                        _healthSetter = prop?.GetSetMethod(true);
+                    }
+                    if (_healthSetter != null)
+                    {
+                        _healthSetter.Invoke(dm, new object[] { maxHP });
+                        MelonLogger.Msg($"[HEALTH-FIX] Construction site Health01={health01:F3} at completion — forced to 1.0 (MaxHealth={maxHP:F0})");
+                    }
+                }
+                catch { }
+            }
         }
 
         private static class Patch_SendPlayerOverrides

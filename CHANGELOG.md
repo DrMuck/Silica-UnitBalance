@@ -4,6 +4,66 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-14 — Health Diagnostics, Behemoth Accuracy Fix, Proximity Detonation Support, Tech Time Diagnostics
+
+### Refinery Health Bar Fix (Shared DamageManagerData)
+- **Problem**: Refineries showed ~25% less than max health on fresh build, even with `health_mult: 1.0`. Root cause: `DamageManager.MaxHealth` is a live computed property from `DamageManagerData.Health`, while `HealthInternal` is set once at spawn. When another unit sharing the same DamageManagerData gets a health_mult applied, the Refinery's MaxHealth increases but its current Health stays at the old value.
+- **Fix**: `ReclampLiveHealth()` now **maintains health percentage** for all live DamageManagers whose Data asset was modified. Previously only clamped DOWN (HP > MaxHealth); now also scales UP. Units at full health before the change stay at full health after. Units at partial health maintain their percentage.
+- Also: `_originalHealth` anti-compounding cache, `modifiedDMD` HashSet, `[HEALTH-DIAG]` diagnostics.
+
+### Behemoth Accuracy Fix (Instant-Hit Ray Weapons)
+- **Problem**: `accuracy_mult` modified `AttackProjectileSpread` which has no effect on instant-hit (raycast) weapons — the ray goes straight to target regardless of spread.
+- **Fix v1**: For instant-hit creatures, `accuracy_mult` now also scales `AttackProjectileAimAngle` (the AI's aiming cone). Behemoth AimAngle: 3.0 → 1.5 with `accuracy_mult: 0.50`. Uses `_originalAimAngle` cache to prevent compounding.
+- **Fix v2 (2026-03-15)**: AimAngle scaling was nested inside `if (!float.IsNaN(spread))` — if `AttackProjectileSpread` couldn't be read (returns NaN), the entire AimAngle block was skipped. Moved instant-hit AimAngle scaling outside the spread NaN check so it runs independently.
+- **Status**: Built, awaiting deploy (server must be stopped first — DLL locked).
+
+### Proximity Detonation Support (Flak Truck)
+- **New feature**: Config support for `ProjectileProximityDetonation` component on projectile prefabs.
+- Config format: `"proximity"` sub-object inside per-projectile overrides:
+  ```json
+  "projectiles": {
+      "ProjectileData_Flak_AAFlakCar": {
+          "m_fBaseSpeed": 250,
+          "proximity": {
+              "MinimumTime": 0.5,
+              "SplashRadiusScale": 2.0,
+              "FlyingUnits": true,
+              "GroundUnits": false,
+              "Structures": true
+          }
+      }
+  }
+  ```
+- Fields: `MinimumTime` (arming delay, default 0.25s), `SplashRadiusScale` (proximity detection radius scale, default 1.5), `FlyingUnits`/`GroundUnits`/`Structures` (bool toggles).
+- Finds component via `ProjectileData.m_ProjectilePrefab` → `GetComponentsInChildren`.
+
+### Tech Time Diagnostics
+- **Problem**: Tech time changes appeared "additive not replacive" — unclear root cause.
+- **Fix**: Enhanced `[TECH]` logging to include ConstructionData asset name, verify value after OM.Set, warn on OM failure with fallback, and log unconfigured tech tiers.
+
+### Proximity Detonation In-Game UI (`!b` menu)
+- Added "Proximity Detonation" parameter group for units with `ProjectileProximityDetonation` (e.g. Flak Car)
+- Displays: MinimumTime, SplashRadiusScale, FlyingUnits, GroundUnits, Structures
+- Bool fields show as True/False, accept 1/0 input
+- Writes to nested JSON config (`projectiles -> PDName -> proximity -> field`)
+- Auto-discovers ProjectileData name for the unit
+
+### Flak Explosion Visual Distance
+- **Finding**: Explosion visibility at range is controlled by `ImpactEffectLOD.MaxDistance * m_fDetonateImpactSizeScale` (client-side rendering). Trail has hardcoded 400m cutoff.
+- **Workaround**: `m_fDetonateImpactSizeScale` is a ProjectileData field synced via OM. Increasing it extends explosion visual range (but also scales explosion visual size). Already configurable via per-projectile overrides:
+  ```json
+  "ProjectileData_Flak_AAFlakCar": { "m_fDetonateImpactSizeScale": 3.0 }
+  ```
+
+### Files Changed
+- `Si_UnitBalance.cs` — new dictionaries (`_originalHealth`, `_originalAimAngle`, `_proximityOverrides`), proximity config parsing
+- `Si_UnitBalance.Overrides.cs` — health fix (ReclampLiveHealth rescale), AimAngle scaling for instant-hit, `ApplyProximityDetonationOverrides()`, enhanced tech time logging
+- `Si_UnitBalance.Menu.cs` — proximity UI (GetBaseValuesLive prox_* cases, WriteProximityToJson, ReadProximityConfigValue, FindUnitProjectileDataName), GetProximityComponent helper
+- `Si_UnitBalance.Patches.cs` — proximity write routing in confirm handler, wire proximity overrides in rebalance, clear new caches
+- `Si_UnitBalance.Lifecycle.cs` — wire proximity overrides, clear new caches on game end
+
+---
+
 ## 2026-03-08 — Same-Map Restart Fix, Remove Revert on Round End
 
 ### Same-Map Restart Fix

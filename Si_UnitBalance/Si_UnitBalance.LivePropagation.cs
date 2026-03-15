@@ -41,7 +41,7 @@ namespace Si_UnitBalance
             }
 
             if (liveCount > 0 || totalUpdated > 0)
-                MelonLogger.Msg($"[LIVE] Propagated overrides to {totalUpdated}/{liveCount} live instances");
+                LogDebug($"[LIVE] Propagated overrides to {totalUpdated}/{liveCount} live instances");
         }
 
         private static void PropagateToInstance(GameObject liveGO, ObjectInfo info, HashSet<int> processedGOs,
@@ -158,7 +158,7 @@ namespace Si_UnitBalance
                         var fowDbg = liveComp.GetType().GetField("FogOfWarViewDistance",
                             BindingFlags.Public | BindingFlags.Instance);
                         float curFow = fowDbg != null ? (float)fowDbg.GetValue(liveComp) : -1f;
-                        MelonLogger.Msg($"[LIVE-FOW] {name}: current={curFow}, target={fowDist}");
+                        LogDebug($"[LIVE-FOW] {name}: current={curFow}, target={fowDist}");
                         fieldsSet += LiveSetAbsolute(liveComp, "FogOfWarViewDistance", fowDist);
                     }
                 }
@@ -352,7 +352,7 @@ namespace Si_UnitBalance
                 float newVal = vanilla * multiplier;
                 liveField.SetValue(live, newVal);
                 float verify = (float)liveField.GetValue(live);
-                MelonLogger.Msg($"[LIVE-DBG] {unitName}: {fieldName} prefab={vanilla:F2} old={oldLive:F2} -> new={newVal:F2} verify={verify:F2}");
+                LogDebug($"[LIVE-DBG] {unitName}: {fieldName} prefab={vanilla:F2} old={oldLive:F2} -> new={newVal:F2} verify={verify:F2}");
                 return 1;
             }
             catch (Exception ex)
@@ -399,7 +399,7 @@ namespace Si_UnitBalance
                     verify = (float)liveProp.GetValue(live);
                 }
 
-                MelonLogger.Msg($"[LIVE-DBG] {unitName}: {fieldName} prefab={vanilla:F2} old={oldLive:F2} -> new={newVal:F2} verify={verify:F2}");
+                LogDebug($"[LIVE-DBG] {unitName}: {fieldName} prefab={vanilla:F2} old={oldLive:F2} -> new={newVal:F2} verify={verify:F2}");
                 return 1;
             }
             catch { return 0; }
@@ -471,7 +471,7 @@ namespace Si_UnitBalance
                     "Si_UnitBalance_Dump.json");
 
                 var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
-                MelonLogger.Msg($"[JSON DUMP] Found {allInfos.Length} ObjectInfo entries, writing to {outPath}");
+                LogDebug($"[JSON DUMP] Found {allInfos.Length} ObjectInfo entries, writing to {outPath}");
 
                 // Build production tree: structure display name -> list of buildable display names
                 var prodTree = new Dictionary<string, List<string>>();
@@ -933,13 +933,13 @@ namespace Si_UnitBalance
                                                     }
                                                 }
                                                 catch { }
-                                                MelonLogger.Msg($"[DUMP-DBG] {name}: HHA via CA '{ca.name}' proj={hhaProjName} mag={hhaMagazine} fi={hhaFireDelay:F4}");
+                                                LogDebug($"[DUMP-DBG] {name}: HHA via CA '{ca.name}' proj={hhaProjName} mag={hhaMagazine} fi={hhaFireDelay:F4}");
                                                 break;
                                             }
                                             if (!string.IsNullOrEmpty(hhaProjName)) break;
                                         }
                                         if (string.IsNullOrEmpty(hhaProjName))
-                                            MelonLogger.Msg($"[DUMP-DBG] {name}: no CA match for '{baseName}' ({caList.Count} CAs)");
+                                            LogDebug($"[DUMP-DBG] {name}: no CA match for '{baseName}' ({caList.Count} CAs)");
                                     }
                                 }
                                 catch (Exception ex) { MelonLogger.Warning($"[DUMP-DBG] {name}: HHA error: {ex.Message}"); }
@@ -1143,7 +1143,7 @@ namespace Si_UnitBalance
                 sb.AppendLine("}");
 
                 System.IO.File.WriteAllText(outPath, sb.ToString());
-                MelonLogger.Msg($"[JSON DUMP] Wrote {seen.Count} entries to {outPath}");
+                LogDebug($"[JSON DUMP] Wrote {seen.Count} entries to {outPath}");
             }
             catch (Exception ex)
             {

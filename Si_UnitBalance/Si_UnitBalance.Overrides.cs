@@ -42,12 +42,26 @@ namespace Si_UnitBalance
                     {
                         float origTime = cd.BuildUpTime;
                         float newTime = Math.Max(1f, techTime);
+                        bool omOk = false;
                         if (useOM)
-                            OMSetFloat(cdTarget, "BuildUpTime", newTime);
+                        {
+                            omOk = OMSetFloat(cdTarget, "BuildUpTime", newTime);
+                            if (!omOk)
+                            {
+                                MelonLogger.Warning($"[TECH] OM.Set failed for '{cdTarget}' BuildUpTime={newTime}, falling back to direct");
+                                cd.BuildUpTime = newTime;
+                            }
+                        }
                         else
                             cd.BuildUpTime = newTime;
-                        MelonLogger.Msg($"[TECH] Tier {cd.TechnologyTier} '{name}': {origTime:F0}s -> {newTime:F0}s{(useOM ? " (OM)" : "")}");
+                        // Log actual value after set to verify it took effect
+                        float verifyTime = cd.BuildUpTime;
+                        LogDebug($"[TECH] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): {origTime:F0}s -> {newTime:F0}s (verify={verifyTime:F0}s){(omOk ? " (OM)" : "")}");
                         techApplied++;
+                    }
+                    else
+                    {
+                        LogDebug($"[TECH-DIAG] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): no config for this tier, BuildUpTime={cd.BuildUpTime:F0}s");
                     }
                     continue;
                 }
@@ -67,7 +81,7 @@ namespace Si_UnitBalance
                         OMSetInt(cdTarget, "ResourceCost", newCost);
                     else
                         cd.ResourceCost = newCost;
-                    MelonLogger.Msg($"[COST] {name}: {origCost} -> {newCost} (x{costMult:F2}){(useOM ? " (OM)" : "")}");
+                    LogDebug($"[COST] {name}: {origCost} -> {newCost} (x{costMult:F2}){(useOM ? " (OM)" : "")}");
                 }
 
                 if (hasBuildTime)
@@ -78,7 +92,7 @@ namespace Si_UnitBalance
                         OMSetFloat(cdTarget, "BuildUpTime", newTime);
                     else
                         cd.BuildUpTime = newTime;
-                    MelonLogger.Msg($"[BUILD] {name}: {origTime:F1}s -> {newTime:F1}s (x{btMult:F2}){(useOM ? " (OM)" : "")}");
+                    LogDebug($"[BUILD] {name}: {origTime:F1}s -> {newTime:F1}s (x{btMult:F2}){(useOM ? " (OM)" : "")}");
                 }
 
                 if (hasMinTier)
@@ -88,7 +102,7 @@ namespace Si_UnitBalance
                         OMSetInt(cdTarget, "MinimumTeamTier", minTier);
                     else
                         cd.MinimumTeamTier = minTier;
-                    MelonLogger.Msg($"[TIER] {name}: min tier {origTier} -> {minTier}{(useOM ? " (OM)" : "")}");
+                    LogDebug($"[TIER] {name}: min tier {origTier} -> {minTier}{(useOM ? " (OM)" : "")}");
                 }
 
                 if (hasBuildRadius)
@@ -98,7 +112,7 @@ namespace Si_UnitBalance
                         OMSetFloat(cdTarget, "MaximumBaseStructureDistance", buildRadius);
                     else
                         cd.MaximumBaseStructureDistance = buildRadius;
-                    MelonLogger.Msg($"[BUILD_RADIUS] {name}: {origDist:F0} -> {buildRadius:F0}{(useOM ? " (OM)" : "")}");
+                    LogDebug($"[BUILD_RADIUS] {name}: {origDist:F0} -> {buildRadius:F0}{(useOM ? " (OM)" : "")}");
                 }
 
                 applied++;
@@ -121,6 +135,42 @@ namespace Si_UnitBalance
 
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
             int applied = 0;
+            var modifiedDMD = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Diagnostic: log all DMD asset sharing to help debug unexpected health changes
+            var dmdUsers = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                var dmCheck = info.Prefab.GetComponent<DamageManager>();
+                if (dmCheck == null) continue;
+                try
+                {
+                    var dataFieldCheck = dmCheck.GetType().GetField("Data", BindingFlags.Public | BindingFlags.Instance);
+                    if (dataFieldCheck == null) continue;
+                    var dataObjCheck = dataFieldCheck.GetValue(dmCheck) as UnityEngine.Object;
+                    if (dataObjCheck == null) continue;
+                    string dmdName = dataObjCheck.name;
+                    string uName = ResolveConfigName(info.DisplayName, info.name);
+                    if (string.IsNullOrEmpty(dmdName) || string.IsNullOrEmpty(uName)) continue;
+                    if (!dmdUsers.ContainsKey(dmdName))
+                        dmdUsers[dmdName] = new List<string>();
+                    dmdUsers[dmdName].Add(uName);
+                }
+                catch { }
+            }
+            // Warn about shared DMD assets among units that have health overrides
+            foreach (var kvp in dmdUsers)
+            {
+                if (kvp.Value.Count > 1)
+                {
+                    bool anyHasOverride = false;
+                    foreach (string u in kvp.Value)
+                        if (_healthMultipliers.ContainsKey(u)) { anyHasOverride = true; break; }
+                    if (anyHasOverride)
+                        MelonLogger.Warning($"[HEALTH-DIAG] DamageManagerData '{kvp.Key}' shared by: {string.Join(", ", kvp.Value)}");
+                }
+            }
 
             foreach (var info in allInfos)
             {
@@ -141,13 +191,35 @@ namespace Si_UnitBalance
                         object dataObj = dataField.GetValue(dm);
                         if (dataObj != null)
                         {
-                            float origHealth = GetFloatMember(dataObj, "Health");
-                            if (origHealth <= 0) origHealth = GetFloatMember(dataObj, "MaxHealth");
-                            if (origHealth <= 0) origHealth = GetFloatMember(dataObj, "m_MaxHealth");
+                            string dataName = ((UnityEngine.Object)dataObj).name;
+
+                            // Skip if this DMD asset was already modified by another unit
+                            if (!string.IsNullOrEmpty(dataName) && modifiedDMD.Contains(dataName))
+                            {
+                                MelonLogger.Warning($"[HEALTH] {name}: DamageManagerData '{dataName}' already modified — skipping to prevent compounding");
+                                continue;
+                            }
+
+                            // Anti-compounding: cache first-seen vanilla value
+                            float currentHealth = GetFloatMember(dataObj, "Health");
+                            if (currentHealth <= 0) currentHealth = GetFloatMember(dataObj, "MaxHealth");
+                            if (currentHealth <= 0) currentHealth = GetFloatMember(dataObj, "m_MaxHealth");
+
+                            float origHealth;
+                            string cacheKey = dataName ?? name;
+                            if (_originalHealth.ContainsKey(cacheKey))
+                                origHealth = _originalHealth[cacheKey];
+                            else
+                            {
+                                origHealth = currentHealth;
+                                _originalHealth[cacheKey] = origHealth;
+                            }
+
                             if (origHealth > 0)
                             {
                                 float newHealth = origHealth * hpMult;
-                                string dataName = ((UnityEngine.Object)dataObj).name;
+
+                                LogDebug($"[HEALTH-DIAG] {name}: DMD='{dataName}', vanilla={origHealth:F0}, current={currentHealth:F0}, target={newHealth:F0} (x{hpMult:F2})");
 
                                 if (useOM && !string.IsNullOrEmpty(dataName))
                                 {
@@ -156,7 +228,7 @@ namespace Si_UnitBalance
                                     string dmdTarget = $"A:DamageManagerData_{dataName}.asset";
                                     set = OMSetFloat(dmdTarget, "Health", newHealth);
                                     if (set)
-                                        MelonLogger.Msg($"[HEALTH] {name}: Health {origHealth:F0} -> {newHealth:F0} (x{hpMult:F2}) (OM: {dataName})");
+                                        LogDebug($"[HEALTH] {name}: Health {origHealth:F0} -> {newHealth:F0} (x{hpMult:F2}) (OM: {dataName})");
                                     else
                                         MelonLogger.Warning($"[HEALTH] {name}: OM failed for {dmdTarget}, falling back to direct mutation");
                                 }
@@ -168,8 +240,11 @@ namespace Si_UnitBalance
                                     if (!set) set = SetFloatMember(dataObj, "MaxHealth", newHealth);
                                     if (!set) set = SetFloatMember(dataObj, "m_MaxHealth", newHealth);
                                     if (set)
-                                        MelonLogger.Msg($"[HEALTH] {name}: Health {origHealth:F0} -> {newHealth:F0} (x{hpMult:F2}) (direct mutation — no client sync!)");
+                                        LogDebug($"[HEALTH] {name}: Health {origHealth:F0} -> {newHealth:F0} (x{hpMult:F2}) (direct mutation — no client sync!)");
                                 }
+
+                                if (set && !string.IsNullOrEmpty(dataName))
+                                    modifiedDMD.Add(dataName);
                             }
                         }
                     }
@@ -183,7 +258,7 @@ namespace Si_UnitBalance
         }
 
         /// <summary>
-        /// Re-clamp HealthInternal on all live DamageManager instances whose Data.Health was modified.
+        /// Rescale HealthInternal on all live DamageManager instances whose Data.Health was modified.
         /// Maintains health percentage (e.g., 50% HP before → 50% HP after).
         /// Called after ApplyHealthOverrides to fix existing units spawned with old MaxHealth.
         /// </summary>
@@ -195,53 +270,86 @@ namespace Si_UnitBalance
                 BindingFlags.Public | BindingFlags.Instance);
             if (healthProp == null || healthProp.GetSetMethod(true) == null)
             {
-                MelonLogger.Warning("[HEALTH] Cannot find Health setter — skip live re-clamp");
+                MelonLogger.Warning("[HEALTH] Cannot find Health setter — skip live rescale");
                 return;
             }
             var healthSetter = healthProp.GetSetMethod(true);
 
-            // Build lookup: DamageManagerData asset name → health multiplier
-            var dataNameToMult = new Dictionary<string, float>();
+            // Build lookup: DamageManagerData asset name → (oldHealth, newHealth) ratio
+            // oldHealth = vanilla value from _originalHealth cache
+            // newHealth = current Data.Health (after override applied)
+            var dataNameToRatio = new Dictionary<string, float>();
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
                 string name = ResolveConfigName(info.DisplayName, info.name);
                 if (string.IsNullOrEmpty(name)) continue;
-                if (!_healthMultipliers.TryGetValue(name, out float _)) continue;
+                if (!_healthMultipliers.TryGetValue(name, out float hpMult)) continue;
 
                 var dm = info.Prefab.GetComponent<DamageManager>();
                 if (dm == null || dm.Data == null) continue;
                 string dataName = ((UnityEngine.Object)dm.Data).name;
-                if (!string.IsNullOrEmpty(dataName))
-                    dataNameToMult[dataName] = 1f; // just track which data assets were modified
+                if (string.IsNullOrEmpty(dataName)) continue;
+                if (dataNameToRatio.ContainsKey(dataName)) continue;
+
+                // Ratio = new / old. Use _originalHealth for vanilla baseline.
+                string cacheKey = dataName;
+                if (_originalHealth.TryGetValue(cacheKey, out float origHP) && origHP > 0)
+                    dataNameToRatio[dataName] = hpMult;
+                else
+                    dataNameToRatio[dataName] = 1f;
             }
 
-            if (dataNameToMult.Count == 0) return;
+            if (dataNameToRatio.Count == 0) return;
 
-            // Find all live DamageManager instances and re-clamp
+            // Find all live DamageManager instances and rescale to maintain health percentage
             var liveDMs = UnityEngine.Object.FindObjectsOfType<DamageManager>();
-            int clamped = 0;
+            int rescaled = 0;
             foreach (var dm in liveDMs)
             {
                 if (dm == null || dm.Data == null) continue;
                 string dataName = ((UnityEngine.Object)dm.Data).name;
-                if (!dataNameToMult.ContainsKey(dataName)) continue;
+                if (!dataNameToRatio.TryGetValue(dataName, out float ratio)) continue;
 
                 float currentHP = dm.Health;
                 float newMax = dm.MaxHealth;
 
-                if (currentHP > newMax)
+                if (currentHP <= 0 || newMax <= 0) continue;
+
+                // Maintain health percentage: if unit was at X% before, keep at X%
+                // oldMax = newMax / ratio. oldPct = currentHP / oldMax. newHP = oldPct * newMax = currentHP * ratio.
+                float newHP;
+                if (Math.Abs(ratio - 1f) < 0.001f)
                 {
-                    // Clamp down: unit had more HP than new max
-                    healthSetter.Invoke(dm, new object[] { newMax });
-                    MelonLogger.Msg($"[HEALTH] Re-clamped live {dataName}: {currentHP:F0} -> {newMax:F0}");
-                    clamped++;
+                    // No multiplier change, but unit might have been spawned before DMD was modified
+                    // by a *different* unit sharing the same DMD. Set to full if at or above old max.
+                    if (_originalHealth.TryGetValue(dataName, out float origMax) && origMax > 0)
+                    {
+                        if (currentHP >= origMax - 1f)
+                            newHP = newMax; // Was at full health → stay at full
+                        else
+                            newHP = (currentHP / origMax) * newMax; // Maintain percentage
+                    }
+                    else
+                        continue;
                 }
+                else
+                {
+                    // Scale by ratio to maintain percentage
+                    newHP = currentHP * ratio;
+                }
+
+                newHP = Math.Min(newHP, newMax);
+                if (Math.Abs(newHP - currentHP) < 1f) continue;
+
+                healthSetter.Invoke(dm, new object[] { newHP });
+                LogDebug($"[HEALTH] Rescaled live {dataName}: {currentHP:F0} -> {newHP:F0} (max={newMax:F0})");
+                rescaled++;
             }
 
-            if (clamped > 0)
-                MelonLogger.Msg($"[HEALTH] Re-clamped {clamped} live unit(s) to new MaxHealth");
+            if (rescaled > 0)
+                LogDebug($"[HEALTH] Rescaled {rescaled} live unit(s) to maintain health percentage");
         }
 
         // =============================================
@@ -400,7 +508,7 @@ namespace Si_UnitBalance
                                         OMSetFloat(pdTarget, kvp.Key, kvp.Value);
                                     else
                                         SetFloatMember(pdObj, kvp.Key, kvp.Value);
-                                    MelonLogger.Msg($"[DMG] {name} -> {pdName}.{kvp.Key}: {origVal:F1} -> {kvp.Value:F1}{(useOM ? " (OM)" : "")}");
+                                    LogDebug($"[DMG] {name} -> {pdName}.{kvp.Key}: {origVal:F1} -> {kvp.Value:F1}{(useOM ? " (OM)" : "")}");
                                 }
                                 modifiedPD.Add(pdName);
                                 anyApplied = true;
@@ -461,7 +569,7 @@ namespace Si_UnitBalance
                                                 OMSetFloat(pdTarget, kvp.Key, kvp.Value);
                                             else
                                                 SetFloatMember(pdObj, kvp.Key, kvp.Value);
-                                            MelonLogger.Msg($"[DMG] {name} -> {pdName}.{kvp.Key}: {origVal:F1} -> {kvp.Value:F1}{(useOM ? " (OM)" : "")}");
+                                            LogDebug($"[DMG] {name} -> {pdName}.{kvp.Key}: {origVal:F1} -> {kvp.Value:F1}{(useOM ? " (OM)" : "")}");
                                         }
                                         modifiedPD.Add(pdName);
                                         anyApplied = true;
@@ -486,7 +594,7 @@ namespace Si_UnitBalance
                                     {
                                         float newDmg = origDmg * effectiveDmgMult;
                                         SetFloatMember(attackObj, "Damage", newDmg);
-                                        MelonLogger.Msg($"[DMG] {name} -> {attackFieldName}.Damage: {origDmg:F0} -> {newDmg:F0} (melee, direct)");
+                                        LogDebug($"[DMG] {name} -> {attackFieldName}.Damage: {origDmg:F0} -> {newDmg:F0} (melee, direct)");
                                         anyApplied = true;
                                     }
                                 }
@@ -524,7 +632,7 @@ namespace Si_UnitBalance
                     OMSetFloat(pdTarget, fieldName, newVal);
                 else
                     SetFloatMember(pdObj, fieldName, newVal);
-                MelonLogger.Msg($"[DMG] {unitName} -> {pdName}.{fieldName}: {orig:F1} -> {newVal:F1} (x{fieldMult:F2}){(useOM ? " (OM)" : "")}");
+                LogDebug($"[DMG] {unitName} -> {pdName}.{fieldName}: {orig:F1} -> {newVal:F1} (x{fieldMult:F2}){(useOM ? " (OM)" : "")}");
                 scaled++;
             }
 
@@ -543,7 +651,7 @@ namespace Si_UnitBalance
                         OMSetFloat(pdTarget, srField, newSR);
                     else
                         SetFloatMember(pdObj, srField, newSR);
-                    MelonLogger.Msg($"[DMG] {unitName} -> {pdName}.{srField}: {origSR:F1} -> {newSR:F1} (x{srMult:F2}){(useOM ? " (OM)" : "")}");
+                    LogDebug($"[DMG] {unitName} -> {pdName}.{srField}: {origSR:F1} -> {newSR:F1} (x{srMult:F2}){(useOM ? " (OM)" : "")}");
                     scaled++;
                 }
             }
@@ -563,6 +671,12 @@ namespace Si_UnitBalance
         private static readonly Dictionary<string, float> _originalProjectileLifetimes =
             new Dictionary<string, float>();
         private static readonly Dictionary<string, float> _originalProjectileSpeeds =
+            new Dictionary<string, float>();
+        private static readonly Dictionary<string, float> _originalAimLeadVelocity =
+            new Dictionary<string, float>();
+        private static readonly Dictionary<string, float> _originalAimLeadGravity =
+            new Dictionary<string, float>();
+        private static readonly Dictionary<string, float> _originalAimLeadDrag =
             new Dictionary<string, float>();
 
         private static void ApplyRangeOverrides(bool useOM)
@@ -592,7 +706,7 @@ namespace Si_UnitBalance
                 if (!hasRange && !hasSpeed && !hasLifetime && !hasReload && !hasAccuracy && !hasMagazine && !hasFireRate) continue;
 
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
-                MelonLogger.Msg($"[RANGE] Applying weapon overrides to '{name}' (internal: {info.name}){(useOM ? " (OM)" : "")}");
+                LogDebug($"[RANGE] Applying weapon overrides to '{name}' (internal: {info.name}){(useOM ? " (OM)" : "")}");
 
                 bool foundProjectileOnComponent = false;
                 var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
@@ -627,7 +741,7 @@ namespace Si_UnitBalance
                                         OMSetFloat(oiTarget, "AimDistance", newVal);
                                     else
                                         adField.SetValue(comp, newVal);
-                                    MelonLogger.Msg($"  VehicleTurret.AimDistance: {orig} -> {newVal}");
+                                    LogDebug($"  VehicleTurret.AimDistance: {orig} -> {newVal}");
                                 }
                             }
                         }
@@ -648,7 +762,7 @@ namespace Si_UnitBalance
                                         OMSetFloat(oiTarget, "AimDistanceMax", newVal);
                                     else
                                         admField.SetValue(comp, newVal);
-                                    MelonLogger.Msg($"  UnitAimAt.AimDistanceMax: {orig} -> {newVal}");
+                                    LogDebug($"  UnitAimAt.AimDistanceMax: {orig} -> {newVal}");
                                 }
                             }
                         }
@@ -741,7 +855,7 @@ namespace Si_UnitBalance
                                         }
                                         float newVal = orig * effectiveAimDistMult;
                                         SetFloatMember(attackObj, "AttackProjectileAimDistMax", newVal);
-                                        MelonLogger.Msg($"  CreatureAttack.{attackFieldName}.AimDistMax: {orig} -> {newVal} (direct{(isInstantHitAtk ? ", instant-hit" : "")})");
+                                        LogDebug($"  CreatureAttack.{attackFieldName}.AimDistMax: {orig} -> {newVal} (direct{(isInstantHitAtk ? ", instant-hit" : "")})");
                                     }
                                 }
 
@@ -762,7 +876,32 @@ namespace Si_UnitBalance
                                         }
                                         float newVal = orig * atkAccMult;
                                         SetFloatMember(attackObj, "AttackProjectileSpread", newVal);
-                                        MelonLogger.Msg($"  CreatureAttack.{attackFieldName}.Spread: {orig} -> {newVal} (direct)");
+                                        LogDebug($"  CreatureAttack.{attackFieldName}.Spread: {orig} -> {newVal} (direct)");
+                                    }
+
+                                    // For instant-hit (ray) weapons, AttackProjectileSpread has no effect —
+                                    // the ray goes straight to target. Scale AttackProjectileAimAngle instead,
+                                    // which controls the AI's aiming cone (how precisely it aims).
+                                    // NOTE: This must be OUTSIDE the spread NaN check — instant-hit weapons
+                                    // may not have a readable spread field at all.
+                                    if (isInstantHitAtk)
+                                    {
+                                        float aimAngle = GetFloatMember(attackObj, "AttackProjectileAimAngle");
+                                        if (!float.IsNaN(aimAngle) && aimAngle > 0)
+                                        {
+                                            string aaKey = $"{name}_aimangle_{attackFieldName}";
+                                            float origAA;
+                                            if (_originalAimAngle.ContainsKey(aaKey))
+                                                origAA = _originalAimAngle[aaKey];
+                                            else
+                                            {
+                                                origAA = aimAngle;
+                                                _originalAimAngle[aaKey] = origAA;
+                                            }
+                                            float newAA = origAA * atkAccMult;
+                                            SetFloatMember(attackObj, "AttackProjectileAimAngle", newAA);
+                                            LogDebug($"  CreatureAttack.{attackFieldName}.AimAngle: {origAA:F2} -> {newAA:F2} (direct, instant-hit accuracy)");
+                                        }
                                     }
                                 }
 
@@ -815,7 +954,7 @@ namespace Si_UnitBalance
                                         float newVal = Math.Max(0.1f, orig * effReload);
                                         if (useOM) OMSetFloat(oiTarget, $"{prefix}ReloadTime", newVal);
                                         else rtField.SetValue(comp, newVal);
-                                        MelonLogger.Msg($"  VehicleTurret.{prefix}ReloadTime: {orig:F2} -> {newVal:F2}");
+                                        LogDebug($"  VehicleTurret.{prefix}ReloadTime: {orig:F2} -> {newVal:F2}");
                                     }
                                 }
                             }
@@ -833,7 +972,7 @@ namespace Si_UnitBalance
                                         float newVal = Math.Max(0.01f, orig / effFR);
                                         if (useOM) OMSetFloat(oiTarget, $"{prefix}FireInterval", newVal);
                                         else fiField.SetValue(comp, newVal);
-                                        MelonLogger.Msg($"  VehicleTurret.{prefix}FireInterval: {orig:F4} -> {newVal:F4}");
+                                        LogDebug($"  VehicleTurret.{prefix}FireInterval: {orig:F4} -> {newVal:F4}");
                                     }
                                 }
                             }
@@ -851,7 +990,7 @@ namespace Si_UnitBalance
                                         int newVal = Math.Max(1, (int)Math.Round(orig * effMag));
                                         if (useOM) OMSetInt(oiTarget, $"{prefix}MagazineSize", newVal);
                                         else msField.SetValue(comp, newVal);
-                                        MelonLogger.Msg($"  VehicleTurret.{prefix}MagazineSize: {orig} -> {newVal}");
+                                        LogDebug($"  VehicleTurret.{prefix}MagazineSize: {orig} -> {newVal}");
                                     }
                                 }
                             }
@@ -869,7 +1008,7 @@ namespace Si_UnitBalance
                                         float newVal = orig * effAcc;
                                         if (useOM) OMSetFloat(oiTarget, $"{prefix}MuzzleSpread", newVal);
                                         else spField.SetValue(comp, newVal);
-                                        MelonLogger.Msg($"  VehicleTurret.{prefix}MuzzleSpread: {orig:F4} -> {newVal:F4}");
+                                        LogDebug($"  VehicleTurret.{prefix}MuzzleSpread: {orig:F4} -> {newVal:F4}");
                                     }
                                 }
                             }
@@ -933,7 +1072,7 @@ namespace Si_UnitBalance
                     bool fbHasRange = Math.Abs(fbRange - 1f) > 0.001f;
                     bool fbHasSpeed = Math.Abs(fbSpeed - 1f) > 0.001f;
                     bool fbHasLifetime = Math.Abs(fbLifetime - 1f) > 0.001f;
-                    MelonLogger.Msg($"  No ProjectileData found on components, searching by name...");
+                    LogDebug($"  No ProjectileData found on components, searching by name...");
                     int fallbackCount = 0;
                     if (fbHasRange || fbHasSpeed || fbHasLifetime)
                     {
@@ -1006,13 +1145,13 @@ namespace Si_UnitBalance
                     float orig = (float)tdField.GetValue(comp);
                     if (useOM && OMSetFloat(oiTarget, "TargetingDistance", targetDist))
                     {
-                        MelonLogger.Msg($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist} (OM)");
+                        LogDebug($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist} (OM)");
                         applied++;
                     }
                     else if (!useOM)
                     {
                         tdField.SetValue(comp, targetDist);
-                        MelonLogger.Msg($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist} (direct)");
+                        LogDebug($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist} (direct)");
                         applied++;
                     }
                     break;
@@ -1048,13 +1187,13 @@ namespace Si_UnitBalance
                     float orig = (float)fowField.GetValue(comp);
                     if (useOM && OMSetFloat(oiTarget, "FogOfWarViewDistance", fowDist))
                     {
-                        MelonLogger.Msg($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist} (OM)");
+                        LogDebug($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist} (OM)");
                         applied++;
                     }
                     else if (!useOM)
                     {
                         fowField.SetValue(comp, fowDist);
-                        MelonLogger.Msg($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist} (direct)");
+                        LogDebug($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist} (direct)");
                         applied++;
                     }
                     break;
@@ -1092,13 +1231,13 @@ namespace Si_UnitBalance
                     float newVal = orig * mult;
                     if (useOM && OMSetFloat(oiTarget, "JumpSpeed", newVal))
                     {
-                        MelonLogger.Msg($"[JUMP] {name}: JumpSpeed {orig:F1} -> {newVal:F1} x{mult:F2} (OM)");
+                        LogDebug($"[JUMP] {name}: JumpSpeed {orig:F1} -> {newVal:F1} x{mult:F2} (OM)");
                         applied++;
                     }
                     else if (!useOM)
                     {
                         jsField.SetValue(comp, newVal);
-                        MelonLogger.Msg($"[JUMP] {name}: JumpSpeed {orig:F1} -> {newVal:F1} x{mult:F2} (direct)");
+                        LogDebug($"[JUMP] {name}: JumpSpeed {orig:F1} -> {newVal:F1} x{mult:F2} (direct)");
                         applied++;
                     }
                 }
@@ -1149,7 +1288,7 @@ namespace Si_UnitBalance
                             string pdTarget = useOM ? $"A:{pdName}.asset" : null;
                             if (useOM) OMSetFloat(pdTarget, "VisibleEventRadius", newVER);
                             else SetFloatMember(pdObj, "VisibleEventRadius", newVER);
-                            MelonLogger.Msg($"[VER] {name}: {pdName} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
+                            LogDebug($"[VER] {name}: {pdName} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
                             modifiedPD.Add(pdName);
                             anyApplied = true;
                         }
@@ -1181,7 +1320,7 @@ namespace Si_UnitBalance
                             string pdTarget = useOM ? $"A:{pdName}.asset" : null;
                             if (useOM) OMSetFloat(pdTarget, "VisibleEventRadius", newVER);
                             else SetFloatMember(pdObj, "VisibleEventRadius", newVER);
-                            MelonLogger.Msg($"[VER] {name}: {pdName} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
+                            LogDebug($"[VER] {name}: {pdName} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
                             modifiedPD.Add(pdName);
                             anyApplied = true;
                         }
@@ -1205,7 +1344,7 @@ namespace Si_UnitBalance
                         string pdTarget = useOM ? $"A:{pdName2}.asset" : null;
                         if (useOM) OMSetFloat(pdTarget, "VisibleEventRadius", newVER);
                         else SetFloatMember(pdObj2, "VisibleEventRadius", newVER);
-                        MelonLogger.Msg($"[VER] {name}: {pdName2} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
+                        LogDebug($"[VER] {name}: {pdName2} VisibleEventRadius {origVER:F0} -> {newVER:F0} x{mult:F2}");
                         modifiedPD.Add(pdName2);
                         anyApplied = true;
                     }
@@ -1240,15 +1379,15 @@ namespace Si_UnitBalance
 
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
                 if (hasMoveSpeed)
-                    MelonLogger.Msg($"[MOVESPEED] Applying move_speed_mult x{mult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                    LogDebug($"[MOVESPEED] Applying move_speed_mult x{mult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
                 if (hasFlySpeed)
-                    MelonLogger.Msg($"[MOVESPEED] Applying fly_speed_mult x{flyMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                    LogDebug($"[MOVESPEED] Applying fly_speed_mult x{flyMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
                 if (hasTurboSpeed)
-                    MelonLogger.Msg($"[MOVESPEED] Applying turbo_speed_mult x{turboMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                    LogDebug($"[MOVESPEED] Applying turbo_speed_mult x{turboMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
                 if (hasRunSpeed)
-                    MelonLogger.Msg($"[MOVESPEED] Applying run_speed_mult x{runMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                    LogDebug($"[MOVESPEED] Applying run_speed_mult x{runMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
                 if (hasSprintSpeed)
-                    MelonLogger.Msg($"[MOVESPEED] Applying sprint_speed_mult x{sprintMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                    LogDebug($"[MOVESPEED] Applying sprint_speed_mult x{sprintMult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
 
                 if (useOM)
                 {
@@ -1318,7 +1457,7 @@ namespace Si_UnitBalance
                             float newVal = orig * fieldMult;
                             if (OMSetFloat(oiTarget, fieldName, newVal))
                             {
-                                MelonLogger.Msg($"  {compType.Name}.{fieldName}: {orig} -> {newVal} (OM)");
+                                LogDebug($"  {compType.Name}.{fieldName}: {orig} -> {newVal} (OM)");
                                 fieldsSet++;
                             }
                         }
@@ -1363,7 +1502,7 @@ namespace Si_UnitBalance
                 if (!_strafeSpeedMultipliers.TryGetValue(name, out float mult)) continue;
 
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
-                MelonLogger.Msg($"[STRAFE] Applying strafe_speed_mult x{mult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
+                LogDebug($"[STRAFE] Applying strafe_speed_mult x{mult:F2} to '{name}'{(useOM ? " (OM)" : "")}");
 
                 var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
                 bool done = false;
@@ -1399,12 +1538,12 @@ namespace Si_UnitBalance
                         {
                             float newVal = orig * mult;
                             if (useOM && OMSetFloat(oiTarget, "FlyMoveScaleSide", newVal))
-                                MelonLogger.Msg($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (OM)");
+                                LogDebug($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (OM)");
                             else
                             {
                                 if (f != null) f.SetValue(comp, newVal);
                                 else { var p = ct.GetProperty("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance); p?.SetValue(comp, newVal); }
-                                MelonLogger.Msg($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (direct)");
+                                LogDebug($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (direct)");
                             }
                             done = true;
                         }
@@ -1436,12 +1575,12 @@ namespace Si_UnitBalance
                         {
                             float newVal = orig * mult;
                             if (useOM && OMSetFloat(oiTarget, "StrafeSpeed", newVal))
-                                MelonLogger.Msg($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (OM)");
+                                LogDebug($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (OM)");
                             else
                             {
                                 if (f != null) f.SetValue(comp, newVal);
                                 else { var p = ct.GetProperty("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance); p?.SetValue(comp, newVal); }
-                                MelonLogger.Msg($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (direct)");
+                                LogDebug($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (direct)");
                             }
                             done = true;
                         }
@@ -1486,13 +1625,13 @@ namespace Si_UnitBalance
 
                     if (useOM && OMSetFloat(oiTarget, "TurningCircleRadius", newVal))
                     {
-                        MelonLogger.Msg($"[TURNRADIUS] {name}: TurningCircleRadius {orig:F1} -> {newVal:F1} (OM)");
+                        LogDebug($"[TURNRADIUS] {name}: TurningCircleRadius {orig:F1} -> {newVal:F1} (OM)");
                         applied++;
                     }
                     else
                     {
                         field.SetValue(comp, newVal);
-                        MelonLogger.Msg($"[TURNRADIUS] {name}: TurningCircleRadius {orig:F1} -> {newVal:F1} (direct)");
+                        LogDebug($"[TURNRADIUS] {name}: TurningCircleRadius {orig:F1} -> {newVal:F1} (direct)");
                         applied++;
                     }
                     break;
@@ -1531,13 +1670,13 @@ namespace Si_UnitBalance
                             float orig = (float)f.GetValue(comp);
                             if (useOM && OMSetFloat(oiTarget, "TeleportCooldownTime", _teleportCooldown))
                             {
-                                MelonLogger.Msg($"[TELEPORT] {name}: CooldownTime {orig:F1} -> {_teleportCooldown:F1} (OM)");
+                                LogDebug($"[TELEPORT] {name}: CooldownTime {orig:F1} -> {_teleportCooldown:F1} (OM)");
                                 applied++;
                             }
                             else
                             {
                                 f.SetValue(comp, _teleportCooldown);
-                                MelonLogger.Msg($"[TELEPORT] {name}: CooldownTime {orig:F1} -> {_teleportCooldown:F1} (direct)");
+                                LogDebug($"[TELEPORT] {name}: CooldownTime {orig:F1} -> {_teleportCooldown:F1} (direct)");
                                 applied++;
                             }
                         }
@@ -1550,13 +1689,13 @@ namespace Si_UnitBalance
                             float orig = (float)f.GetValue(comp);
                             if (useOM && OMSetFloat(oiTarget, "TeleportTime", _teleportDuration))
                             {
-                                MelonLogger.Msg($"[TELEPORT] {name}: TeleportTime {orig:F1} -> {_teleportDuration:F1} (OM)");
+                                LogDebug($"[TELEPORT] {name}: TeleportTime {orig:F1} -> {_teleportDuration:F1} (OM)");
                                 applied++;
                             }
                             else
                             {
                                 f.SetValue(comp, _teleportDuration);
-                                MelonLogger.Msg($"[TELEPORT] {name}: TeleportTime {orig:F1} -> {_teleportDuration:F1} (direct)");
+                                LogDebug($"[TELEPORT] {name}: TeleportTime {orig:F1} -> {_teleportDuration:F1} (direct)");
                                 applied++;
                             }
                         }
@@ -1595,13 +1734,13 @@ namespace Si_UnitBalance
                         float orig = (float)f.GetValue(comp);
                         if (useOM && OMSetFloat(oiTarget, "DispenseTimeout", _dispenseTimeout))
                         {
-                            MelonLogger.Msg($"[DISPENSER] {info.DisplayName}: DispenseTimeout {orig:F1} -> {_dispenseTimeout:F1} (OM)");
+                            LogDebug($"[DISPENSER] {info.DisplayName}: DispenseTimeout {orig:F1} -> {_dispenseTimeout:F1} (OM)");
                             applied++;
                         }
                         else
                         {
                             f.SetValue(comp, _dispenseTimeout);
-                            MelonLogger.Msg($"[DISPENSER] {info.DisplayName}: DispenseTimeout {orig:F1} -> {_dispenseTimeout:F1} (direct)");
+                            LogDebug($"[DISPENSER] {info.DisplayName}: DispenseTimeout {orig:F1} -> {_dispenseTimeout:F1} (direct)");
                             applied++;
                         }
                     }
@@ -1659,7 +1798,7 @@ namespace Si_UnitBalance
 
                         float newVal = orig * mult;
                         field.SetValue(comp, newVal);
-                        MelonLogger.Msg($"  [{typeName}] field {field.Name}: {orig} -> {newVal}");
+                        LogDebug($"  [{typeName}] field {field.Name}: {orig} -> {newVal}");
                         totalModified++;
                     }
                     catch { }
@@ -1689,7 +1828,7 @@ namespace Si_UnitBalance
 
                         float newVal = orig * mult;
                         prop.SetValue(comp, newVal);
-                        MelonLogger.Msg($"  [{typeName}] prop {prop.Name}: {orig} -> {newVal}");
+                        LogDebug($"  [{typeName}] prop {prop.Name}: {orig} -> {newVal}");
                         totalModified++;
                     }
                     catch { }
@@ -1708,7 +1847,7 @@ namespace Si_UnitBalance
                         tn.Contains("collider") || tn.Contains("light") || tn.Contains("audio") ||
                         tn.Contains("canvas") || tn.Contains("cloth") || tn.Contains("rigidbody"))
                         continue;
-                    MelonLogger.Msg($"  Component: {comp.GetType().Name} on '{comp.gameObject.name}'");
+                    LogDebug($"  Component: {comp.GetType().Name} on '{comp.gameObject.name}'");
                 }
             }
 
@@ -1801,7 +1940,7 @@ namespace Si_UnitBalance
                     else SetFloatMember(pdObj, "m_fBaseSpeed", finalSpeed);
                     newSpeed = finalSpeed;
                 }
-                MelonLogger.Msg($"  ProjectileData '{pdName}' (instant-hit): Range {origSpeed:F0} -> {newSpeed:F0}{(useOM ? " (OM)" : "")}");
+                LogDebug($"  ProjectileData '{pdName}' (instant-hit): Range {origSpeed:F0} -> {newSpeed:F0}{(useOM ? " (OM)" : "")}");
             }
             else
             {
@@ -1816,17 +1955,25 @@ namespace Si_UnitBalance
                 {
                     if (useOM) OMSetFloat(pdTarget, "m_fLifeTime", newLt);
                     else SetFloatMember(pdObj, "m_fLifeTime", newLt);
-                    MelonLogger.Msg($"  ProjectileData '{pdName}': Lifetime {origLt} -> {newLt:F2}");
+                    LogDebug($"  ProjectileData '{pdName}': Lifetime {origLt} -> {newLt:F2}");
                 }
 
                 if (Math.Abs(speedMult - 1f) > 0.001f && origSpeed > 0)
                 {
                     if (useOM) OMSetFloat(pdTarget, "m_fBaseSpeed", newSpeed);
                     else SetFloatMember(pdObj, "m_fBaseSpeed", newSpeed);
-                    MelonLogger.Msg($"  ProjectileData '{pdName}': Speed {origSpeed} -> {newSpeed:F1}");
+                    LogDebug($"  ProjectileData '{pdName}': Speed {origSpeed} -> {newSpeed:F1}");
                 }
 
-                MelonLogger.Msg($"  ProjectileData '{pdName}': Range {origRange:F0} -> {newRange:F0}{(useOM ? " (OM)" : "")}");
+                LogDebug($"  ProjectileData '{pdName}': Range {origRange:F0} -> {newRange:F0}{(useOM ? " (OM)" : "")}");
+
+                // AI aim lead compensation: when proj speed changes, AI lead prediction must be adjusted
+                // Faster projectile needs less lead → scale lead factors by 1/speedMult
+                if (Math.Abs(speedMult - 1f) > 0.001f)
+                {
+                    float invSpeed = 1f / speedMult;
+                    ScaleAimLeadFactors(pdObj, pdName, pdTarget, invSpeed, useOM);
+                }
             }
 
             // For instant-hit: lifetime mult also applies (visual beam duration)
@@ -1835,7 +1982,7 @@ namespace Si_UnitBalance
                 float newLt = origLt * lifetimeMult;
                 if (useOM) OMSetFloat(pdTarget, "m_fLifeTime", newLt);
                 else SetFloatMember(pdObj, "m_fLifeTime", newLt);
-                MelonLogger.Msg($"  ProjectileData '{pdName}' (instant-hit): Lifetime {origLt} -> {newLt:F2}");
+                LogDebug($"  ProjectileData '{pdName}' (instant-hit): Lifetime {origLt} -> {newLt:F2}");
             }
 
             // Scale VisibleEventRadius for instant-hit projectiles (beams need VER to match range)
@@ -1849,11 +1996,162 @@ namespace Si_UnitBalance
                     float newVER = origVER * rangeMult;
                     if (useOM) OMSetFloat(pdTarget, "VisibleEventRadius", newVER);
                     else SetFloatMember(pdObj, "VisibleEventRadius", newVER);
-                    MelonLogger.Msg($"  ProjectileData '{pdName}': VisibleEventRadius {origVER:F0} -> {newVER:F0}");
+                    LogDebug($"  ProjectileData '{pdName}': VisibleEventRadius {origVER:F0} -> {newVER:F0}");
                 }
             }
 
             modifiedPD.Add(pdName);
+        }
+
+        /// <summary>
+        /// Scales AI aim lead factors on a ProjectileData to compensate for speed changes.
+        /// When projectile speed is multiplied by X, the AI needs 1/X as much lead.
+        /// </summary>
+        private static void ScaleAimLeadFactors(object pdObj, string pdName, string pdTarget, float scale, bool useOM)
+        {
+            string[] fields = { "m_AIAimLeadFactor_Velocity", "m_AIAimLeadFactor_Gravity", "m_AIAimLeadFactor_Drag" };
+            Dictionary<string, float>[] caches = { _originalAimLeadVelocity, _originalAimLeadGravity, _originalAimLeadDrag };
+
+            for (int i = 0; i < fields.Length; i++)
+            {
+                string field = fields[i];
+                string cacheKey = $"{pdName}_{field}";
+                float orig = GetFloatMember(pdObj, field);
+                if (float.IsNaN(orig)) continue;
+
+                if (!caches[i].ContainsKey(cacheKey))
+                    caches[i][cacheKey] = orig;
+                else
+                    orig = caches[i][cacheKey];
+
+                float newVal = orig * scale;
+                if (useOM) OMSetFloat(pdTarget, field, newVal);
+                else SetFloatMember(pdObj, field, newVal);
+                LogDebug($"  ProjectileData '{pdName}': {field} {orig:F3} -> {newVal:F3}");
+            }
+        }
+
+        // =============================================
+        // Proximity Detonation: modify ProjectileProximityDetonation on projectile prefabs
+        // Fields: MinimumTime (arming delay), SplashRadiusScale, FlyingUnits, GroundUnits, Structures
+        // =============================================
+
+        private static void ApplyProximityDetonationOverrides()
+        {
+            if (_proximityOverrides.Count == 0) return;
+
+            var allProjectiles = Resources.FindObjectsOfTypeAll<ProjectileData>();
+            int applied = 0;
+
+            foreach (var pd in allProjectiles)
+            {
+                if (pd == null) continue;
+                string pdName = pd.name;
+                if (string.IsNullOrEmpty(pdName)) continue;
+                if (!_proximityOverrides.TryGetValue(pdName, out var proxFields)) continue;
+
+                // Get the projectile prefab GameObject from ProjectileData
+                object prefabObj = null;
+                try
+                {
+                    var prefabField = pd.GetType().GetField("m_ProjectilePrefab",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (prefabField != null)
+                        prefabObj = prefabField.GetValue(pd);
+                    if (prefabObj == null)
+                    {
+                        var prefabProp = pd.GetType().GetProperty("m_ProjectilePrefab",
+                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (prefabProp != null)
+                            prefabObj = prefabProp.GetValue(pd);
+                    }
+                }
+                catch { }
+
+                if (prefabObj == null)
+                {
+                    MelonLogger.Warning($"[PROXIMITY] {pdName}: m_ProjectilePrefab not found");
+                    continue;
+                }
+
+                // The prefab could be a GameObject or a Component (ProjectileBasic) — get the GameObject
+                GameObject prefabGO = null;
+                if (prefabObj is GameObject go)
+                    prefabGO = go;
+                else if (prefabObj is Component c)
+                    prefabGO = c.gameObject;
+
+                if (prefabGO == null)
+                {
+                    MelonLogger.Warning($"[PROXIMITY] {pdName}: Could not resolve prefab GameObject (type: {prefabObj.GetType().Name})");
+                    continue;
+                }
+
+                // Find ProjectileProximityDetonation component on the prefab
+                Component proxComp = null;
+                foreach (var comp in prefabGO.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp != null && comp.GetType().Name == "ProjectileProximityDetonation")
+                    {
+                        proxComp = comp;
+                        break;
+                    }
+                }
+
+                if (proxComp == null)
+                {
+                    MelonLogger.Warning($"[PROXIMITY] {pdName}: No ProjectileProximityDetonation component on prefab '{prefabGO.name}'");
+                    continue;
+                }
+
+                var proxType = proxComp.GetType();
+                LogDebug($"[PROXIMITY] Applying overrides to '{pdName}' (prefab '{prefabGO.name}'):");
+
+                foreach (var kvp in proxFields)
+                {
+                    string fieldName = kvp.Key;
+                    float newVal = kvp.Value;
+
+                    // Handle bool fields (FlyingUnits, GroundUnits, Structures) — stored as 0/1
+                    bool isBoolField = fieldName == "FlyingUnits" || fieldName == "GroundUnits" || fieldName == "Structures";
+
+                    if (isBoolField)
+                    {
+                        bool boolVal = newVal >= 0.5f;
+                        bool origBool = GetBoolMember(proxComp, fieldName);
+                        var bField = proxType.GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
+                        if (bField != null)
+                        {
+                            bField.SetValue(proxComp, boolVal);
+                            LogDebug($"  {fieldName}: {origBool} -> {boolVal}");
+                        }
+                        else
+                        {
+                            var bProp = proxType.GetProperty(fieldName, BindingFlags.Public | BindingFlags.Instance);
+                            if (bProp != null && bProp.CanWrite)
+                            {
+                                bProp.SetValue(proxComp, boolVal);
+                                LogDebug($"  {fieldName}: {origBool} -> {boolVal}");
+                            }
+                            else
+                                MelonLogger.Warning($"  {fieldName}: field/property not found or read-only");
+                        }
+                    }
+                    else
+                    {
+                        float origVal = GetFloatMember(proxComp, fieldName);
+                        bool ok = SetFloatMember(proxComp, fieldName, newVal);
+                        if (ok)
+                            LogDebug($"  {fieldName}: {origVal:F3} -> {newVal:F3}");
+                        else
+                            MelonLogger.Warning($"  {fieldName}: SetFloatMember failed");
+                    }
+                }
+                applied++;
+            }
+
+            if (applied > 0)
+                MelonLogger.Msg($"[PROXIMITY] Applied proximity detonation overrides to {applied} projectile(s)");
         }
 
         // =============================================
@@ -1886,7 +2184,7 @@ namespace Si_UnitBalance
                             {
                                 float was = (float)meleeDistField.GetValue(comp);
                                 meleeDistField.SetValue(comp, 0f);
-                                MelonLogger.Msg($"[SHRIMP] AIMeleeDistance: {was} -> 0");
+                                LogDebug($"[SHRIMP] AIMeleeDistance: {was} -> 0");
                             }
                         }
 
@@ -1900,7 +2198,7 @@ namespace Si_UnitBalance
                             {
                                 float was = (float)targetDistField.GetValue(comp);
                                 targetDistField.SetValue(comp, 0f);
-                                MelonLogger.Msg($"[SHRIMP] Sensor.TargetingDistance: {was} -> 0");
+                                LogDebug($"[SHRIMP] Sensor.TargetingDistance: {was} -> 0");
                             }
                         }
 
@@ -1912,7 +2210,7 @@ namespace Si_UnitBalance
                             if (aimPausedField != null)
                             {
                                 aimPausedField.SetValue(comp, true);
-                                MelonLogger.Msg($"[SHRIMP] AIAiming.AimPaused -> True");
+                                LogDebug($"[SHRIMP] AIAiming.AimPaused -> True");
                             }
                         }
                     }

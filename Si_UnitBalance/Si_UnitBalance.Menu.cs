@@ -300,6 +300,43 @@ namespace Si_UnitBalance
             catch { }
         }
 
+        /// <summary>
+        /// Check if a ProjectileData object has a ProjectileProximityDetonation component on its prefab.
+        /// Returns the component if found, null otherwise. Also outputs the PD name for config writing.
+        /// </summary>
+        private static Component GetProximityComponent(object pdObj, out string pdName)
+        {
+            pdName = "";
+            if (pdObj == null) return null;
+            try
+            {
+                pdName = ((UnityEngine.Object)pdObj).name;
+                var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                object prefabObj = null;
+                var prefabField = pdObj.GetType().GetField("m_ProjectilePrefab", flags);
+                if (prefabField != null) prefabObj = prefabField.GetValue(pdObj);
+                if (prefabObj == null)
+                {
+                    var prefabProp = pdObj.GetType().GetProperty("m_ProjectilePrefab", flags);
+                    if (prefabProp != null) prefabObj = prefabProp.GetValue(pdObj);
+                }
+                if (prefabObj == null) return null;
+
+                GameObject prefabGO = null;
+                if (prefabObj is GameObject go) prefabGO = go;
+                else if (prefabObj is Component c) prefabGO = c.gameObject;
+                if (prefabGO == null) return null;
+
+                foreach (var comp in prefabGO.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp != null && comp.GetType().Name == "ProjectileProximityDetonation")
+                        return comp;
+                }
+            }
+            catch { }
+            return null;
+        }
+
         private static void GetUnitWeaponInfo(string unitName, out bool hasPrimary, out bool hasSecondary,
             out string priName, out string secName)
         {
@@ -602,6 +639,19 @@ namespace Si_UnitBalance
                 // Unarmed structures: fow distance only
                 names.Add("Vision & Sense");
                 keys.Add(new[] { "fow_distance" });
+            }
+
+            // ── Proximity Detonation (only for units whose projectile has ProjectileProximityDetonation) ──
+            {
+                Component proxComp = GetProximityComponent(priPDObj, out string _pdn);
+                if (proxComp == null && secPDObj != null)
+                    proxComp = GetProximityComponent(secPDObj, out _pdn);
+                if (proxComp != null)
+                {
+                    names.Add("Proximity Detonation");
+                    keys.Add(new[] { "prox_MinimumTime", "prox_SplashRadiusScale",
+                                     "prox_FlyingUnits", "prox_GroundUnits", "prox_Structures" });
+                }
             }
 
             groupNames = names.ToArray();
@@ -1284,6 +1334,60 @@ namespace Si_UnitBalance
                                 }
                                 break;
 
+                            case "prox_MinimumTime":
+                            case "prox_SplashRadiusScale":
+                            case "prox_FlyingUnits":
+                            case "prox_GroundUnits":
+                            case "prox_Structures":
+                            {
+                                string proxField = key.Substring(5); // strip "prox_"
+                                // Try primary PD first, then secondary
+                                Component proxComp = null;
+                                if (priPD != null) proxComp = GetProximityComponent(priPD, out _);
+                                if (proxComp == null && secPD != null) proxComp = GetProximityComponent(secPD, out _);
+                                // Also try creature attacks
+                                if (proxComp == null && decapodComp != null)
+                                {
+                                    foreach (string atkName in new[] { "AttackPrimary", "AttackSecondary" })
+                                    {
+                                        var af = decapodComp.GetType().GetField(atkName, BindingFlags.Public | BindingFlags.Instance);
+                                        if (af == null) continue;
+                                        var atk = af.GetValue(decapodComp);
+                                        if (atk == null) continue;
+                                        var pdF = atk.GetType().GetField("AttackProjectileData", BindingFlags.Public | BindingFlags.Instance);
+                                        if (pdF == null) continue;
+                                        var pd = pdF.GetValue(atk);
+                                        if (pd == null) continue;
+                                        proxComp = GetProximityComponent(pd, out _);
+                                        if (proxComp != null) break;
+                                    }
+                                }
+                                if (proxComp != null)
+                                {
+                                    var proxType = proxComp.GetType();
+                                    var pf = proxType.GetField(proxField, flags);
+                                    if (pf != null)
+                                    {
+                                        object pv = pf.GetValue(proxComp);
+                                        if (pv is bool bv) val = bv ? "True" : "False";
+                                        else if (pv is float fv) val = fv.ToString("F2");
+                                        else if (pv != null) val = pv.ToString();
+                                    }
+                                    else
+                                    {
+                                        var pp = proxType.GetProperty(proxField, flags);
+                                        if (pp != null)
+                                        {
+                                            object pv = pp.GetValue(proxComp);
+                                            if (pv is bool bv) val = bv ? "True" : "False";
+                                            else if (pv is float fv) val = fv.ToString("F2");
+                                            else if (pv != null) val = pv.ToString();
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+
                             case "dispense_timeout":
                             {
                                 // Find VehicleDispenser that dispenses this unit
@@ -1633,18 +1737,25 @@ namespace Si_UnitBalance
                     for (int i = 0; i < keys.Length; i++)
                     {
                         string val = "-";
-                        if (unitConfig != null && unitConfig.ContainsKey(keys[i]))
+                        if (keys[i].StartsWith("prox_"))
+                        {
+                            // Read from nested: projectiles -> PDName -> proximity -> fieldName
+                            val = ReadProximityConfigValue(unitConfig, keys[i].Substring(5));
+                        }
+                        else if (unitConfig != null && unitConfig.ContainsKey(keys[i]))
                             val = unitConfig[keys[i]].ToString();
                         string baseSuffix = "";
                         if (baseVals.TryGetValue(keys[i], out string bv))
                             baseSuffix = " " + _dimColor + "(base: " + bv + ")</color>";
-                        // Strip pri_/sec_ prefix for display: "pri_damage_mult" → "damage_mult"
+                        // Strip pri_/sec_/prox_ prefix for display
                         string displayKey = keys[i];
                         if (displayKey.StartsWith("pri_") || displayKey.StartsWith("sec_"))
                             displayKey = displayKey.Substring(4);
+                        else if (displayKey.StartsWith("prox_"))
+                            displayKey = displayKey.Substring(5);
                         SendChatToPlayer(player, _chatPrefix + _itemColor + (i + 1) + ".</color> " + displayKey + " = " + _valueColor + val + "</color>" + baseSuffix);
                     }
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 1.5 (or !b 1 1.5)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 1.5 (or !b 1 1.5) [bool: 1=True, 0=False]</color>");
                     break;
                 }
 
@@ -1974,6 +2085,33 @@ namespace Si_UnitBalance
             }
         }
 
+        // Read a proximity field from nested config: projectiles -> any PDName -> proximity -> fieldName
+        private static string ReadProximityConfigValue(JObject unitConfig, string proxField)
+        {
+            if (unitConfig == null) return "-";
+            try
+            {
+                var projObj = unitConfig["projectiles"] as JObject;
+                if (projObj == null) return "-";
+                foreach (var pdKvp in projObj)
+                {
+                    var pdObj = pdKvp.Value as JObject;
+                    if (pdObj == null) continue;
+                    var proxObj = pdObj["proximity"] as JObject;
+                    if (proxObj == null) continue;
+                    var token = proxObj[proxField];
+                    if (token != null)
+                    {
+                        if (token.Type == Newtonsoft.Json.Linq.JTokenType.Boolean)
+                            return token.Value<bool>() ? "True" : "False";
+                        return token.ToString();
+                    }
+                }
+            }
+            catch { }
+            return "-";
+        }
+
         // Read a unit's config values from JSON on disk
         private static JObject ReadUnitConfigFromJson(string unitName)
         {
@@ -2107,6 +2245,110 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"[BAL] Failed to write JSON: {ex.Message}");
                 return false;
             }
+        }
+
+        // Write a proximity detonation parameter into the nested projectiles JSON structure
+        // Path: units -> unitName -> projectiles -> PDName -> proximity -> fieldName
+        private static bool WriteProximityToJson(string unitName, string proxField, float value)
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return false;
+                string json = File.ReadAllText(_configPath);
+                var root = JObject.Parse(json);
+                var units = root["units"] as JObject;
+                if (units == null) { units = new JObject(); root["units"] = units; }
+                var unitObj = units[unitName] as JObject;
+                if (unitObj == null) { unitObj = new JObject(); unitObj["_note"] = "modified via !b"; units[unitName] = unitObj; }
+
+                // Find the ProjectileData name for this unit
+                string pdName = FindUnitProjectileDataName(unitName);
+                if (string.IsNullOrEmpty(pdName))
+                {
+                    MelonLogger.Warning($"[BAL] WriteProximityToJson: could not find ProjectileData for {unitName}");
+                    return false;
+                }
+
+                var projObj = unitObj["projectiles"] as JObject;
+                if (projObj == null) { projObj = new JObject(); unitObj["projectiles"] = projObj; }
+                var pdObj = projObj[pdName] as JObject;
+                if (pdObj == null) { pdObj = new JObject(); projObj[pdName] = pdObj; }
+                var proxObj = pdObj["proximity"] as JObject;
+                if (proxObj == null) { proxObj = new JObject(); pdObj["proximity"] = proxObj; }
+
+                // Bool fields: store as bool, float fields: store as number
+                if (proxField == "FlyingUnits" || proxField == "GroundUnits" || proxField == "Structures")
+                    proxObj[proxField] = value >= 0.5f;
+                else
+                    proxObj[proxField] = Math.Round(value, 4);
+
+                File.WriteAllText(_configPath, root.ToString());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[BAL] WriteProximityToJson failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        // Find the ProjectileData name for a unit that has proximity detonation
+        private static string FindUnitProjectileDataName(string unitName)
+        {
+            try
+            {
+                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                ObjectInfo matchedInfo = null;
+                foreach (var info in allInfos)
+                {
+                    if (info == null || info.Prefab == null) continue;
+                    if (MatchesUnitName(info, unitName)) { matchedInfo = info; break; }
+                }
+                if (matchedInfo == null) return null;
+
+                var prefab = matchedInfo.Prefab;
+                var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+
+                // Check VehicleTurret weapons
+                foreach (var comp in prefab.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp == null || comp.GetType().Name != "VehicleTurret") continue;
+                    foreach (string pfx in new[] { "Primary", "Secondary" })
+                    {
+                        foreach (string suffix in new[] { "Projectile", "ProjectileData" })
+                        {
+                            var pdF = comp.GetType().GetField(pfx + suffix, flags);
+                            if (pdF == null) continue;
+                            object pd = null;
+                            try { pd = pdF.GetValue(comp); } catch { }
+                            if (pd == null) continue;
+                            var proxComp = GetProximityComponent(pd, out string pdName);
+                            if (proxComp != null) return pdName;
+                        }
+                    }
+                }
+
+                // Check CreatureDecapod attacks
+                foreach (var comp in prefab.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp == null || comp.GetType().Name != "CreatureDecapod") continue;
+                    foreach (string atkName in new[] { "AttackPrimary", "AttackSecondary" })
+                    {
+                        var af = comp.GetType().GetField(atkName, BindingFlags.Public | BindingFlags.Instance);
+                        if (af == null) continue;
+                        var atk = af.GetValue(comp);
+                        if (atk == null) continue;
+                        var pdF = atk.GetType().GetField("AttackProjectileData", BindingFlags.Public | BindingFlags.Instance);
+                        if (pdF == null) continue;
+                        object pd = pdF.GetValue(atk);
+                        if (pd == null) continue;
+                        var proxComp = GetProximityComponent(pd, out string pdName);
+                        if (proxComp != null) return pdName;
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
 
         // Find the position of a JSON key ("keyName":) in a string, returns index of the opening quote

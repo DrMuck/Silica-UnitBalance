@@ -56,6 +56,10 @@ namespace Si_UnitBalance
         private static bool _discordAutoPost = false;
         private static string _discordWebhookUrl = "";
         private static bool _harmonyApplied; // true when SilicaCore found (server)
+        private static bool _debugLogging = false; // read from Admin_EnableDebugLogging MelonPreference
+
+        /// <summary>Log only when debug logging is enabled (Admin_EnableDebugLogging in MelonPreferences).</summary>
+        internal static void LogDebug(string msg) { if (_debugLogging) MelonLogger.Msg(msg); }
 
         // OverrideManager reflection cache (resolved once in OnGameStartedLogic)
         private static Type _overrideManagerType;
@@ -165,6 +169,12 @@ namespace Si_UnitBalance
         // Tech tier number (1-8) -> build time in seconds
         private static readonly Dictionary<int, float> _techTierTimes = new Dictionary<int, float>();
 
+        // Original health values (keyed by DamageManagerData asset name) to prevent compounding
+        private static readonly Dictionary<string, float> _originalHealth =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // Original aim angle values (keyed by unit_attackField) to prevent compounding
+        private static readonly Dictionary<string, float> _originalAimAngle =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         // Original move speed values (keyed by unit+component+field) to prevent compounding
         private static readonly Dictionary<string, float> _originalMoveSpeeds =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
@@ -174,6 +184,11 @@ namespace Si_UnitBalance
         // Per-projectile absolute value overrides: unit name -> { projectile name -> { field name -> value } }
         private static readonly Dictionary<string, Dictionary<string, Dictionary<string, float>>> _projectileOverrides =
             new Dictionary<string, Dictionary<string, Dictionary<string, float>>>(StringComparer.OrdinalIgnoreCase);
+
+        // Per-projectile proximity detonation overrides: projectile name -> { field name -> value }
+        // Fields: MinimumTime (float), SplashRadiusScale (float), FlyingUnits (0/1), GroundUnits (0/1), Structures (0/1)
+        private static readonly Dictionary<string, Dictionary<string, float>> _proximityOverrides =
+            new Dictionary<string, Dictionary<string, float>>(StringComparer.OrdinalIgnoreCase);
 
         // Teleport overrides (from _teleport pseudo-unit in config)
         private static float _teleportCooldown = -1f;
@@ -274,6 +289,18 @@ namespace Si_UnitBalance
                 }
                 else
                     MelonLogger.Warning("SendPlayerOverrides method not found — override sync may fail for large configs");
+
+                // Patch ConstructionSite.SpawnObject to ensure full health on building completion
+                // Fixes vanilla timing bug where first-built structures get partial health due to
+                // HealthAddRemaining being computed against a different MaxHealth than final Health01 ratio.
+                var spawnObject = typeof(ConstructionSite).GetMethod("SpawnObject",
+                    BindingFlags.NonPublic | BindingFlags.Instance);
+                if (spawnObject != null)
+                {
+                    harmony.Patch(spawnObject,
+                        prefix: new HarmonyMethod(typeof(Patch_ConstructionSpawn), "Prefix"));
+                    MelonLogger.Msg("Patched ConstructionSite.SpawnObject for construction health fix");
+                }
 
                 // Register chat commands via AdminMod API
                 try
@@ -397,6 +424,16 @@ namespace Si_UnitBalance
                 // _revertOnRoundEnd removed — always false (reverting breaks starter structure overrides)
                 _healthMultEnabled = config["health_mult_enabled"]?.Value<bool>() ?? true;
 
+                // Read debug logging from Admin mod's MelonPreference
+                try
+                {
+                    var cat = MelonLoader.MelonPreferences.GetCategory("Silica");
+                    var entry = cat?.GetEntry<bool>("Admin_EnableDebugLogging");
+                    _debugLogging = entry?.Value ?? false;
+                }
+                catch { _debugLogging = false; }
+                MelonLogger.Msg($"[CONFIG] Debug logging: {_debugLogging}");
+
                 _damageMultipliers.Clear();
                 _healthMultipliers.Clear();
                 _costMultipliers.Clear();
@@ -423,6 +460,7 @@ namespace Si_UnitBalance
                 _sprintSpeedMultipliers.Clear();
                 _splashRadiusMultipliers.Clear();
                 _projectileOverrides.Clear();
+                _proximityOverrides.Clear();
                 _techTierTimes.Clear();
                 _teleportCooldown = -1f;
                 _teleportDuration = -1f;
@@ -620,6 +658,31 @@ namespace Si_UnitBalance
                                 var fieldOverrides = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
                                 foreach (var fieldKvp in projFields)
                                 {
+                                    // Parse "proximity" sub-object for ProjectileProximityDetonation overrides
+                                    if (string.Equals(fieldKvp.Key, "proximity", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        var proxObj = fieldKvp.Value as JObject;
+                                        if (proxObj != null)
+                                        {
+                                            var proxFields = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+                                            foreach (var pKvp in proxObj)
+                                            {
+                                                if (pKvp.Value == null) continue;
+                                                // Booleans stored as 0/1 floats
+                                                if (pKvp.Value.Type == Newtonsoft.Json.Linq.JTokenType.Boolean)
+                                                    proxFields[pKvp.Key] = pKvp.Value.Value<bool>() ? 1f : 0f;
+                                                else
+                                                {
+                                                    float? pVal = pKvp.Value.Value<float>();
+                                                    if (pVal.HasValue)
+                                                        proxFields[pKvp.Key] = pVal.Value;
+                                                }
+                                            }
+                                            if (proxFields.Count > 0)
+                                                _proximityOverrides[projName] = proxFields;
+                                        }
+                                        continue;
+                                    }
                                     float? val = fieldKvp.Value?.Value<float>();
                                     if (val.HasValue)
                                         fieldOverrides[fieldKvp.Key] = val.Value;
