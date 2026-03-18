@@ -321,6 +321,30 @@ namespace Si_UnitBalance
 
                 _nameCache.Clear();
 
+                // Auto-detect game version changes and trigger fresh dump
+                if (!_fieldsDumped)
+                {
+                    try
+                    {
+                        string gameVersion = UnityEngine.Application.version ?? "unknown";
+                        string versionFile = System.IO.Path.Combine(
+                            System.IO.Path.GetDirectoryName(_configPath), "game_version.txt");
+                        string savedVersion = "";
+                        if (System.IO.File.Exists(versionFile))
+                            savedVersion = System.IO.File.ReadAllText(versionFile).Trim();
+                        if (savedVersion != gameVersion)
+                        {
+                            MelonLogger.Msg($"[VERSION] Game version changed: '{savedVersion}' -> '{gameVersion}' — triggering auto-dump");
+                            _dumpFields = true;
+                            System.IO.File.WriteAllText(versionFile, gameVersion);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MelonLogger.Warning($"[VERSION] Failed to check game version: {ex.Message}");
+                    }
+                }
+
                 if (_dumpFields && !_fieldsDumped)
                 {
                     DumpFieldDiscovery();
@@ -669,6 +693,7 @@ namespace Si_UnitBalance
                 _originalProjectileLifetimes.Clear();
                 _originalProjectileSpeeds.Clear();
                 _originalMoveSpeeds.Clear();
+                _originalMeleeDamage.Clear();
                 _originalHealth.Clear();
                 _originalAimAngle.Clear();
 

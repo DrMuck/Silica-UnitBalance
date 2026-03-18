@@ -932,7 +932,20 @@ namespace Si_UnitBalance
                                 break;
                             case "build_time_mult":
                                 if (matchedInfo.ConstructionData != null)
-                                    val = matchedInfo.ConstructionData.BuildUpTime.ToString("F1") + "s";
+                                {
+                                    var cd = matchedInfo.ConstructionData;
+                                    float totalBuild = cd.BuildUpTime;
+                                    try
+                                    {
+                                        var cdType = cd.GetType();
+                                        var fwt = cdType.GetField("FinishedWaitTime", BindingFlags.Public | BindingFlags.Instance);
+                                        var cut = cdType.GetField("CleanUpTime", BindingFlags.Public | BindingFlags.Instance);
+                                        if (fwt != null) totalBuild += (float)fwt.GetValue(cd);
+                                        if (cut != null) totalBuild += (float)cut.GetValue(cd);
+                                    }
+                                    catch { }
+                                    val = totalBuild.ToString("F1") + "s";
+                                }
                                 break;
                             case "min_tier":
                                 if (matchedInfo.ConstructionData != null)

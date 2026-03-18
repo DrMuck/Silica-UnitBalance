@@ -116,6 +116,7 @@ namespace Si_UnitBalance
                 _originalAimLeadGravity.Clear();
                 _originalAimLeadDrag.Clear();
                 _originalMoveSpeeds.Clear();
+                _originalMeleeDamage.Clear();
                 _originalHealth.Clear();
                 _originalAimAngle.Clear();
                 _nameCache.Clear();

@@ -378,11 +378,14 @@ namespace Si_UnitBalance
             { "Shuttle", 1 },        // cannon on 2nd VT (only weapon)
             { "Gunship", 1 },        // gun on 2nd VT
             { "Platoon Hauler", 1 }, // weapon on 2nd VT
+            { "Fighter", 1 },       // gun on 2nd VT, bombs on 1st
+            { "Interceptor", 1 },   // gun on 2nd VT, bombs on 1st
         };
 
         /// <summary>
         /// Resolve the effective damage multiplier for a specific damage field.
-        /// Priority: pri_impact_damage_mult > impact_damage_mult > pri_damage_mult > damage_mult > 1.0
+        /// Priority: pri_impact_damage_mult > pri_damage_mult > impact_damage_mult > damage_mult > 1.0
+        /// Weapon-specific keys always take precedence over shared keys to prevent cross-contamination.
         /// </summary>
         private static float GetDamageFieldMult(string unitName, string weapon, string fieldName)
         {
@@ -391,12 +394,12 @@ namespace Si_UnitBalance
             // 1. Most specific: weapon + subtype (e.g., "pri:impact:Hover Tank")
             if (!string.IsNullOrEmpty(weapon) && _damageMultipliers.TryGetValue(weapon + ":" + subtype + unitName, out float v1))
                 return v1;
-            // 2. Subtype only (e.g., "impact:Hover Tank")
-            if (_damageMultipliers.TryGetValue(subtype + unitName, out float v2))
-                return v2;
-            // 3. Weapon blanket (e.g., "pri:Hover Tank")
+            // 2. Weapon blanket (e.g., "pri:Hover Tank") — before shared subtype to prevent cross-weapon contamination
             if (!string.IsNullOrEmpty(weapon) && _damageMultipliers.TryGetValue(weapon + ":" + unitName, out float v3))
                 return v3;
+            // 3. Subtype only — shared across all weapons (e.g., "impact:Hover Tank")
+            if (_damageMultipliers.TryGetValue(subtype + unitName, out float v2))
+                return v2;
             // 4. Unit blanket (e.g., "Hover Tank")
             if (_damageMultipliers.TryGetValue(unitName, out float v4))
                 return v4;
@@ -527,6 +530,7 @@ namespace Si_UnitBalance
                                 anyApplied = true;
                             }
                         }
+                        vtIndex++;
                     }
 
                     // --- CreatureDecapod: AttackPrimary/Secondary.AttackProjectileData + melee Damage ---
@@ -589,7 +593,15 @@ namespace Si_UnitBalance
                                 float effectiveDmgMult = GetWeaponMult(_damageMultipliers, name, weapon);
                                 if (Math.Abs(effectiveDmgMult - 1f) > 0.001f)
                                 {
-                                    float origDmg = GetFloatMember(attackObj, "Damage");
+                                    string cacheKey = $"{name}_{attackFieldName}";
+                                    float origDmg;
+                                    if (_originalMeleeDamage.ContainsKey(cacheKey))
+                                        origDmg = _originalMeleeDamage[cacheKey];
+                                    else
+                                    {
+                                        origDmg = GetFloatMember(attackObj, "Damage");
+                                        _originalMeleeDamage[cacheKey] = origDmg;
+                                    }
                                     if (origDmg > 0)
                                     {
                                         float newDmg = origDmg * effectiveDmgMult;
@@ -599,6 +611,24 @@ namespace Si_UnitBalance
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // --- Generic ProjectileData field scan (catches infantry/HumanHandsAnimator weapons) ---
+                    if (typeName != "VehicleTurret" && typeName != "CreatureDecapod" && hasDamageMult)
+                    {
+                        var compType = comp.GetType();
+                        foreach (var field in compType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                        {
+                            if (field.FieldType.Name != "ProjectileData") continue;
+                            object pdObj;
+                            try { pdObj = field.GetValue(comp); } catch { continue; }
+                            if (pdObj == null) continue;
+                            string pdName = "";
+                            try { pdName = ((UnityEngine.Object)pdObj).name; } catch { continue; }
+                            if (string.IsNullOrEmpty(pdName) || modifiedPD.Contains(pdName)) continue;
+                            ScaleProjectileDamage(pdObj, pdName, name, "pri", modifiedPD, useOM);
+                            anyApplied = true;
                         }
                     }
                 }

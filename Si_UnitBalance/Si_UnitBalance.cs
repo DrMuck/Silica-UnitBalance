@@ -175,6 +175,9 @@ namespace Si_UnitBalance
         // Original aim angle values (keyed by unit_attackField) to prevent compounding
         private static readonly Dictionary<string, float> _originalAimAngle =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // Original melee damage values (keyed by unit_attackField) to prevent compounding
+        private static readonly Dictionary<string, float> _originalMeleeDamage =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         // Original move speed values (keyed by unit+component+field) to prevent compounding
         private static readonly Dictionary<string, float> _originalMoveSpeeds =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
