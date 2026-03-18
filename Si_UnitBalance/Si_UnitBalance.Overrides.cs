@@ -40,56 +40,65 @@ namespace Si_UnitBalance
                 {
                     if (_techTierTimes.TryGetValue(cd.TechnologyTier, out float techTime))
                     {
-                        float origTime = cd.BuildUpTime;
-                        float newTime = Math.Max(1f, techTime);
+                        // techTime = desired TOTAL time (BuildUpTime + FinishedWaitTime + CleanUpTime)
+                        // Distribute proportionally across all three fields
+                        float origBU = cd.BuildUpTime;
+                        float origFwt = 0, origCut = 0;
+                        try
+                        {
+                            var cdType = cd.GetType();
+                            var fwtField = cdType.GetField("FinishedWaitTime", BindingFlags.Public | BindingFlags.Instance);
+                            var cutField = cdType.GetField("CleanUpTime", BindingFlags.Public | BindingFlags.Instance);
+                            if (fwtField != null) origFwt = (float)fwtField.GetValue(cd);
+                            if (cutField != null) origCut = (float)cutField.GetValue(cd);
+                        }
+                        catch { }
+                        float origTotal = origBU + origFwt + origCut;
+                        float desiredTotal = Math.Max(1f, techTime);
+                        float ratio = origTotal > 0 ? desiredTotal / origTotal : 1f;
+
+                        float newBU = Math.Max(0.5f, origBU * ratio);
                         bool omOk = false;
                         if (useOM)
                         {
-                            omOk = OMSetFloat(cdTarget, "BuildUpTime", newTime);
+                            omOk = OMSetFloat(cdTarget, "BuildUpTime", newBU);
                             if (!omOk)
                             {
-                                MelonLogger.Warning($"[TECH] OM.Set failed for '{cdTarget}' BuildUpTime={newTime}, falling back to direct");
-                                cd.BuildUpTime = newTime;
+                                MelonLogger.Warning($"[TECH] OM.Set failed for '{cdTarget}' BuildUpTime={newBU}, falling back to direct");
+                                cd.BuildUpTime = newBU;
                             }
                         }
                         else
-                            cd.BuildUpTime = newTime;
+                            cd.BuildUpTime = newBU;
 
-                        // Scale FinishedWaitTime/CleanUpTime proportionally
-                        if (origTime > 0)
+                        // Scale FWT/CUT by same ratio
+                        try
                         {
-                            float ratio = newTime / origTime;
-                            try
+                            var cdType = cd.GetType();
+                            if (origFwt > 0)
                             {
-                                var cdType = cd.GetType();
+                                float newFwt = origFwt * ratio;
                                 var fwtField = cdType.GetField("FinishedWaitTime", BindingFlags.Public | BindingFlags.Instance);
-                                var cutField = cdType.GetField("CleanUpTime", BindingFlags.Public | BindingFlags.Instance);
                                 if (fwtField != null)
                                 {
-                                    float origFwt = (float)fwtField.GetValue(cd);
-                                    if (origFwt > 0)
-                                    {
-                                        float newFwt = origFwt * ratio;
-                                        if (useOM) OMSetFloat(cdTarget, "FinishedWaitTime", newFwt);
-                                        else fwtField.SetValue(cd, newFwt);
-                                    }
-                                }
-                                if (cutField != null)
-                                {
-                                    float origCut = (float)cutField.GetValue(cd);
-                                    if (origCut > 0)
-                                    {
-                                        float newCut = origCut * ratio;
-                                        if (useOM) OMSetFloat(cdTarget, "CleanUpTime", newCut);
-                                        else cutField.SetValue(cd, newCut);
-                                    }
+                                    if (useOM) OMSetFloat(cdTarget, "FinishedWaitTime", newFwt);
+                                    else fwtField.SetValue(cd, newFwt);
                                 }
                             }
-                            catch { }
+                            if (origCut > 0)
+                            {
+                                float newCut = origCut * ratio;
+                                var cutField = cdType.GetField("CleanUpTime", BindingFlags.Public | BindingFlags.Instance);
+                                if (cutField != null)
+                                {
+                                    if (useOM) OMSetFloat(cdTarget, "CleanUpTime", newCut);
+                                    else cutField.SetValue(cd, newCut);
+                                }
+                            }
                         }
+                        catch { }
 
-                        float verifyTime = cd.BuildUpTime;
-                        LogDebug($"[TECH] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): {origTime:F0}s -> {newTime:F0}s (verify={verifyTime:F0}s){(omOk ? " (OM)" : "")}");
+                        LogDebug($"[TECH] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): total {origTotal:F0}s -> {desiredTotal:F0}s (BU:{origBU:F0}->{newBU:F0} FWT:{origFwt:F0} CUT:{origCut:F0}){(omOk ? " (OM)" : "")}");
                         techApplied++;
                     }
                     else
@@ -443,8 +452,8 @@ namespace Si_UnitBalance
             { "Shuttle", 1 },        // cannon on 2nd VT (only weapon)
             { "Gunship", 1 },        // gun on 2nd VT
             { "Platoon Hauler", 1 }, // weapon on 2nd VT
-            { "Fighter", 1 },       // gun on 2nd VT, bombs on 1st
-            { "Interceptor", 1 },   // gun on 2nd VT, bombs on 1st
+            // Fighter: gun (HMG_StealthFighter) is on VT[0] — NOT in this list
+            // Interceptor: gun (Shell_Interceptor) is on VT[0] — NOT in this list
         };
 
         /// <summary>
@@ -1021,17 +1030,17 @@ namespace Si_UnitBalance
                         }
 
                     // VehicleTurret weapon params via OverrideManager (per-weapon multiplier resolution)
+                    // NOTE: OM.Set always targets the first VehicleTurret on the prefab.
+                    // _vtPriIndex is NOT used here — weapon params always map VT[0].Primary → "pri".
+                    // _vtPriIndex is only used for damage scaling (which targets ProjectileData assets).
                     if (typeName == "VehicleTurret")
                     {
                         var vtType = comp.GetType();
 
                         foreach (string prefix in new[] { "Primary", "Secondary" })
                         {
-                            // Determine weapon slot based on VT index and turret mapping
-                            int priIdx = 0;
-                            _vtPriIndex.TryGetValue(name, out priIdx);
                             string weapon;
-                            if (vtIndex == priIdx)
+                            if (vtIndex == 0)
                                 weapon = prefix == "Primary" ? "pri" : "sec";
                             else
                                 weapon = "sec";
@@ -1049,7 +1058,7 @@ namespace Si_UnitBalance
                                         float newVal = Math.Max(0.1f, orig * effReload);
                                         if (useOM) OMSetFloat(oiTarget, $"{prefix}ReloadTime", newVal);
                                         else rtField.SetValue(comp, newVal);
-                                        LogDebug($"  VehicleTurret.{prefix}ReloadTime: {orig:F2} -> {newVal:F2}");
+                                        LogDebug($"  VT[{vtIndex}].{prefix}ReloadTime: {orig:F2} -> {newVal:F2}{(useOM ? " (OM)" : " (direct)")}");
                                     }
                                 }
                             }
@@ -1085,7 +1094,8 @@ namespace Si_UnitBalance
                                         int newVal = Math.Max(1, (int)Math.Round(orig * effMag));
                                         if (useOM) OMSetInt(oiTarget, $"{prefix}MagazineSize", newVal);
                                         else msField.SetValue(comp, newVal);
-                                        LogDebug($"  VehicleTurret.{prefix}MagazineSize: {orig} -> {newVal}");
+                                        LogDebug($"  VT[{vtIndex}].{prefix}MagazineSize: {orig} -> {newVal}{(useOM ? " (OM)" : " (direct)")}");
+
                                     }
                                 }
                             }
