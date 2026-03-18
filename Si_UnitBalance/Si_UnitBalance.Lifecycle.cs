@@ -349,6 +349,7 @@ namespace Si_UnitBalance
                 {
                     DumpFieldDiscovery();
                     DumpAllUnitsJson();
+                    UpdateConfigBaseAnnotations();
                     _fieldsDumped = true;
                 }
 

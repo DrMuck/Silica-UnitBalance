@@ -1,4 +1,5 @@
 using MelonLoader;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -540,6 +541,16 @@ namespace Si_UnitBalance
                     var cd = info.ConstructionData;
                     int cost = cd.ResourceCost;
                     float buildTime = cd.BuildUpTime;
+                    float finishedWaitTime = 0, cleanUpTime = 0;
+                    try
+                    {
+                        var cdType = cd.GetType();
+                        var fwt = cdType.GetField("FinishedWaitTime", BindingFlags.Public | BindingFlags.Instance);
+                        var cut = cdType.GetField("CleanUpTime", BindingFlags.Public | BindingFlags.Instance);
+                        if (fwt != null) finishedWaitTime = (float)fwt.GetValue(cd);
+                        if (cut != null) cleanUpTime = (float)cut.GetValue(cd);
+                    }
+                    catch { }
                     int minTier = cd.MinimumTeamTier;
                     int maxTier = cd.MaximumTeamTier;
                     float maxDist = cd.MaximumBaseStructureDistance;
@@ -997,6 +1008,8 @@ namespace Si_UnitBalance
                     sb.Append($"\"built_at\":\"{EscJson(producer)}\",");
                     sb.Append($"\"cost\":{cost},");
                     sb.Append($"\"build_time\":{buildTime:F1},");
+                    sb.Append($"\"finished_wait_time\":{finishedWaitTime:F1},");
+                    sb.Append($"\"clean_up_time\":{cleanUpTime:F1},");
                     sb.Append($"\"min_tier\":{minTier},");
                     sb.Append($"\"max_tier\":{maxTier},");
                     sb.Append($"\"hp\":{maxHealth},");
@@ -1149,6 +1162,172 @@ namespace Si_UnitBalance
             {
                 MelonLogger.Error($"[JSON DUMP] Error: {ex}");
             }
+        }
+
+        /// <summary>
+        /// After a fresh dump, update _base/_pri_weapon/_sec_weapon/_base_speed/_base_sense
+        /// annotations in the config JSON to match current vanilla values.
+        /// </summary>
+        private static void UpdateConfigBaseAnnotations()
+        {
+            try
+            {
+                string dumpPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(_configPath),
+                    "Si_UnitBalance_Dump.json");
+                if (!System.IO.File.Exists(dumpPath) || !System.IO.File.Exists(_configPath)) return;
+
+                var dumpJson = JObject.Parse(System.IO.File.ReadAllText(dumpPath));
+                var configJson = JObject.Parse(System.IO.File.ReadAllText(_configPath));
+                var units = dumpJson["units"] as JArray;
+                var configUnits = configJson["units"] as JObject;
+                if (units == null || configUnits == null) return;
+
+                // Build lookup: config key -> dump entry
+                var dumpLookup = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
+                foreach (JObject u in units)
+                {
+                    string name = Js(u, "name");
+                    string intern = Js(u, "internal");
+                    string key = ResolveConfigName(name, intern);
+                    if (!string.IsNullOrEmpty(key) && !dumpLookup.ContainsKey(key))
+                        dumpLookup[key] = u;
+                }
+
+                int updated = 0;
+                foreach (var prop in configUnits.Properties())
+                {
+                    string unitName = prop.Name;
+                    if (unitName.StartsWith("_")) continue;
+                    var entry = prop.Value as JObject;
+                    if (entry == null) continue;
+                    if (!dumpLookup.TryGetValue(unitName, out var dump)) continue;
+
+                    bool changed = false;
+
+                    // _base: "HP:{hp} Cost:{cost} Build:{totalBuild}s T{tier}"
+                    int hp = Ji(dump, "hp");
+                    int cost = Ji(dump, "cost");
+                    float totalBuild = Jf(dump, "build_time") + Jf(dump, "finished_wait_time") + Jf(dump, "clean_up_time");
+                    int minTier = Ji(dump, "min_tier", -1);
+                    string tierStr = minTier < 0 ? "T0" : $"T{minTier}";
+                    string newBase = $"HP:{hp} Cost:{cost} Build:{totalBuild:F1}s {tierStr}";
+                    if (entry["_base"]?.ToString() != newBase)
+                    {
+                        entry["_base"] = newBase;
+                        changed = true;
+                    }
+
+                    // Determine weapon source
+                    bool isCreature = Js(dump, "faction") == "Alien" && !Jb(dump, "is_structure");
+                    bool hasVT = !string.IsNullOrEmpty(Js(dump, "vt_proj"));
+
+                    if (isCreature)
+                    {
+                        string atkProj = Js(dump, "atk_proj");
+                        if (!string.IsNullOrEmpty(atkProj))
+                        {
+                            string wpn = FormatWeaponAnnotation(atkProj,
+                                Jf(dump, "proj_impact_dmg"), Jf(dump, "proj_ricochet_dmg"),
+                                Jf(dump, "proj_splash_dmg"), true, 0, false,
+                                Jf(dump, "proj_speed"), Jf(dump, "proj_lifetime"),
+                                Jf(dump, "atk_spread"), 0, 0, 0);
+                            if (!string.IsNullOrEmpty(wpn)) { entry["_pri_weapon"] = wpn; changed = true; }
+                        }
+                        int atk2Dmg = Ji(dump, "atk2_damage");
+                        if (atk2Dmg > 0) { entry["_sec_weapon"] = $"Melee | dmg:{atk2Dmg}"; changed = true; }
+
+                        float moveSpd = Jf(dump, "move_speed"), flySpd = Jf(dump, "fly_speed");
+                        if (moveSpd > 0 || flySpd > 0)
+                        {
+                            string spd = $"Move:{moveSpd:G} Fly:{flySpd:G}";
+                            float strafe = Jf(dump, "fly_strafe_scale", 1f);
+                            if (Math.Abs(strafe - 1f) > 0.01f) spd += $" Strafe:{strafe:G}";
+                            entry["_base_speed"] = spd; changed = true;
+                        }
+                    }
+                    else if (hasVT)
+                    {
+                        int priIdx = 0;
+                        _vtPriIndex.TryGetValue(unitName, out priIdx);
+                        string vt0Proj = Js(dump, "vt_proj"), vt1Proj = Js(dump, "vt3_proj");
+                        int vtCount = Ji(dump, "vt_count", 1);
+
+                        string priProj, secProj, priPfx, secPfx;
+                        if (priIdx == 0)
+                        { priProj = vt0Proj; priPfx = "vt_"; secProj = vtCount >= 2 ? vt1Proj : ""; secPfx = "vt3_"; }
+                        else
+                        { priProj = vtCount >= 2 ? vt1Proj : ""; priPfx = "vt3_"; secProj = vt0Proj; secPfx = "vt_"; }
+
+                        if (!string.IsNullOrEmpty(priProj))
+                        {
+                            string wpn = FormatVTWeapon(dump, priPfx, priProj);
+                            if (!string.IsNullOrEmpty(wpn)) { entry["_pri_weapon"] = wpn; changed = true; }
+                        }
+                        if (!string.IsNullOrEmpty(secProj))
+                        {
+                            string wpn = FormatVTWeapon(dump, secPfx, secProj);
+                            if (!string.IsNullOrEmpty(wpn)) { entry["_sec_weapon"] = wpn; changed = true; }
+                        }
+
+                        float vehSpd = Jf(dump, "move_speed");
+                        if (vehSpd > 0) { entry["_base_speed"] = $"Speed:{vehSpd:G}"; changed = true; }
+                    }
+
+                    int fow = Ji(dump, "fow_view"), tgt = Ji(dump, "target_dist");
+                    if (fow > 0 || tgt > 0)
+                    {
+                        string newSense = $"FOW:{fow} Target:{tgt}";
+                        if (entry["_base_sense"]?.ToString() != newSense)
+                        { entry["_base_sense"] = newSense; changed = true; }
+                    }
+
+                    if (changed) updated++;
+                }
+
+                System.IO.File.WriteAllText(_configPath,
+                    configJson.ToString(Newtonsoft.Json.Formatting.Indented));
+                MelonLogger.Msg($"[ANNOTATIONS] Updated base annotations for {updated} units in config");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[ANNOTATIONS] Failed to update config annotations: {ex.Message}");
+            }
+        }
+
+        // JSON helpers for dump JObject (avoids .Value<T>() which requires key param in older Newtonsoft)
+        private static string Js(JObject o, string k) { var t = o[k]; return t != null ? t.ToString() : ""; }
+        private static int Ji(JObject o, string k, int def = 0) { var t = o[k]; return t != null ? (int)t : def; }
+        private static float Jf(JObject o, string k, float def = 0f) { var t = o[k]; return t != null ? (float)t : def; }
+        private static bool Jb(JObject o, string k) { var t = o[k]; return t != null && (bool)t; }
+
+        private static string FormatWeaponAnnotation(string projName, float impact, float ricochet,
+            float splash, bool hasSplash, float pen, bool hasPen,
+            float speed, float lifetime, float spread, int magazine, float fireInterval, float reload)
+        {
+            var parts = new List<string> { projName + " |" };
+            if (impact > 0) parts.Add($"imp:{impact:G}");
+            if (splash > 0 && hasSplash) parts.Add($"spl:{splash:G}");
+            if (pen > 0 && hasPen) parts.Add($"pen:{pen:G}");
+            if (ricochet > 0) parts.Add($"ric:{ricochet:G}");
+            if (speed > 0) parts.Add($"spd:{speed:G}");
+            if (lifetime > 0) parts.Add($"life:{lifetime:G}");
+            if (spread > 0) parts.Add($"spread:{spread:G}");
+            if (magazine > 0) parts.Add($"mag:{magazine}");
+            if (fireInterval > 0) parts.Add($"fi:{fireInterval:G}");
+            if (reload > 0) parts.Add($"reload:{reload:G}");
+            return parts.Count > 1 ? string.Join(" ", parts) : "";
+        }
+
+        private static string FormatVTWeapon(JObject dump, string pfx, string projName)
+        {
+            return FormatWeaponAnnotation(projName,
+                Jf(dump, pfx + "impact_dmg"), Jf(dump, pfx + "ricochet_dmg"),
+                Jf(dump, pfx + "splash_dmg"), Jb(dump, pfx + "has_splash"),
+                Jf(dump, pfx + "pen_dmg"), Jb(dump, pfx + "has_pen"),
+                Jf(dump, pfx + "proj_speed"), Jf(dump, pfx + "proj_lifetime"),
+                Jf(dump, pfx + "spread"), Ji(dump, pfx + "magazine"),
+                Jf(dump, pfx + "fire_interval"), Jf(dump, pfx + "reload"));
         }
 
         private static float GetFloatField(Type t, object obj, string fieldName)

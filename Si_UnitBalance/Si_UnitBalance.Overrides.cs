@@ -54,7 +54,40 @@ namespace Si_UnitBalance
                         }
                         else
                             cd.BuildUpTime = newTime;
-                        // Log actual value after set to verify it took effect
+
+                        // Scale FinishedWaitTime/CleanUpTime proportionally
+                        if (origTime > 0)
+                        {
+                            float ratio = newTime / origTime;
+                            try
+                            {
+                                var cdType = cd.GetType();
+                                var fwtField = cdType.GetField("FinishedWaitTime", BindingFlags.Public | BindingFlags.Instance);
+                                var cutField = cdType.GetField("CleanUpTime", BindingFlags.Public | BindingFlags.Instance);
+                                if (fwtField != null)
+                                {
+                                    float origFwt = (float)fwtField.GetValue(cd);
+                                    if (origFwt > 0)
+                                    {
+                                        float newFwt = origFwt * ratio;
+                                        if (useOM) OMSetFloat(cdTarget, "FinishedWaitTime", newFwt);
+                                        else fwtField.SetValue(cd, newFwt);
+                                    }
+                                }
+                                if (cutField != null)
+                                {
+                                    float origCut = (float)cutField.GetValue(cd);
+                                    if (origCut > 0)
+                                    {
+                                        float newCut = origCut * ratio;
+                                        if (useOM) OMSetFloat(cdTarget, "CleanUpTime", newCut);
+                                        else cutField.SetValue(cd, newCut);
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+
                         float verifyTime = cd.BuildUpTime;
                         LogDebug($"[TECH] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): {origTime:F0}s -> {newTime:F0}s (verify={verifyTime:F0}s){(omOk ? " (OM)" : "")}");
                         techApplied++;
@@ -92,7 +125,39 @@ namespace Si_UnitBalance
                         OMSetFloat(cdTarget, "BuildUpTime", newTime);
                     else
                         cd.BuildUpTime = newTime;
-                    LogDebug($"[BUILD] {name}: {origTime:F1}s -> {newTime:F1}s (x{btMult:F2}){(useOM ? " (OM)" : "")}");
+                    LogDebug($"[BUILD] {name}: BuildUpTime {origTime:F1}s -> {newTime:F1}s (x{btMult:F2}){(useOM ? " (OM)" : "")}");
+
+                    // Also scale FinishedWaitTime and CleanUpTime so the total build time
+                    // shown in-game scales proportionally (game displays BuildUpTime + FinishedWaitTime + CleanUpTime)
+                    try
+                    {
+                        var cdType = cd.GetType();
+                        var fwtField = cdType.GetField("FinishedWaitTime", BindingFlags.Public | BindingFlags.Instance);
+                        var cutField = cdType.GetField("CleanUpTime", BindingFlags.Public | BindingFlags.Instance);
+                        if (fwtField != null)
+                        {
+                            float origFwt = (float)fwtField.GetValue(cd);
+                            if (origFwt > 0)
+                            {
+                                float newFwt = origFwt * btMult;
+                                if (useOM) OMSetFloat(cdTarget, "FinishedWaitTime", newFwt);
+                                else fwtField.SetValue(cd, newFwt);
+                                LogDebug($"[BUILD] {name}: FinishedWaitTime {origFwt:F1}s -> {newFwt:F1}s");
+                            }
+                        }
+                        if (cutField != null)
+                        {
+                            float origCut = (float)cutField.GetValue(cd);
+                            if (origCut > 0)
+                            {
+                                float newCut = origCut * btMult;
+                                if (useOM) OMSetFloat(cdTarget, "CleanUpTime", newCut);
+                                else cutField.SetValue(cd, newCut);
+                                LogDebug($"[BUILD] {name}: CleanUpTime {origCut:F1}s -> {newCut:F1}s");
+                            }
+                        }
+                    }
+                    catch { }
                 }
 
                 if (hasMinTier)
