@@ -38,15 +38,10 @@ namespace Si_UnitBalance
         {
             public static void Postfix()
             {
-                // Fires on map load — fresh prefabs loaded
                 _watchdogGeneration++;
                 _watchdogFired = false;
                 _lastMapName = GetCurrentMapName();
-                // Fresh map = fresh prefabs — clear vanilla cache so it re-reads from clean prefabs
-                _overridesApplied = false;
-                _vanillaBaseCache.Clear();
-                MelonLogger.Msg($"[UnitBalance] Game init ({_lastMapName}) — applying overrides to fresh prefabs");
-                ApplyOverridesLogic();
+                MelonLogger.Msg($"[UnitBalance] Game init ({_lastMapName})");
             }
         }
 
@@ -56,25 +51,19 @@ namespace Si_UnitBalance
             {
                 _watchdogGeneration++;
                 _watchdogFired = false;
-
-                // Detect map change by comparing current map name
                 string currentMap = GetCurrentMapName();
                 bool mapChanged = !string.Equals(currentMap, _lastMapName, StringComparison.OrdinalIgnoreCase);
                 if (mapChanged)
                 {
-                    MelonLogger.Msg($"[UnitBalance] Game restart — map changed ({_lastMapName} → {currentMap}), re-applying overrides");
+                    MelonLogger.Msg($"[UnitBalance] Game restart — map changed ({_lastMapName} → {currentMap})");
                     _lastMapName = currentMap;
-                    _overridesApplied = false;
                     _vanillaBaseCache.Clear();
-                    ApplyOverridesLogic();
                 }
                 else
                 {
-                    MelonLogger.Msg("[UnitBalance] Game restart (same map) — prefabs already modified");
-                    // Prefabs still modified from previous round, no re-apply needed
-                    if (!_overridesApplied)
-                        ApplyOverridesLogic();
+                    MelonLogger.Msg("[UnitBalance] Game restart (same map)");
                 }
+                _overridesApplied = false;
             }
         }
 
@@ -87,6 +76,50 @@ namespace Si_UnitBalance
                 _watchdogFired = false;
                 OnGameStartedLogic();
             }
+        }
+
+        // =============================================
+        // OverrideManager.RevertAll Postfix — when the GAME reverts during scene
+        // transitions, immediately re-apply our overrides so clients see them
+        // before starters spawn. Guarded to skip when WE call OMRevertAll.
+        // =============================================
+
+        // =============================================
+        // OnFinishLoadingLevel — on GameLevelLoader (NOT GameEvents, so won't be cleared).
+        // Fires after OM.RevertAll + scene assets loaded, before spawning starts.
+        // This is the ideal spot identified by databomb via dnSpy analysis.
+        // =============================================
+
+        private static void OnFinishLoadingLevel(string sceneName, GameModeInfo gameModeInfo)
+        {
+            if (!_enabled || !_configLoaded) return;
+            if (string.IsNullOrEmpty(sceneName) || sceneName == "Loading" || sceneName == "MainMenu") return;
+
+            // Only apply once (first map after server start). OM state persists
+            // through map changes because we block the game's RevertAll.
+            if (_overridesApplied)
+            {
+                MelonLogger.Msg($"[UnitBalance] OnFinishLoadingLevel ({sceneName}) — overrides already active, skipping");
+                return;
+            }
+
+            MelonLogger.Msg($"[UnitBalance] OnFinishLoadingLevel ({sceneName}) — applying overrides (first time)");
+            _lastMapName = sceneName;
+            _vanillaBaseCache.Clear();
+            ApplyOverridesLogic();
+        }
+
+        // =============================================
+        // Scene loaded callback — fires after ANY scene load
+        // Catches map voting transitions that bypass GameInit
+        // =============================================
+
+        private static void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+        {
+            // State tracking only — actual override application is in OnFinishLoadingLevel
+            string sceneName = scene.name;
+            if (string.IsNullOrEmpty(sceneName) || sceneName == "Loading" || sceneName == "MainMenu") return;
+            MelonLogger.Msg($"[UnitBalance] Scene loaded: {sceneName}");
         }
 
         // =============================================
@@ -289,16 +322,37 @@ namespace Si_UnitBalance
             }
         }
 
+        private static bool _allowRevertAll; // only true when WE explicitly want to revert
+
+        // Harmony Prefix on OverrideManager.RevertAll — blocks the game's revert during
+        // scene transitions so OM overrides persist through map changes.
+        // Only allows revert when we set _allowRevertAll = true (e.g., !rebalance).
+        private static class Patch_OMRevertAll
+        {
+            public static bool Prefix()
+            {
+                if (_allowRevertAll)
+                    return true; // our explicit request (e.g., !rebalance)
+                LogDebug("[OverrideManager] RevertAll BLOCKED (game scene transition)");
+                return false; // block — OM overrides persist through map changes
+            }
+        }
+
         private static void OMRevertAll()
         {
             try
             {
+                _allowRevertAll = true;
                 _omRevertAllMethod.Invoke(null, new object[] { true, false });
                 MelonLogger.Msg("[OverrideManager] RevertAll called (notify=true)");
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[OverrideManager] RevertAll error: {ex.InnerException?.Message ?? ex.Message}");
+            }
+            finally
+            {
+                _allowRevertAll = false;
             }
         }
 
@@ -358,11 +412,8 @@ namespace Si_UnitBalance
                 if (!omReady)
                     MelonLogger.Warning("OverrideManager not available — falling back to direct mutation (no client sync)");
 
-                // Revert OM overrides to ensure clean state before applying.
-                // On map change: game already reverted in LoadAsyncScene, this ensures
-                // our OM state is consistent (notify=true cleans up client state too).
-                // On same-map restart: ApplyOverridesLogic is skipped (_overridesApplied=true),
-                // so this never fires — no compounding risk.
+                // Revert OM to vanilla before applying — ensures multipliers compute from
+                // vanilla values (prevents compounding). Only runs on first apply or !rebalance.
                 if (omReady && _overrideManagerType != null)
                     OMRevertAll();
 
@@ -422,17 +473,10 @@ namespace Si_UnitBalance
             {
                 if (!_enabled || !_configLoaded) return;
 
-                // Safety net: detect map change if Patch_GameInit didn't fire
-                string currentMap = GetCurrentMapName();
-                if (!string.Equals(currentMap, _lastMapName, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(currentMap))
-                {
-                    MelonLogger.Msg($"[UnitBalance] GameStarted detected map change ({_lastMapName} → {currentMap})");
-                    _lastMapName = currentMap;
-                    _overridesApplied = false;
-                    _vanillaBaseCache.Clear();
-                }
-                // Apply if not already done
-                ApplyOverridesLogic();
+                // Apply if not yet done (OnFinishLoadingLevel is the primary hook,
+                // this is a fallback for edge cases)
+                if (!_overridesApplied)
+                    ApplyOverridesLogic();
 
                 bool omReady = _omInitialized;
 

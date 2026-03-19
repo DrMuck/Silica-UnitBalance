@@ -41,8 +41,7 @@ namespace Si_UnitBalance
                 PropagateToInstance(structure.gameObject, structure.ObjectInfo, processedGOs, ref liveCount, ref totalUpdated);
             }
 
-            if (liveCount > 0 || totalUpdated > 0)
-                LogDebug($"[LIVE] Propagated overrides to {totalUpdated}/{liveCount} live instances");
+            MelonLogger.Msg($"[LIVE] Propagated overrides to {totalUpdated}/{liveCount} live instances (units={liveUnits.Length}, structures={liveStructures.Length})");
         }
 
         private static void PropagateToInstance(GameObject liveGO, ObjectInfo info, HashSet<int> processedGOs,
@@ -156,11 +155,13 @@ namespace Si_UnitBalance
                         fieldsSet += LiveSetAbsolute(liveComp, "TargetingDistance", targetDist);
                     if (hasFoW)
                     {
-                        var fowDbg = liveComp.GetType().GetField("FogOfWarViewDistance",
+                        var fowField = liveComp.GetType().GetField("FogOfWarViewDistance",
                             BindingFlags.Public | BindingFlags.Instance);
-                        float curFow = fowDbg != null ? (float)fowDbg.GetValue(liveComp) : -1f;
-                        LogDebug($"[LIVE-FOW] {name}: current={curFow}, target={fowDist}");
-                        fieldsSet += LiveSetAbsolute(liveComp, "FogOfWarViewDistance", fowDist);
+                        float curFow = fowField != null ? (float)fowField.GetValue(liveComp) : -1f;
+                        int result = LiveSetAbsolute(liveComp, "FogOfWarViewDistance", fowDist);
+                        float afterFow = fowField != null ? (float)fowField.GetValue(liveComp) : -1f;
+                        MelonLogger.Msg($"[LIVE-FOW] {name}: {curFow} -> {afterFow} (target={fowDist}, ok={result})");
+                        fieldsSet += result;
                     }
                 }
 

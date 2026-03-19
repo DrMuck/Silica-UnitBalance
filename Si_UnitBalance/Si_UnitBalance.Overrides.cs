@@ -1280,17 +1280,10 @@ namespace Si_UnitBalance
                     if (tdField == null || tdField.FieldType != typeof(float)) continue;
 
                     float orig = (float)tdField.GetValue(comp);
-                    if (useOM && OMSetFloat(oiTarget, "TargetingDistance", targetDist))
-                    {
-                        LogDebug($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist} (OM)");
-                        applied++;
-                    }
-                    else if (!useOM)
-                    {
-                        tdField.SetValue(comp, targetDist);
-                        LogDebug($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist} (direct)");
-                        applied++;
-                    }
+                    tdField.SetValue(comp, targetDist);
+                    if (useOM) OMSetFloat(oiTarget, "TargetingDistance", targetDist);
+                    LogDebug($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist}{(useOM ? " (OM+direct)" : " (direct)")}");
+                    applied++;
                     break;
                 }
             }
@@ -1322,17 +1315,12 @@ namespace Si_UnitBalance
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (fowField == null || fowField.FieldType != typeof(float)) continue;
                     float orig = (float)fowField.GetValue(comp);
-                    if (useOM && OMSetFloat(oiTarget, "FogOfWarViewDistance", fowDist))
-                    {
-                        LogDebug($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist} (OM)");
-                        applied++;
-                    }
-                    else if (!useOM)
-                    {
-                        fowField.SetValue(comp, fowDist);
-                        LogDebug($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist} (direct)");
-                        applied++;
-                    }
+                    // Always mutate prefab directly so starters inherit the value at spawn time.
+                    // Also set via OM to sync to clients.
+                    fowField.SetValue(comp, fowDist);
+                    if (useOM) OMSetFloat(oiTarget, "FogOfWarViewDistance", fowDist);
+                    LogDebug($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist}{(useOM ? " (OM+direct)" : " (direct)")}");
+                    applied++;
                     break;
                 }
             }

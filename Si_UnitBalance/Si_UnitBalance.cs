@@ -237,6 +237,32 @@ namespace Si_UnitBalance
 
             LoadConfig();
             TryApplyHarmonyPatches();
+
+            // Register level load callbacks
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
+            // OnFinishLoadingLevel is on GameLevelLoader (NOT GameEvents) — won't be cleared by GameEvents.Clear()
+            // Fires after OM.RevertAll + scene loaded, before spawning starts
+            try
+            {
+                var oflField = typeof(GameLevelLoader).GetField("OnFinishLoadingLevel",
+                    BindingFlags.Public | BindingFlags.Static);
+                if (oflField != null)
+                {
+                    var handler = (Action<string, GameModeInfo>)Delegate.CreateDelegate(
+                        typeof(Action<string, GameModeInfo>),
+                        typeof(UnitBalance).GetMethod("OnFinishLoadingLevel", BindingFlags.NonPublic | BindingFlags.Static));
+                    var existing = (Action<string, GameModeInfo>)oflField.GetValue(null);
+                    oflField.SetValue(null, existing + handler);
+                    MelonLogger.Msg("Subscribed to GameLevelLoader.OnFinishLoadingLevel");
+                }
+                else
+                    MelonLogger.Warning("GameLevelLoader.OnFinishLoadingLevel field not found");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message}");
+            }
+
             MelonLogger.Msg($"Unit Balance v7.2.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count}");
         }
@@ -295,6 +321,17 @@ namespace Si_UnitBalance
                 }
                 else
                     MelonLogger.Warning("SendPlayerOverrides method not found — override sync may fail for large configs");
+
+                // Patch OverrideManager.RevertAll — BLOCK the game's revert during scene transitions
+                // so our OM overrides persist through map changes. Only allow revert when we explicitly request it.
+                var omRevertAll = typeof(OverrideManager).GetMethod("RevertAll",
+                    BindingFlags.Public | BindingFlags.Static);
+                if (omRevertAll != null)
+                {
+                    harmony.Patch(omRevertAll,
+                        prefix: new HarmonyMethod(typeof(Patch_OMRevertAll), "Prefix"));
+                    MelonLogger.Msg("Patched OverrideManager.RevertAll — blocking game revert during scene transitions");
+                }
 
                 // Patch ConstructionSite.SpawnObject to ensure full health on building completion
                 // Fixes vanilla timing bug where first-built structures get partial health due to

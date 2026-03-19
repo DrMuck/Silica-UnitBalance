@@ -4,7 +4,28 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
-## 2026-03-19 — Build Time Fix, Weapon Fixes, Unit Cap, Auto-Annotations, Game Version Detection
+## 2026-03-19 — Build Time Fix, Weapon Fixes, Unit Cap, Auto-Annotations, Game Version Detection, Starter Override Fix
+
+### Starter Structure Override Fix (FOW/TargetDistance)
+- **Problem**: Starter HQ spawned with vanilla FOW/TargetDistance after map changes via the beta map voting system. Worked on first server start but not on subsequent maps.
+- **Root cause 1**: Map voting uses `NetworkGameServer.LoadLevel` which bypasses `MusicJukeboxHandler.OnGameInit`.
+- **Root cause 2**: OM overrides are a runtime overlay — they don't modify actual prefab field values. Starters get vanilla values at spawn.
+- **Root cause 3**: Timing — any overrides applied before `GameLevelLoader.LoadAsyncScene` completes get wiped by its internal `OM.RevertAll`.
+- **Fix**: Hook `GameEvents.OnLevelEndLoad` — fires AFTER `OM.RevertAll` + AFTER scene assets loaded, BEFORE spawning starts. Works for ALL map transition paths including map voting. (Identified by databomb via dnSpy analysis of `LoadAsyncScene`.)
+- **Direct prefab mutation**: `ApplyFoWDistanceOverrides` and `ApplyTargetDistanceOverrides` always mutate the prefab directly + set via OM. Direct mutation ensures starters inherit values at spawn. OM ensures client sync.
+- **Override application hooks** (in order of firing):
+  1. `GameEvents.OnLevelEndLoad` — primary hook, ideal timing (after revert, before spawn)
+  2. `Patch_GameInit` — backup for first map load
+  3. `SceneManager.sceneLoaded` — universal backup for any scene transition
+  4. `Patch_GameRestart` — marks `_overridesApplied = false` for map changes
+  5. `OnGameStartedLogic` — re-applies + propagates to live instances + client sync (2s delay)
+- **Final working solution (2026-03-19)**:
+  1. Harmony PREFIX on `OM.RevertAll` — BLOCKS the game's revert during scene transitions (OM overrides persist through map changes)
+  2. Apply overrides ONCE on first map via `OnFinishLoadingLevel` (with our own `OMRevertAll` before apply to prevent compounding)
+  3. On map changes: do nothing — OM state persists, `OnGameStartedLogic` handles propagation + client sync only
+  4. `!rebalance` explicitly allowed to revert via `_allowRevertAll` flag
+- **Key insight**: `GameEvents.OnLevelEndLoad` gets cleared by `GameEvents.Clear()` during scene transitions — useless. `GameLevelLoader.OnFinishLoadingLevel` persists (different class).
+- **Failed approaches**: Harmony Postfix on `OM.RevertAll` caused compounding. Delayed syncs didn't work (client's local OM.RevertAll wipes received updates). Multiple apply hooks caused double-application.
 
 ### Build Time Scaling Fix
 - **Problem**: `build_time_mult` only scaled `BuildUpTime`, but game UI shows `BuildUpTime + FinishedWaitTime + CleanUpTime`. A 0.75x multiplier on a 20s total (15s BU + 5s FWT/CUT) showed 16.25s instead of 15s.
