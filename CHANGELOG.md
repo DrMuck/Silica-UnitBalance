@@ -4,6 +4,66 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-19 — Build Time Fix, Weapon Fixes, Unit Cap, Auto-Annotations, Game Version Detection
+
+### Build Time Scaling Fix
+- **Problem**: `build_time_mult` only scaled `BuildUpTime`, but game UI shows `BuildUpTime + FinishedWaitTime + CleanUpTime`. A 0.75x multiplier on a 20s total (15s BU + 5s FWT/CUT) showed 16.25s instead of 15s.
+- **Fix**: `build_time_mult` now scales all three fields by the same multiplier.
+- **Tech tier times**: Config value now represents the desired TOTAL time, distributed proportionally across BU/FWT/CUT (e.g., `tier_1: 29` = 29s total, not just BuildUpTime).
+
+### Weapon Cross-Contamination Fix
+- **Problem**: Changing Interceptor primary splash damage also changed secondary (bombs). Two bugs: (1) `vtIndex` never incremented in `ApplyProjectileDamageOverrides` — all VTs treated as VT[0]. (2) Damage fallback priority checked shared subtype keys before weapon-specific keys.
+- **Fix**: Added `vtIndex++`, reordered fallback: `pri:splash:Unit` → `pri:Unit` → `splash:Unit` → `Unit`.
+
+### Infantry Damage Support
+- **Problem**: Marksman/Sniper damage multipliers had no effect — `ApplyProjectileDamageOverrides` only scanned VehicleTurret and CreatureDecapod.
+- **Fix**: Added generic ProjectileData field scanner for infantry weapons (HumanHandsAnimator).
+
+### Fighter/Interceptor VT Mapping Correction
+- **Problem**: Fighter and Interceptor were incorrectly added to `_vtPriIndex` (gun assumed on VT[1]).
+- **Fix**: Confirmed via dump + in-game testing that gun is on VT[0] for both. Removed from `_vtPriIndex`.
+- **OM limitation**: Weapon params (reload, fire_rate, magazine, accuracy) always target VT[0] via OM. `_vtPriIndex` only used for damage scaling (targets ProjectileData assets).
+
+### Melee Damage Anti-Compounding
+- **Problem**: Creature melee damage compounded on `!rebalance` (no original value cache).
+- **Fix**: Added `_originalMeleeDamage` cache, same pattern as other anti-compounding caches.
+
+### AI Aim Lead Compensation
+- `proj_speed_mult` now auto-scales `m_AIAimLeadFactor_Velocity`, `_Gravity`, `_Drag` by `1/speedMult`.
+- Prevents AI missing shots after projectile speed changes.
+
+### Unit Cap Value Override
+- **New param**: `unit_cap_value` — absolute int override for `ObjectInfo.UnitCapValue` via OM (synced to clients).
+- Set to 0 to remove cap cost (e.g., unlimited infantry). Vanilla values: infantry 1-2, vehicles 1-6, Colossus 15.
+- Cap types: Primary (vehicles/heavy), Secondary (infantry/light creatures), None (structures/Queen).
+- **Note**: Unit cap changes only take effect after a map change (not mid-round or via `!rebalance`).
+- Shown in `!b` menu under "Health & Production".
+
+### Game Version Auto-Detection & Dump
+- Reads `Application.version` (e.g., `Beta:0.9.15`) and saves to `game_version.txt`.
+- On version change: auto-triggers field dump + config annotation update.
+- No manual `dump_fields: true` needed for game updates.
+
+### Auto-Update Config Annotations
+- `UpdateConfigBaseAnnotations()` runs after dump, updates `_base`/`_pri_weapon`/`_sec_weapon`/`_base_speed`/`_base_sense` from dump data.
+- Build time in `_base` now shows total (BU + FWT + CUT). Dump includes `finished_wait_time` and `clean_up_time`.
+- `unit_cap_type` and `unit_cap_value` added to dump output.
+- Entire pipeline in C# — no Python scripts needed.
+
+### Debug Logging Toggle
+- All verbose `MelonLogger.Msg` calls (111 lines) gated behind `Admin_EnableDebugLogging` MelonPreference.
+- Default: off. Controlled via admin mod only.
+
+### Files Changed
+- `Si_UnitBalance.cs` — `_unitCapOverrides` dict, config parsing for `unit_cap_value`
+- `Si_UnitBalance.Overrides.cs` — build time FWT/CUT scaling, tech time total distribution, `ApplyUnitCapOverrides`, vtIndex fix, damage fallback reorder, infantry PD scanner, melee cache, aim lead compensation, VT mapping fix
+- `Si_UnitBalance.Lifecycle.cs` — wire `ApplyUnitCapOverrides`, game version detection, auto-dump trigger
+- `Si_UnitBalance.LivePropagation.cs` — `UpdateConfigBaseAnnotations()`, dump FWT/CUT/UnitCap fields, JSON helpers
+- `Si_UnitBalance.Menu.cs` — `unit_cap_value` in param groups + base display, build time total display
+- `Si_UnitBalance.Patches.cs` — `_originalMeleeDamage` clear
+
+---
+
 ## 2026-03-14 — Health Diagnostics, Behemoth Accuracy Fix, Proximity Detonation Support, Tech Time Diagnostics
 
 ### Refinery Health Bar Fix (Shared DamageManagerData)

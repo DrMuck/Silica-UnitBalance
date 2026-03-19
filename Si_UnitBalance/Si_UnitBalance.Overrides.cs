@@ -197,6 +197,38 @@ namespace Si_UnitBalance
         }
 
         // =============================================
+        // Unit Cap: set UnitCapValue on ObjectInfo via OverrideManager
+        // =============================================
+
+        private static void ApplyUnitCapOverrides(bool useOM)
+        {
+            if (_unitCapOverrides.Count == 0) return;
+
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            int applied = 0;
+
+            foreach (var info in allInfos)
+            {
+                if (info == null) continue;
+                string name = ResolveConfigName(info.DisplayName, info.name);
+                if (string.IsNullOrEmpty(name)) continue;
+                if (!_unitCapOverrides.TryGetValue(name, out int newCap)) continue;
+
+                int origCap = info.UnitCapValue;
+                string oiTarget = useOM ? $"A:{info.name}.asset" : null;
+                if (useOM)
+                    OMSetInt(oiTarget, "UnitCapValue", newCap);
+                else
+                    info.UnitCapValue = newCap;
+                LogDebug($"[UNITCAP] {name}: {origCap} -> {newCap}{(useOM ? " (OM)" : "")}");
+                applied++;
+            }
+
+            if (applied > 0)
+                MelonLogger.Msg($"[UNITCAP] Applied unit cap overrides to {applied} units");
+        }
+
+        // =============================================
         // Health: scale DamageManagerData.Health via OverrideManager
         // DamageManagerData is a ScriptableObject asset (e.g. "Soldier_Juggernaut.asset")
         // with a "Health" field. OverrideManager can target it via "A:{name}.asset".

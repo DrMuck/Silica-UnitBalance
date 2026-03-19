@@ -166,6 +166,9 @@ namespace Si_UnitBalance
         // Splash radius multipliers: composite keys like "max:unitName", "pri:max:unitName"
         private static readonly Dictionary<string, float> _splashRadiusMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // Unit cap value overrides: absolute int (e.g., set infantry to 0 for unlimited)
+        private static readonly Dictionary<string, int> _unitCapOverrides =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         // Tech tier number (1-8) -> build time in seconds
         private static readonly Dictionary<int, float> _techTierTimes = new Dictionary<int, float>();
 
@@ -442,6 +445,7 @@ namespace Si_UnitBalance
                 _costMultipliers.Clear();
                 _buildTimeMultipliers.Clear();
                 _minTierOverrides.Clear();
+                _unitCapOverrides.Clear();
                 _rangeMultipliers.Clear();
                 _speedMultipliers.Clear();
                 _reloadTimeMultipliers.Clear();
@@ -512,6 +516,7 @@ namespace Si_UnitBalance
                         float runSpeedMult = overrides["run_speed_mult"]?.Value<float>() ?? 1.0f;
                         float sprintSpeedMult = overrides["sprint_speed_mult"]?.Value<float>() ?? 1.0f;
                         float dispenseTimeout = overrides["dispense_timeout"]?.Value<float>() ?? -1f;
+                        int unitCapValue = overrides["unit_cap_value"]?.Value<int>() ?? -1;
 
                         // Per-damage-subtype multipliers (4 sub-types × 3 scopes)
                         float impactDmgMult = overrides["impact_damage_mult"]?.Value<float>() ?? 1.0f;
@@ -606,6 +611,8 @@ namespace Si_UnitBalance
                             _sprintSpeedMultipliers[unitName] = sprintSpeedMult;
                         if (dispenseTimeout >= 0)
                             _dispenseTimeout = dispenseTimeout; // global — applies to all dispensers of this unit
+                        if (unitCapValue >= 0)
+                            _unitCapOverrides[unitName] = unitCapValue;
 
                         // Store per-weapon multipliers with "pri:"/"sec:" prefix keys
                         if (Math.Abs(priDamageMult - 1.0f) > 0.001f) _damageMultipliers["pri:" + unitName] = priDamageMult;

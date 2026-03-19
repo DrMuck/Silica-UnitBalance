@@ -502,9 +502,9 @@ namespace Si_UnitBalance
             if (isStructure)
                 keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "build_radius" });
             else if (string.Equals(unitName, "Hover Bike", StringComparison.OrdinalIgnoreCase))
-                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "dispense_timeout" });
+                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value", "dispense_timeout" });
             else
-                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier" });
+                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value" });
 
             // ── Weapons ──
             // Armed structures must be checked first: they have VT but use non-prefixed keys
@@ -950,6 +950,9 @@ namespace Si_UnitBalance
                             case "min_tier":
                                 if (matchedInfo.ConstructionData != null)
                                     val = matchedInfo.ConstructionData.MinimumTeamTier.ToString();
+                                break;
+                            case "unit_cap_value":
+                                val = matchedInfo.UnitCapValue.ToString();
                                 break;
                             case "build_radius":
                                 if (matchedInfo.ConstructionData != null)
@@ -2150,7 +2153,7 @@ namespace Si_UnitBalance
                 string json = File.ReadAllText(_configPath);
 
                 string valueStr;
-                if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "target_distance" || paramKey == "fow_distance")
+                if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "target_distance" || paramKey == "fow_distance" || paramKey == "unit_cap_value")
                     valueStr = ((int)value).ToString();
                 else
                     valueStr = Math.Round(value, 4).ToString(System.Globalization.CultureInfo.InvariantCulture);

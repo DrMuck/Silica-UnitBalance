@@ -1013,6 +1013,19 @@ namespace Si_UnitBalance
                     sb.Append($"\"min_tier\":{minTier},");
                     sb.Append($"\"max_tier\":{maxTier},");
                     sb.Append($"\"hp\":{maxHealth},");
+                    // Unit cap
+                    string unitCapType = "None";
+                    int unitCapValue = 0;
+                    try
+                    {
+                        var capTypeField = info.GetType().GetField("UnitCapType", BindingFlags.Public | BindingFlags.Instance);
+                        var capValField = info.GetType().GetField("UnitCapValue", BindingFlags.Public | BindingFlags.Instance);
+                        if (capTypeField != null) unitCapType = capTypeField.GetValue(info)?.ToString() ?? "None";
+                        if (capValField != null) unitCapValue = (int)capValField.GetValue(info);
+                    }
+                    catch { }
+                    sb.Append($"\"unit_cap_type\":\"{unitCapType}\",");
+                    sb.Append($"\"unit_cap_value\":{unitCapValue},");
                     sb.Append($"\"max_dist\":{maxDist:F0},");
                     sb.Append($"\"use_radius\":{(useRadius ? "true" : "false")},");
                     // Movement
@@ -1286,7 +1299,7 @@ namespace Si_UnitBalance
                 }
 
                 System.IO.File.WriteAllText(_configPath,
-                    configJson.ToString(Newtonsoft.Json.Formatting.Indented));
+                    configJson.ToString());
                 MelonLogger.Msg($"[ANNOTATIONS] Updated base annotations for {updated} units in config");
             }
             catch (Exception ex)

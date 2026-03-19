@@ -393,6 +393,7 @@ namespace Si_UnitBalance
                 ApplyTeleportOverrides(omReady);
                 ApplyDispenserTimeoutOverrides(omReady);
                 ApplyProximityDetonationOverrides();
+                ApplyUnitCapOverrides(omReady);
 
                 if (_shrimpDisableAim)
                     ApplyShrimpAimDisable();
