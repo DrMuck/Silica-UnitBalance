@@ -637,8 +637,9 @@ namespace Si_UnitBalance
 
             int totalSpawned = 0;
 
-            // Disable damage during spawn to prevent fall damage on spawned units
-            DamageManager.DamageDisabled = true;
+            // NOTE: Do NOT use DamageManager.DamageDisabled (static/global) — it blocks
+            // construction site health accumulation (SetHealth rejects increases when disabled).
+            // Spawned units survive fall damage because they have enough HP.
             try
             {
                 foreach (var team in Team.Teams)
@@ -689,13 +690,21 @@ namespace Si_UnitBalance
                             Vector3 dir = Quaternion.Euler(0f, angleDeg, 0f) * hqForward;
                             Vector3 pos = hqPos + dir * radius;
 
-                            // Sample terrain height at spawn position
-                            float bestY = pos.y;
+                            // Sample terrain height at spawn position — only from the terrain tile that contains this XZ
+                            float bestY = pos.y; // fallback to HQ height
                             foreach (var terrain in Terrain.activeTerrains)
                             {
                                 if (terrain == null) continue;
-                                float ty = terrain.SampleHeight(pos) + terrain.transform.position.y;
-                                if (ty > bestY) bestY = ty;
+                                var tp = terrain.transform.position;
+                                var td = terrain.terrainData;
+                                if (td == null) continue;
+                                // Check if pos is within this terrain tile's XZ bounds
+                                if (pos.x >= tp.x && pos.x <= tp.x + td.size.x &&
+                                    pos.z >= tp.z && pos.z <= tp.z + td.size.z)
+                                {
+                                    bestY = terrain.SampleHeight(pos) + tp.y;
+                                    break;
+                                }
                             }
                             pos.y = bestY + 1f;
 
@@ -714,13 +723,9 @@ namespace Si_UnitBalance
             }
             finally
             {
-                // Keep damage disabled for 20s so spawned units can land without fall damage
-                MelonLogger.Msg($"[SPAWN] Additional spawn complete: {totalSpawned} units — damage disabled for 20s");
+                MelonLogger.Msg($"[SPAWN] Additional spawn complete: {totalSpawned} units (no global damage disable)");
             }
-
-            yield return new WaitForSeconds(20f);
-            DamageManager.DamageDisabled = false;
-            MelonLogger.Msg("[SPAWN] Damage re-enabled");
+            yield break;
         }
 
         private static class Patch_GameEnded

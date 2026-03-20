@@ -4,6 +4,21 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-03-20 — Construction Health Root Cause Fix, Spawn Height Fix
+
+### Construction Health Root Cause Fix
+- **Problem**: Refineries and other buildings showed ~25-35% less than max health on fresh build.
+- **Root cause**: `DamageManager.DamageDisabled` is a **static/global** field. Our additional unit spawn code set it to `true` for 20 seconds (fall damage protection), which blocked ALL `SetHealth` calls that increase health — including construction site health accumulation ticks. The diminishing series reduced `HealthAddRemaining` each tick but `SetHealth` silently rejected the increases, causing permanent health loss.
+- **Fix**: Removed global `DamageManager.DamageDisabled` from spawn code entirely. Spawned units survive fall damage due to sufficient HP and 1m above-terrain placement.
+- **Previous workaround** (Harmony Prefix on `ConstructionSite.SpawnObject` forcing health to max): disabled, no longer needed.
+
+### Spawn Height Fix (Multi-Terrain Maps)
+- **Problem**: Additional spawned units on maps like Badlands spawned 50m above ground and died from fall damage.
+- **Root cause**: `Terrain.SampleHeight()` returns 0 for positions outside a terrain tile's bounds, but we still added `terrain.transform.position.y` — picking a wrong tile's height offset.
+- **Fix**: Check terrain tile XZ bounds before sampling. Only sample from the terrain tile that contains the spawn position. Fallback to HQ height if no matching tile.
+
+---
+
 ## 2026-03-19 — Build Time Fix, Weapon Fixes, Unit Cap, Auto-Annotations, Game Version Detection, Starter Override Fix
 
 ### Starter Structure Override Fix (FOW/TargetDistance)

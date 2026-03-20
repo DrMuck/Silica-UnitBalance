@@ -638,6 +638,7 @@ namespace Si_UnitBalance
 
             public static void Prefix(object __instance)
             {
+                return; // DISABLED FOR TESTING — checking if DamageDisabled removal fixes root cause
                 try
                 {
                     var dm = ((UnityEngine.Component)__instance).GetComponent<DamageManager>();
