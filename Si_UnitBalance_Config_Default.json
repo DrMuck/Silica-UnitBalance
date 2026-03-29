@@ -14,6 +14,25 @@
         "tier_7": 30,
         "tier_8": 30
     },
+    "decay": {
+        "_note": "Structure decay when not anchored to HQ/Nest. enabled=false disables decay. Vanilla: delay=10, tick=5, amount_pct=0.01, randomize_pct=0.2",
+        "human": {
+            "enabled": true,
+            "delay": -1,
+            "tick": -1,
+            "amount_pct": -1,
+            "randomize_pct": -1,
+            "keep_production": false
+        },
+        "alien": {
+            "enabled": true,
+            "delay": -1,
+            "tick": -1,
+            "amount_pct": -1,
+            "randomize_pct": -1,
+            "keep_production": false
+        }
+    },
     "units": {
         "_teleport": {
             "cooldown": 120,

@@ -1808,7 +1808,7 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Hoverbike  " + _itemColor + "2.</color> Tier  " + _itemColor + "3.</color> Teleportation  " + _itemColor + "4.</color> Shrimp Aim [" + shrimpStatus + "]");
                     string watchdogStatus = _watchdogEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]  " + _itemColor + "6.</color> Discord");
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]  " + _itemColor + "8.</color> Decay");
                     break;
                 }
 
@@ -1892,6 +1892,35 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Cooldown = " + _valueColor + cdVal + "</color> " + _dimColor + "(base: 120s)</color>");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Duration = " + _valueColor + durVal + "</color> " + _dimColor + "(base: 5s)</color>");
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 90 (or !b 1 90)</color>");
+                    break;
+                }
+
+                // ── Decay ────────────────────────────────────────────
+                case MenuLevel.HTPDecay:
+                {
+                    string humanEnabled = _decayHuman.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    string alienEnabled = _decayAlien.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Decay</color> " + _dimColor + "(structure decay when unanchored)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Human (Sol/Centauri) [" + humanEnabled + "]");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Alien [" + alienEnabled + "]");
+                    break;
+                }
+
+                case MenuLevel.HTPDecayFaction:
+                {
+                    bool isHuman = state.HTPDecayFactionIdx == 0;
+                    string factionLabel = isHuman ? "Human" : "Alien";
+                    var ds = isHuman ? _decayHuman : _decayAlien;
+                    string enabledStr = ds.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Decay > " + factionLabel + "</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Enabled [" + enabledStr + "]");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> delay = " + _valueColor + (ds.Delay >= 0 ? ds.Delay.ToString("F1") + "s" : "-") + "</color> " + _dimColor + "(base: 10s)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "3.</color> tick = " + _valueColor + (ds.Tick >= 0 ? ds.Tick.ToString("F1") + "s" : "-") + "</color> " + _dimColor + "(base: 5s)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "4.</color> amount_pct = " + _valueColor + (ds.AmountPct >= 0 ? ds.AmountPct.ToString("F4") : "-") + "</color> " + _dimColor + "(base: 0.01)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> randomize_pct = " + _valueColor + (ds.RandomizePct >= 0 ? ds.RandomizePct.ToString("F2") : "-") + "</color> " + _dimColor + "(base: 0.2)</color>");
+                    string keepProdStr = ds.KeepProduction ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "6.</color> Keep Production [" + keepProdStr + "]");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 30 (delay=30s) or .4 0.05 (5% per tick)</color>");
                     break;
                 }
 
@@ -2057,6 +2086,83 @@ namespace Si_UnitBalance
 
             SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Teleport " + label + " " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "s</color>");
             SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
+        }
+
+        // ── Decay Edit Handler ───────────────────────────────────────
+
+        private static void HandleHTPDecayEdit(object player, BalanceMenuState state, int paramIdx, string valueStr)
+        {
+            // paramIdx: 1=enabled (toggle only), 2=delay, 3=tick, 4=amount_pct, 5=randomize_pct
+            if (paramIdx < 2 || paramIdx > 5)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 2-5 (use .1 to toggle enabled).</color>");
+                return;
+            }
+            if (!float.TryParse(valueStr, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float newValue))
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid number: " + valueStr + "</color>");
+                return;
+            }
+
+            bool isHuman = state.HTPDecayFactionIdx == 0;
+            string factionKey = isHuman ? "human" : "alien";
+            string factionLabel = isHuman ? "Human" : "Alien";
+            var ds = isHuman ? _decayHuman : _decayAlien;
+
+            string paramKey;
+            string oldVal;
+            switch (paramIdx)
+            {
+                case 2: paramKey = "delay"; oldVal = ds.Delay >= 0 ? ds.Delay.ToString("F1") : "-"; break;
+                case 3: paramKey = "tick"; oldVal = ds.Tick >= 0 ? ds.Tick.ToString("F1") : "-"; break;
+                case 4: paramKey = "amount_pct"; oldVal = ds.AmountPct >= 0 ? ds.AmountPct.ToString("F4") : "-"; break;
+                case 5: paramKey = "randomize_pct"; oldVal = ds.RandomizePct >= 0 ? ds.RandomizePct.ToString("F2") : "-"; break;
+                default: return;
+            }
+
+            string newValStr = newValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            state.PendingConfirm = true;
+            state.PendingParamKey = "decay_" + factionKey + "_" + paramKey;
+            state.PendingValue = newValue;
+            state.PendingOldVal = oldVal;
+            state.PendingUnitName = "_decay_" + factionKey; // pseudo-unit for save routing
+
+            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Decay " + factionLabel + " " + paramKey + " " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "</color>");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
+        }
+
+        private static bool WriteDecayToJson(string factionKey, string paramKey, float value)
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return false;
+                string json = File.ReadAllText(_configPath);
+                var root = JObject.Parse(json);
+                var decay = root["decay"] as JObject;
+                if (decay == null)
+                {
+                    decay = new JObject();
+                    root["decay"] = decay;
+                }
+                var fObj = decay[factionKey] as JObject;
+                if (fObj == null)
+                {
+                    fObj = new JObject();
+                    decay[factionKey] = fObj;
+                }
+                if (paramKey == "enabled")
+                    fObj[paramKey] = value > 0.5f;
+                else
+                    fObj[paramKey] = Math.Round(value, 4);
+                File.WriteAllText(_configPath, root.ToString(Newtonsoft.Json.Formatting.Indented));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"WriteDecayToJson: {ex.Message}");
+                return false;
+            }
         }
 
         private static bool WriteTechTierToJson(string tierKey, float value)

@@ -83,6 +83,203 @@ namespace Si_UnitBalance
         }
 
         // =============================================
+        // keep_production patches — allow unlinked structures to keep producing
+        //
+        // Strategy: Patch IsFunctional on HumanStructure and AlienStructure to return
+        // true when keep_production is enabled (so Construct, HasLogistics, and
+        // ConstructionSite.Update all work). Then patch UpdateHealDecay on both to
+        // enable decay based on actual unlinked state, since IsFunctional no longer
+        // reflects it.
+        // =============================================
+
+        /// <summary>Check if a structure belongs to a faction with keep_production enabled.</summary>
+        private static bool ShouldKeepProduction(Structure structure)
+        {
+            if (structure == null) return false;
+            bool isHuman = structure is HumanStructure;
+            bool isAlien = structure is AlienStructure;
+            if (!isHuman && !isAlien) return false;
+            var settings = isHuman ? _decayHuman : _decayAlien;
+            return settings.KeepProduction;
+        }
+
+        // ── keep_production: permanent production for unlinked structures ──
+        // UnlinkedStructureStateEnabled=false is set per-team in ApplyDecayTeamSettings (RPC synced).
+        // IsFunctional returns true on client+server → production works even without HQ.
+        // UpdateHealDecay postfix forces server-side decay on actually-unlinked structures,
+        // since the vanilla code won't enable it (IsFunctional=true skips decay).
+
+        private static FieldInfo _humanAnchorField;
+
+        // Per-structure decay notification tracking (by structure instance ID)
+        private static readonly HashSet<int> _decayNotifiedStructures = new HashSet<int>();
+        // Per-team: last batch of newly-unlinked structures → sends one message per "wave"
+        // Tracks: team instance ID → (waveTime, unlinkedCount, warningSent)
+        private class DecayWaveState
+        {
+            public float WaveTime;       // Time.time when this wave started
+            public int Count;            // how many structures in this wave
+            public bool WarningSent;     // 10s warning sent
+        }
+        private static readonly Dictionary<int, List<DecayWaveState>> _decayWaves = new Dictionary<int, List<DecayWaveState>>();
+
+        internal static void ClearDecayNotifyStates()
+        {
+            _decayNotifiedStructures.Clear();
+            _decayWaves.Clear();
+        }
+
+        private static void SendChatToTeam(Team team, string message)
+        {
+            if (_sendChatToPlayerMethod == null || team == null) return;
+            try
+            {
+                foreach (var player in Player.Players)
+                {
+                    if (player != null && player.Team == team)
+                        _sendChatToPlayerMethod.Invoke(null, new object[] { player, new string[] { message } });
+                }
+            }
+            catch { }
+        }
+
+        private static void CheckDecayNotifications(Structure structure, Team team, bool actuallyUnlinked, DecaySettings settings)
+        {
+            if (team == null || !actuallyUnlinked || !settings.KeepProduction || !settings.Enabled) return;
+
+            int structId = structure.GetInstanceID();
+            int teamId = team.GetInstanceID();
+            float delay = settings.Delay >= 0 ? settings.Delay : 10f;
+            float now = UnityEngine.Time.time;
+
+            // New unlinked structure we haven't seen before
+            if (!_decayNotifiedStructures.Contains(structId))
+            {
+                _decayNotifiedStructures.Add(structId);
+
+                if (!_decayWaves.ContainsKey(teamId))
+                    _decayWaves[teamId] = new List<DecayWaveState>();
+
+                var waves = _decayWaves[teamId];
+
+                // Check if there's an active wave within the last 2s (batch structures losing anchor together)
+                DecayWaveState currentWave = null;
+                if (waves.Count > 0)
+                {
+                    var last = waves[waves.Count - 1];
+                    if (now - last.WaveTime < 2f)
+                        currentWave = last;
+                }
+
+                if (currentWave != null)
+                {
+                    currentWave.Count++;
+                }
+                else
+                {
+                    // New wave — send message
+                    var wave = new DecayWaveState { WaveTime = now, Count = 1, WarningSent = false };
+                    waves.Add(wave);
+                    int hqNum = waves.Count;
+
+                    string timeStr = delay >= 60 ? $"{delay / 60f:F0}m" : $"{delay:F0}s";
+                    if (hqNum == 1)
+                        SendChatToTeam(team, _chatPrefix + "<color=#FF6666>HQ #1 lost!</color> Structures will decay in <color=#FFD700>" + timeStr + "</color>. Production remains active.");
+                    else
+                        SendChatToTeam(team, _chatPrefix + "<color=#FF6666>HQ #" + hqNum + " lost!</color> More structures will decay in <color=#FFD700>" + timeStr + "</color>.");
+                }
+            }
+
+            // Check 10s warnings for all waves
+            if (_decayWaves.TryGetValue(teamId, out var teamWaves))
+            {
+                for (int i = 0; i < teamWaves.Count; i++)
+                {
+                    var wave = teamWaves[i];
+                    if (wave.WarningSent) continue;
+                    float remaining = delay - (now - wave.WaveTime);
+                    if (remaining <= 10f && remaining > 0f)
+                    {
+                        wave.WarningSent = true;
+                        int hqNum = i + 1;
+                        SendChatToTeam(team, _chatPrefix + "<color=#FF3333>WARNING:</color> HQ #" + hqNum + " structures decay in <color=#FFD700>10s</color>!");
+                    }
+                }
+            }
+        }
+
+        // Patch HumanStructure.UpdateHealDecay — PREFIX that REPLACES vanilla method
+        // when keep_production is active. Vanilla would set Decay.enabled = !IsFunctional = false
+        // (since IsFunctional=true due to UnlinkedStructureStateEnabled=false), preventing decay.
+        // We replace it to use the actual unlinked state instead of IsFunctional.
+        private static class Patch_HumanStructure_UpdateHealDecay
+        {
+            public static bool Prefix(object __instance)
+            {
+                try
+                {
+                    if (!_decayHuman.KeepProduction || !_decayHuman.Enabled) return true; // run vanilla
+
+                    var hs = __instance as HumanStructure;
+                    if (hs == null) return true;
+
+                    if (_humanAnchorField == null)
+                        _humanAnchorField = typeof(HumanStructure).GetField("AnchorStructure",
+                            BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (_humanAnchorField == null) return true;
+
+                    // Check actual unlinked state
+                    var anchor = _humanAnchorField.GetValue(hs) as Structure;
+                    bool isSelfAnchor = hs.IsConstructionAnchor;
+                    bool actuallyUnlinked = !isSelfAnchor && anchor == null;
+
+                    // Send team notifications on HQ loss
+                    CheckDecayNotifications(hs, hs.Team, actuallyUnlinked, _decayHuman);
+
+                    // Replace vanilla UpdateHealDecay logic using actual unlinked state
+                    var dm = hs.gameObject.GetComponent<DamageManager>();
+                    if (dm != null && dm.DisableAutoHeal != actuallyUnlinked)
+                        dm.DisableAutoHeal = actuallyUnlinked;
+
+                    if (hs.Decay != null && hs.Decay.enabled != actuallyUnlinked)
+                        hs.Decay.enabled = actuallyUnlinked;
+
+                    return false; // skip vanilla method
+                }
+                catch { return true; }
+            }
+        }
+
+        // Patch AlienStructure.UpdateHealDecay — same PREFIX replacement for alien
+        private static class Patch_AlienStructure_UpdateHealDecay
+        {
+            public static bool Prefix(object __instance)
+            {
+                try
+                {
+                    if (!_decayAlien.KeepProduction || !_decayAlien.Enabled) return true;
+
+                    var alien = __instance as AlienStructure;
+                    if (alien == null) return true;
+
+                    bool actuallyUnlinked = !alien.IsLinkedToMainBuilding;
+
+                    CheckDecayNotifications(alien, alien.Team, actuallyUnlinked, _decayAlien);
+
+                    var dm = alien.gameObject.GetComponent<DamageManager>();
+                    if (dm != null && dm.DisableAutoHeal != actuallyUnlinked)
+                        dm.DisableAutoHeal = actuallyUnlinked;
+
+                    if (alien.Decay != null && alien.Decay.enabled != actuallyUnlinked)
+                        alien.Decay.enabled = actuallyUnlinked;
+
+                    return false; // skip vanilla
+                }
+                catch { return true; }
+            }
+        }
+
+        // =============================================
         // Chat command: !rebalance — hot-reload config during a running game
         // =============================================
 
@@ -232,6 +429,27 @@ namespace Si_UnitBalance
                         ok = WriteTechTierToJson(state.PendingTechTierKey, state.PendingValue);
                     else if (state.PendingParamKey.StartsWith("prox_"))
                         ok = WriteProximityToJson(unitName, state.PendingParamKey.Substring(5), state.PendingValue);
+                    else if (state.PendingParamKey.StartsWith("decay_"))
+                    {
+                        // "decay_human_delay" → factionKey="human", paramKey="delay"
+                        string decayRest = state.PendingParamKey.Substring(6); // "human_delay"
+                        int sep = decayRest.IndexOf('_');
+                        string factionKey = decayRest.Substring(0, sep);
+                        string dpKey = decayRest.Substring(sep + 1);
+                        ok = WriteDecayToJson(factionKey, dpKey, state.PendingValue);
+                        // Update in-memory state
+                        if (ok)
+                        {
+                            var ds = factionKey == "human" ? _decayHuman : _decayAlien;
+                            switch (dpKey)
+                            {
+                                case "delay": ds.Delay = state.PendingValue; break;
+                                case "tick": ds.Tick = state.PendingValue; break;
+                                case "amount_pct": ds.AmountPct = state.PendingValue; break;
+                                case "randomize_pct": ds.RandomizePct = state.PendingValue; break;
+                            }
+                        }
+                    }
                     else
                         ok = WriteParamToJson(unitName, state.PendingParamKey, state.PendingValue);
                     state.PendingConfirm = false;
@@ -395,6 +613,10 @@ namespace Si_UnitBalance
                     state.Level = MenuLevel.HTPMenu;
                 else if (state.Level == MenuLevel.HTPTeleport)
                     state.Level = MenuLevel.HTPMenu;
+                else if (state.Level == MenuLevel.HTPDecay)
+                    state.Level = MenuLevel.HTPMenu;
+                else if (state.Level == MenuLevel.HTPDecayFaction)
+                    state.Level = MenuLevel.HTPDecay;
                 else
                     state.Level = (MenuLevel)((int)state.Level - 1);
                 ShowCurrentMenu(player, state);
@@ -433,6 +655,13 @@ namespace Si_UnitBalance
             if (state.Level == MenuLevel.HTPTeleport && !string.IsNullOrEmpty(arg2))
             {
                 HandleHTPTeleportEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // HTP Decay faction edit: "/2 30" sets delay=30, "/4 0.05" sets amount_pct=0.05
+            if (state.Level == MenuLevel.HTPDecayFaction && !string.IsNullOrEmpty(arg2))
+            {
+                HandleHTPDecayEdit(player, state, selection, arg2);
                 return;
             }
 
@@ -569,8 +798,57 @@ namespace Si_UnitBalance
                         WriteAuditLog(playerName3, steamId3, "htp", "watchdog_enabled", (!_watchdogEnabled).ToString(), _watchdogEnabled.ToString());
                         MelonLogger.Msg($"[BAL] {playerName3} ({steamId3}): watchdog_enabled -> {_watchdogEnabled}");
                     }
-                    // (menu items 8-9 removed — revert on round end always off, health mult always enabled)
+                    else if (selection == 8)
+                    {
+                        state.Level = MenuLevel.HTPDecay;
+                    }
                     break;
+
+                case MenuLevel.HTPDecay:
+                {
+                    if (selection < 1 || selection > 2) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-2.</color>"); return; }
+                    state.HTPDecayFactionIdx = selection - 1; // 0=Human, 1=Alien
+                    state.Level = MenuLevel.HTPDecayFaction;
+                    break;
+                }
+
+                case MenuLevel.HTPDecayFaction:
+                {
+                    bool isHumanDF = state.HTPDecayFactionIdx == 0;
+                    string factionKeyDF = isHumanDF ? "human" : "alien";
+                    var dsDF = isHumanDF ? _decayHuman : _decayAlien;
+                    string fLabelDF = isHumanDF ? "Human" : "Alien";
+
+                    if (selection == 1)
+                    {
+                        // Toggle enabled
+                        dsDF.Enabled = !dsDF.Enabled;
+                        WriteDecayToJson(factionKeyDF, "enabled", dsDF.Enabled ? 1f : 0f);
+                        string enabledStr = dsDF.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + fLabelDF + " Decay: " + enabledStr + " " + _dimColor + "(use !rebalance to apply)</color>");
+                        string pn = GetPlayerName(player);
+                        string sid = GetPlayerSteamId(player);
+                        WriteAuditLog(pn, sid, "decay_" + factionKeyDF, "enabled", (!dsDF.Enabled).ToString(), dsDF.Enabled.ToString());
+                        MelonLogger.Msg($"[BAL] {pn} ({sid}): decay.{factionKeyDF}.enabled -> {dsDF.Enabled}");
+                    }
+                    else if (selection == 6)
+                    {
+                        // Toggle keep_production
+                        dsDF.KeepProduction = !dsDF.KeepProduction;
+                        WriteDecayToJson(factionKeyDF, "keep_production", dsDF.KeepProduction ? 1f : 0f);
+                        string kpStr = dsDF.KeepProduction ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + fLabelDF + " Keep Production: " + kpStr + " " + _dimColor + "(applies immediately via Harmony)</color>");
+                        string pn2 = GetPlayerName(player);
+                        string sid2 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn2, sid2, "decay_" + factionKeyDF, "keep_production", (!dsDF.KeepProduction).ToString(), dsDF.KeepProduction.ToString());
+                        MelonLogger.Msg($"[BAL] {pn2} ({sid2}): decay.{factionKeyDF}.keep_production -> {dsDF.KeepProduction}");
+                    }
+                    else
+                    {
+                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 30 (or !b 2 30)</color>");
+                    }
+                    return;
+                }
 
                 case MenuLevel.HTPHoverbike:
                 {

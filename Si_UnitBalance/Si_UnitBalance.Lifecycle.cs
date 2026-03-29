@@ -22,6 +22,14 @@ namespace Si_UnitBalance
         private static bool _watchdogFired; // prevents re-triggering after recovery EndRound
         private static string _lastMapName = ""; // tracks current map to detect map changes
 
+        // ============================================================
+        // TEMPORARY HOTFIX: Legacy override mode for old game versions
+        // (e.g. Beta:0.9.1) that lack OnFinishLoadingLevel.
+        // Uses OMRevertAll + Apply each round to prevent compounding.
+        // REMOVE THIS when old version is no longer supported.
+        // ============================================================
+        private static bool _legacyOverrideMode = false;
+
         private static string GetCurrentMapName()
         {
             try
@@ -74,6 +82,20 @@ namespace Si_UnitBalance
                 _gameStartedRan = true;
                 _watchdogGeneration++; // redundant safety — already cancelled in Init
                 _watchdogFired = false;
+
+                // ============================================================
+                // TEMPORARY HOTFIX: In legacy mode, OMRevertAll + Apply every
+                // round start. Revert ensures vanilla baseline (no compounding).
+                // REMOVE THIS when old version is no longer supported.
+                // ============================================================
+                if (_legacyOverrideMode && _enabled && _configLoaded)
+                {
+                    MelonLogger.Msg("[UnitBalance] [LEGACY] Reverting + applying overrides (legacy mode — no OnFinishLoadingLevel)");
+                    _overridesApplied = false;
+                    _vanillaBaseCache.Clear();
+                    ApplyOverridesLogic(); // includes OMRevertAll at top
+                }
+
                 OnGameStartedLogic();
             }
         }
@@ -333,6 +355,10 @@ namespace Si_UnitBalance
             {
                 if (_allowRevertAll)
                     return true; // our explicit request (e.g., !rebalance)
+                // TEMPORARY HOTFIX: In legacy mode, allow game's RevertAll through
+                // (we revert+apply each round anyway). REMOVE when old version dropped.
+                if (_legacyOverrideMode)
+                    return true; // legacy mode — don't block, let game revert normally
                 LogDebug("[OverrideManager] RevertAll BLOCKED (game scene transition)");
                 return false; // block — OM overrides persist through map changes
             }
@@ -449,6 +475,8 @@ namespace Si_UnitBalance
                 if (_shrimpDisableAim)
                     ApplyShrimpAimDisable();
 
+                ApplyDecayOverrides();
+
                 _overridesApplied = true;
 
                 MelonLogger.Msg($"[UnitBalance] Overrides applied (OverrideManager={omReady}): " +
@@ -485,7 +513,12 @@ namespace Si_UnitBalance
                 try { PropagateToLiveInstances(); }
                 catch (Exception pex) { MelonLogger.Warning($"[LIVE] Propagation error on game start: {pex.Message}"); }
 
+                // Apply per-faction decay enable/disable (needs teams to be initialized)
+                ApplyDecayTeamSettings();
+
                 MelonLogger.Msg($"[UnitBalance] Game started — propagation complete");
+
+                ClearDecayNotifyStates();
 
                 // Subscribe to tier change events for dispenser LocalTimeout reset
                 if (_minTierOverrides.Count > 0)
@@ -737,7 +770,7 @@ namespace Si_UnitBalance
                 // Unsubscribe tier change events
                 GameEvents.OnTeamTechnologyTierChanged -= OnTeamTierChanged;
                 _dispenserTierResets.Clear();
-
+                ClearDecayNotifyStates();
                 // Clear direct-mutation caches (objects are destroyed on map change)
                 _originalCreatureAttackAimDist.Clear();
                 _originalSpread.Clear();

@@ -85,7 +85,7 @@ namespace Si_UnitBalance
         // Per-player menu state for !b command (keyed by SteamID for stable identity across Il2Cpp wrappers)
         private static readonly Dictionary<long, BalanceMenuState> _menuStates = new Dictionary<long, BalanceMenuState>();
 
-        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTeleport, DiscordMenu }
+        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTeleport, HTPDecay, HTPDecayFaction, DiscordMenu }
         private class BalanceMenuState
         {
             public MenuLevel Level = MenuLevel.Root;
@@ -96,6 +96,7 @@ namespace Si_UnitBalance
             // HTP state
             public int HTPParamGroupIdx;       // for Hoverbike param groups
             public int HTPTeleportStructIdx;   // for Teleportation structure selection
+            public int HTPDecayFactionIdx;     // 0=Human, 1=Alien
             // Pending confirmation
             public bool PendingConfirm;
             public string PendingParamKey;
@@ -203,6 +204,21 @@ namespace Si_UnitBalance
         // Dispenser timeout override (absolute seconds, -1 = no override)
         private static float _dispenseTimeout = -1f;
 
+        // Per-faction decay settings (from "decay" config section)
+        private class DecaySettings
+        {
+            public bool Enabled = true;    // true = vanilla behavior (decay active)
+            public float Delay = -1f;      // -1 = no override (use vanilla 10s)
+            public float Tick = -1f;       // -1 = no override (use vanilla 5s)
+            public float AmountPct = -1f;  // -1 = no override (use vanilla 0.01)
+            public float RandomizePct = -1f; // -1 = no override (use vanilla 0.2)
+            public bool KeepProduction = false; // true = unlinked structures can still produce
+            public bool HasCustomParams => Delay >= 0 || Tick >= 0 || AmountPct >= 0 || RandomizePct >= 0;
+            public bool IsVanilla => Enabled && !HasCustomParams && !KeepProduction;
+        }
+        private static DecaySettings _decayHuman = new DecaySettings();
+        private static DecaySettings _decayAlien = new DecaySettings();
+
         // Resolve display name to config key — handles units with duplicate DisplayNames
         // (e.g., both Sol and Centauri have DisplayName="Harvester" and "Headquarters")
         private static string ResolveConfigName(string displayName, string internalName)
@@ -256,11 +272,20 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("Subscribed to GameLevelLoader.OnFinishLoadingLevel");
                 }
                 else
-                    MelonLogger.Warning("GameLevelLoader.OnFinishLoadingLevel field not found");
+                {
+                    // ============================================================
+                    // TEMPORARY HOTFIX: Old game versions (e.g. Beta:0.9.1) don't have
+                    // OnFinishLoadingLevel. Fall back to OMRevertAll+Apply every round.
+                    // REMOVE THIS when old version is no longer supported.
+                    // ============================================================
+                    _legacyOverrideMode = true;
+                    MelonLogger.Warning("GameLevelLoader.OnFinishLoadingLevel field not found — using legacy override mode (revert+apply each round)");
+                }
             }
             catch (Exception ex)
             {
-                MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message}");
+                _legacyOverrideMode = true;
+                MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
             MelonLogger.Msg($"Unit Balance v7.2.0 initialized. Config: {_configPath}");
@@ -343,6 +368,34 @@ namespace Si_UnitBalance
                     harmony.Patch(spawnObject,
                         prefix: new HarmonyMethod(typeof(Patch_ConstructionSpawn), "Prefix"));
                     MelonLogger.Msg("Patched ConstructionSite.SpawnObject for construction health fix");
+                }
+
+                // keep_production: patch UpdateHealDecay to force server-side decay
+                // when UnlinkedStructureStateEnabled=false (IsFunctional=true on both client+server).
+                // Without this, decay would never activate since IsFunctional is always true.
+                try
+                {
+                    var humanUpdateHealDecay = typeof(HumanStructure).GetMethod("UpdateHealDecay",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (humanUpdateHealDecay != null)
+                    {
+                        harmony.Patch(humanUpdateHealDecay,
+                            prefix: new HarmonyMethod(typeof(Patch_HumanStructure_UpdateHealDecay), "Prefix"));
+                    }
+
+                    var alienUpdateHealDecay = typeof(AlienStructure).GetMethod("UpdateHealDecay",
+                        BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (alienUpdateHealDecay != null)
+                    {
+                        harmony.Patch(alienUpdateHealDecay,
+                            prefix: new HarmonyMethod(typeof(Patch_AlienStructure_UpdateHealDecay), "Prefix"));
+                    }
+
+                    MelonLogger.Msg("Patched UpdateHealDecay for keep_production decay forcing");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[keep_production] Failed to apply patches: {ex.Message}");
                 }
 
                 // Register chat commands via AdminMod API
@@ -509,6 +562,28 @@ namespace Si_UnitBalance
                 _teleportCooldown = -1f;
                 _teleportDuration = -1f;
                 _dispenseTimeout = -1f;
+                _decayHuman = new DecaySettings();
+                _decayAlien = new DecaySettings();
+
+                // Load per-faction decay settings
+                var decaySection = config["decay"] as JObject;
+                if (decaySection != null)
+                {
+                    foreach (var faction in new[] { ("human", _decayHuman), ("alien", _decayAlien) })
+                    {
+                        var fObj = decaySection[faction.Item1] as JObject;
+                        if (fObj == null) continue;
+                        var ds = faction.Item2;
+                        ds.Enabled = fObj["enabled"]?.Value<bool>() ?? true;
+                        ds.Delay = fObj["delay"]?.Value<float>() ?? -1f;
+                        ds.Tick = fObj["tick"]?.Value<float>() ?? -1f;
+                        ds.AmountPct = fObj["amount_pct"]?.Value<float>() ?? -1f;
+                        ds.RandomizePct = fObj["randomize_pct"]?.Value<float>() ?? -1f;
+                        ds.KeepProduction = fObj["keep_production"]?.Value<bool>() ?? false;
+                    }
+                    if (!_decayHuman.IsVanilla || !_decayAlien.IsVanilla)
+                        MelonLogger.Msg($"[CONFIG] Decay — Human: enabled={_decayHuman.Enabled} custom={_decayHuman.HasCustomParams}, Alien: enabled={_decayAlien.Enabled} custom={_decayAlien.HasCustomParams}");
+                }
 
                 var units = config["units"] as JObject;
                 if (units != null)
@@ -790,6 +865,7 @@ namespace Si_UnitBalance
     ""shrimp_disable_aim"": false,
     ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
     ""tech_time"": { ""tier_1"": 30, ""tier_2"": 30, ""tier_3"": 30, ""tier_4"": 30, ""tier_5"": 30, ""tier_6"": 30, ""tier_7"": 30, ""tier_8"": 30 },
+    ""decay"": { ""human"": { ""enabled"": true, ""keep_production"": false }, ""alien"": { ""enabled"": true, ""keep_production"": false } },
     ""units"": {}
 }";
                 File.WriteAllText(_configPath, defaultJson);

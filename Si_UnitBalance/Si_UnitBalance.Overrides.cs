@@ -2347,5 +2347,187 @@ namespace Si_UnitBalance
                 MelonLogger.Error($"[SHRIMP] ApplyShrimpAimDisable error: {ex.Message}");
             }
         }
+
+        // =============================================
+        // Decay: per-faction enable/disable + custom DecayData params
+        // =============================================
+
+        // Cloned DecayData assets for per-faction overrides (avoids modifying shared vanilla asset)
+        private static ScriptableObject _decayDataHuman;
+        private static ScriptableObject _decayDataAlien;
+
+        /// <summary>
+        /// Apply per-faction decay settings.
+        /// - Enable/disable: sets Team.UnlinkedStructureStateEnabled (built-in RPC sync).
+        /// - Custom params: clones DecayData per faction, swaps the private Data field on
+        ///   structure prefab Decay components. Server-only, no Harmony needed.
+        /// Called from ApplyOverridesLogic (prefab-level) and OnGameStartedLogic (team-level).
+        /// </summary>
+        private static void ApplyDecayOverrides()
+        {
+            if (_decayHuman.IsVanilla && _decayAlien.IsVanilla) return;
+
+            try
+            {
+                // --- Phase 1: Custom DecayData per faction (prefab mutation) ---
+                if (_decayHuman.HasCustomParams || _decayAlien.HasCustomParams)
+                {
+                    // Find all Decay components on structure prefabs
+                    var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                    var decayType = typeof(Decay);
+                    var dataField = decayType.GetField("Data", BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (dataField == null)
+                    {
+                        MelonLogger.Warning("[DECAY] Decay.Data field not found via reflection");
+                        return;
+                    }
+
+                    // Collect unique DecayData assets used by each faction
+                    ScriptableObject vanillaDecayData = null;
+                    foreach (var info in allInfos)
+                    {
+                        if (info == null || info.Prefab == null) continue;
+                        var decay = info.Prefab.GetComponent<Decay>();
+                        if (decay == null) continue;
+                        var dd = dataField.GetValue(decay) as ScriptableObject;
+                        if (dd != null) { vanillaDecayData = dd; break; }
+                    }
+
+                    if (vanillaDecayData == null)
+                    {
+                        MelonLogger.Warning("[DECAY] No DecayData asset found on any structure prefab");
+                        return;
+                    }
+
+                    var ddType = vanillaDecayData.GetType();
+                    var tickField = ddType.GetField("Tick", BindingFlags.Public | BindingFlags.Instance);
+                    var amountField = ddType.GetField("AmountPct", BindingFlags.Public | BindingFlags.Instance);
+                    var randomizeField = ddType.GetField("RandomizePct", BindingFlags.Public | BindingFlags.Instance);
+                    var delayField = ddType.GetField("Delay", BindingFlags.Public | BindingFlags.Instance);
+
+                    // Read vanilla values
+                    float vanillaTick = tickField != null ? (float)tickField.GetValue(vanillaDecayData) : 5f;
+                    float vanillaAmount = amountField != null ? (float)amountField.GetValue(vanillaDecayData) : 0.01f;
+                    float vanillaRandomize = randomizeField != null ? (float)randomizeField.GetValue(vanillaDecayData) : 0.2f;
+                    float vanillaDelay = delayField != null ? (float)delayField.GetValue(vanillaDecayData) : 10f;
+
+                    // Create cloned DecayData for each faction that has custom params
+                    if (_decayHuman.HasCustomParams && _decayDataHuman == null)
+                    {
+                        _decayDataHuman = ScriptableObject.CreateInstance(ddType) as ScriptableObject;
+                        _decayDataHuman.name = "DecayData_Human_Override";
+                    }
+                    if (_decayAlien.HasCustomParams && _decayDataAlien == null)
+                    {
+                        _decayDataAlien = ScriptableObject.CreateInstance(ddType) as ScriptableObject;
+                        _decayDataAlien.name = "DecayData_Alien_Override";
+                    }
+
+                    // Populate cloned assets
+                    foreach (var (settings, clone) in new[] { (_decayHuman, _decayDataHuman), (_decayAlien, _decayDataAlien) })
+                    {
+                        if (clone == null || !settings.HasCustomParams) continue;
+                        if (tickField != null) tickField.SetValue(clone, settings.Tick >= 0 ? settings.Tick : vanillaTick);
+                        if (amountField != null) amountField.SetValue(clone, settings.AmountPct >= 0 ? settings.AmountPct : vanillaAmount);
+                        if (randomizeField != null) randomizeField.SetValue(clone, settings.RandomizePct >= 0 ? settings.RandomizePct : vanillaRandomize);
+                        if (delayField != null) delayField.SetValue(clone, settings.Delay >= 0 ? settings.Delay : vanillaDelay);
+                    }
+
+                    // Swap Data field on each structure prefab's Decay component
+                    int swapped = 0;
+                    foreach (var info in allInfos)
+                    {
+                        if (info == null || info.Prefab == null) continue;
+                        var decay = info.Prefab.GetComponent<Decay>();
+                        if (decay == null) continue;
+
+                        // Determine faction: check for HumanStructure vs AlienStructure component
+                        bool isHuman = info.Prefab.GetComponent<HumanStructure>() != null;
+                        bool isAlien = info.Prefab.GetComponent<AlienStructure>() != null;
+
+                        ScriptableObject targetDD = null;
+                        if (isHuman && _decayHuman.HasCustomParams) targetDD = _decayDataHuman;
+                        else if (isAlien && _decayAlien.HasCustomParams) targetDD = _decayDataAlien;
+
+                        if (targetDD != null)
+                        {
+                            dataField.SetValue(decay, targetDD);
+                            swapped++;
+                        }
+                        else if (!isHuman && !isAlien)
+                        {
+                            // Unknown structure type — leave vanilla
+                        }
+                    }
+
+                    if (swapped > 0)
+                        MelonLogger.Msg($"[DECAY] Swapped DecayData on {swapped} structure prefabs");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"[DECAY] ApplyDecayOverrides error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Apply per-faction decay enable/disable via Team.UnlinkedStructureStateEnabled.
+        /// Must run AFTER teams are initialized (OnGameStartedLogic).
+        /// </summary>
+        private static void ApplyDecayTeamSettings()
+        {
+            if (_decayHuman.IsVanilla && _decayAlien.IsVanilla) return;
+
+            try
+            {
+                var teamsProperty = typeof(Team).GetProperty("Teams", BindingFlags.Public | BindingFlags.Static);
+                if (teamsProperty == null)
+                {
+                    MelonLogger.Warning("[DECAY] Team.Teams property not found");
+                    return;
+                }
+                var teams = teamsProperty.GetValue(null) as System.Collections.IList;
+                if (teams == null) return;
+
+                var unlinkedProp = typeof(Team).GetProperty("UnlinkedStructureStateEnabled", BindingFlags.Public | BindingFlags.Instance);
+                if (unlinkedProp == null)
+                {
+                    MelonLogger.Warning("[DECAY] Team.UnlinkedStructureStateEnabled property not found");
+                    return;
+                }
+
+                foreach (var teamObj in teams)
+                {
+                    var team = teamObj as Team;
+                    if (team == null) continue;
+
+                    // Determine human vs alien: check if BaseStructure prefab has HumanStructure component
+                    bool isHuman = false;
+                    if (team.BaseStructure != null && team.BaseStructure.Prefab != null)
+                        isHuman = team.BaseStructure.Prefab.GetComponent<HumanStructure>() != null;
+
+                    DecaySettings settings = isHuman ? _decayHuman : _decayAlien;
+                    if (!settings.Enabled || settings.KeepProduction)
+                    {
+                        // Set UnlinkedStructureStateEnabled=false → IsFunctional returns true on client
+                        // → production works, no "missing logistics" on client UI.
+                        // If keep_production + decay enabled: UpdateHealDecay Harmony postfix handles
+                        // forcing decay on server based on actual unlinked state.
+                        unlinkedProp.SetValue(team, false);
+                        string reason = !settings.Enabled ? "decay disabled" : "keep_production";
+                        LogDebug($"[DECAY] UnlinkedStructureStateEnabled=false for team {team.TeamShortName} (IsHuman={isHuman}, reason={reason})");
+                    }
+                    // If enabled and no keep_production, leave vanilla value (true) — don't force it,
+                    // in case the server has DisableStructureDecay set globally.
+                }
+
+                if (!_decayHuman.Enabled || !_decayAlien.Enabled)
+                    MelonLogger.Msg($"[DECAY] Team decay — Human: {(_decayHuman.Enabled ? "ON" : "OFF")}, Alien: {(_decayAlien.Enabled ? "ON" : "OFF")}");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"[DECAY] ApplyDecayTeamSettings error: {ex.Message}");
+            }
+        }
     }
 }
