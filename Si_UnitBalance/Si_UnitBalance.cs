@@ -124,8 +124,6 @@ namespace Si_UnitBalance
         // Unit/structure name -> min tier override (-1 = no override)
         private static readonly Dictionary<string, int> _minTierOverrides =
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        // Tracks which team+unit combos have had their dispenser LocalTimeout reset (once per game)
-        private static readonly HashSet<string> _dispenserTierResets = new HashSet<string>();
         private static readonly Dictionary<string, float> _rangeMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _speedMultipliers =

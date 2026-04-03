@@ -4,6 +4,28 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-04-03 — Remove Redundant Tier Change Handler
+
+- **Problem**: Server lag spike on each tech tier change. `OnTeamTierChanged` subscribed to `GameEvents.OnTeamTechnologyTierChanged` and ran `ResetDispenserLocalTimeout` which scanned all assemblies, resolved reflection members, and iterated all VehicleDispenser instances — all unnecessary.
+- **Root cause**: The `LocalTimeout` reset was redundant. `min_tier` already sets `ConstructionData.MinimumTeamTier` via OverrideManager (native game tier gating, synced to clients), and `Patch_VehicleDispenser` Harmony prefix blocks dispensing below the required tier. When the tier is reached, both mechanisms allow the dispenser naturally — no timeout reset needed.
+- **Fix**: Removed `OnTeamTierChanged`, `ResolveDispenserReflection`, `ResetDispenserLocalTimeout`, all cached VehicleDispenser reflection fields, `_dispenserTierResets` HashSet, and event subscription/unsubscription.
+- **Backup**: `Mods/_backup_pre_tier_cleanup_2026-04-03/`
+
+---
+
+## 2026-03-22 — Legacy Override Mode Hotfix (Old Game Versions)
+
+### TEMPORARY HOTFIX: Legacy Override Mode
+- **Problem**: Old game versions (e.g. `Beta:0.9.1`) lack `GameLevelLoader.OnFinishLoadingLevel`, so overrides never get applied. The main server still runs on the old version until the beta is pushed to main.
+- **Fix**: Auto-detect missing `OnFinishLoadingLevel` → set `_legacyOverrideMode = true`:
+  - `Patch_GameStarted`: OMRevertAll + Apply every round start (revert ensures vanilla baseline → no compounding)
+  - `Patch_OMRevertAll`: Don't block game's RevertAll in legacy mode (let it through)
+  - All sections marked with `TEMPORARY HOTFIX` / `REMOVE THIS` for easy cleanup
+- **New version behavior unchanged**: `OnFinishLoadingLevel` hook + blocked RevertAll (OM persists through map changes)
+- **Note**: On old versions, starter HQ FOW won't work on map change (known limitation — no fix without OnFinishLoadingLevel timing). Overrides still apply to all units/buildings built after game start.
+
+---
+
 ## 2026-03-20 — Construction Health Root Cause Fix, Spawn Height Fix
 
 ### Construction Health Root Cause Fix
