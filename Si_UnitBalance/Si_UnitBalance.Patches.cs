@@ -111,102 +111,6 @@ namespace Si_UnitBalance
 
         private static FieldInfo _humanAnchorField;
 
-        // Per-structure decay notification tracking (by structure instance ID)
-        private static readonly HashSet<int> _decayNotifiedStructures = new HashSet<int>();
-        // Per-team: last batch of newly-unlinked structures → sends one message per "wave"
-        // Tracks: team instance ID → (waveTime, unlinkedCount, warningSent)
-        private class DecayWaveState
-        {
-            public float WaveTime;       // Time.time when this wave started
-            public int Count;            // how many structures in this wave
-            public bool WarningSent;     // 10s warning sent
-        }
-        private static readonly Dictionary<int, List<DecayWaveState>> _decayWaves = new Dictionary<int, List<DecayWaveState>>();
-
-        internal static void ClearDecayNotifyStates()
-        {
-            _decayNotifiedStructures.Clear();
-            _decayWaves.Clear();
-        }
-
-        private static void SendChatToTeam(Team team, string message)
-        {
-            if (_sendChatToPlayerMethod == null || team == null) return;
-            try
-            {
-                foreach (var player in Player.Players)
-                {
-                    if (player != null && player.Team == team)
-                        _sendChatToPlayerMethod.Invoke(null, new object[] { player, new string[] { message } });
-                }
-            }
-            catch { }
-        }
-
-        private static void CheckDecayNotifications(Structure structure, Team team, bool actuallyUnlinked, DecaySettings settings)
-        {
-            if (team == null || !actuallyUnlinked || !settings.KeepProduction || !settings.Enabled) return;
-
-            int structId = structure.GetInstanceID();
-            int teamId = team.GetInstanceID();
-            float delay = settings.Delay >= 0 ? settings.Delay : 10f;
-            float now = UnityEngine.Time.time;
-
-            // New unlinked structure we haven't seen before
-            if (!_decayNotifiedStructures.Contains(structId))
-            {
-                _decayNotifiedStructures.Add(structId);
-
-                if (!_decayWaves.ContainsKey(teamId))
-                    _decayWaves[teamId] = new List<DecayWaveState>();
-
-                var waves = _decayWaves[teamId];
-
-                // Check if there's an active wave within the last 2s (batch structures losing anchor together)
-                DecayWaveState currentWave = null;
-                if (waves.Count > 0)
-                {
-                    var last = waves[waves.Count - 1];
-                    if (now - last.WaveTime < 2f)
-                        currentWave = last;
-                }
-
-                if (currentWave != null)
-                {
-                    currentWave.Count++;
-                }
-                else
-                {
-                    // New wave — send message
-                    var wave = new DecayWaveState { WaveTime = now, Count = 1, WarningSent = false };
-                    waves.Add(wave);
-                    int hqNum = waves.Count;
-
-                    string timeStr = delay >= 60 ? $"{delay / 60f:F0}m" : $"{delay:F0}s";
-                    if (hqNum == 1)
-                        SendChatToTeam(team, _chatPrefix + "<color=#FF6666>HQ #1 lost!</color> Structures will decay in <color=#FFD700>" + timeStr + "</color>. Production remains active.");
-                    else
-                        SendChatToTeam(team, _chatPrefix + "<color=#FF6666>HQ #" + hqNum + " lost!</color> More structures will decay in <color=#FFD700>" + timeStr + "</color>.");
-                }
-            }
-
-            // Check 10s warnings for all waves
-            if (_decayWaves.TryGetValue(teamId, out var teamWaves))
-            {
-                for (int i = 0; i < teamWaves.Count; i++)
-                {
-                    var wave = teamWaves[i];
-                    if (wave.WarningSent) continue;
-                    float remaining = delay - (now - wave.WaveTime);
-                    if (remaining <= 10f && remaining > 0f)
-                    {
-                        wave.WarningSent = true;
-                        int hqNum = i + 1;
-                        SendChatToTeam(team, _chatPrefix + "<color=#FF3333>WARNING:</color> HQ #" + hqNum + " structures decay in <color=#FFD700>10s</color>!");
-                    }
-                }
-            }
-        }
 
         // Patch HumanStructure.UpdateHealDecay — PREFIX that REPLACES vanilla method
         // when keep_production is active. Vanilla would set Decay.enabled = !IsFunctional = false
@@ -232,9 +136,6 @@ namespace Si_UnitBalance
                     var anchor = _humanAnchorField.GetValue(hs) as Structure;
                     bool isSelfAnchor = hs.IsConstructionAnchor;
                     bool actuallyUnlinked = !isSelfAnchor && anchor == null;
-
-                    // Send team notifications on HQ loss
-                    CheckDecayNotifications(hs, hs.Team, actuallyUnlinked, _decayHuman);
 
                     // Replace vanilla UpdateHealDecay logic using actual unlinked state
                     var dm = hs.gameObject.GetComponent<DamageManager>();
@@ -263,8 +164,6 @@ namespace Si_UnitBalance
                     if (alien == null) return true;
 
                     bool actuallyUnlinked = !alien.IsLinkedToMainBuilding;
-
-                    CheckDecayNotifications(alien, alien.Team, actuallyUnlinked, _decayAlien);
 
                     var dm = alien.gameObject.GetComponent<DamageManager>();
                     if (dm != null && dm.DisableAutoHeal != actuallyUnlinked)

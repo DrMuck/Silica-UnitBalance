@@ -518,8 +518,6 @@ namespace Si_UnitBalance
 
                 MelonLogger.Msg($"[UnitBalance] Game started — propagation complete");
 
-                ClearDecayNotifyStates();
-
                 // Spawn additional units if enabled
                 if (_additionalSpawn)
                     MelonCoroutines.Start(SpawnAdditionalUnits(5f));
@@ -759,7 +757,6 @@ namespace Si_UnitBalance
             {
                 MelonLogger.Msg("[UnitBalance] Game ended");
 
-                ClearDecayNotifyStates();
                 // Clear direct-mutation caches (objects are destroyed on map change)
                 _originalCreatureAttackAimDist.Clear();
                 _originalSpread.Clear();
