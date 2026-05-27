@@ -1,5 +1,6 @@
 using HarmonyLib;
 using MelonLoader;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -66,6 +67,7 @@ namespace Si_UnitBalance
                     MelonLogger.Msg($"[UnitBalance] Game restart — map changed ({_lastMapName} → {currentMap})");
                     _lastMapName = currentMap;
                     _vanillaBaseCache.Clear();
+                    DecayCacheClear();
                 }
                 else
                 {
@@ -401,7 +403,9 @@ namespace Si_UnitBalance
 
                 _nameCache.Clear();
 
-                // Auto-detect game version changes and trigger fresh dump
+                // Auto-detect game version changes and trigger fresh dump + multiplier migration
+                string _migrateOldVersion = null;
+                string _migrateNewVersion = null;
                 if (!_fieldsDumped)
                 {
                     try
@@ -416,6 +420,8 @@ namespace Si_UnitBalance
                         {
                             MelonLogger.Msg($"[VERSION] Game version changed: '{savedVersion}' -> '{gameVersion}' — triggering auto-dump");
                             _dumpFields = true;
+                            _migrateOldVersion = savedVersion;
+                            _migrateNewVersion = gameVersion;
                             System.IO.File.WriteAllText(versionFile, gameVersion);
                         }
                     }
@@ -427,10 +433,39 @@ namespace Si_UnitBalance
 
                 if (_dumpFields && !_fieldsDumped)
                 {
+                    // Read old dump BEFORE overwriting (for multiplier migration)
+                    JObject oldDump = null;
+                    if (_migrateOldVersion != null)
+                    {
+                        try
+                        {
+                            string dumpPath = System.IO.Path.Combine(
+                                System.IO.Path.GetDirectoryName(_configPath), "Si_UnitBalance_Dump.json");
+                            if (System.IO.File.Exists(dumpPath))
+                                oldDump = JObject.Parse(System.IO.File.ReadAllText(dumpPath));
+                        }
+                        catch (Exception ex)
+                        {
+                            MelonLogger.Warning($"[MIGRATE] Failed to read old dump for migration: {ex.Message}");
+                        }
+                    }
+
                     DumpFieldDiscovery();
                     DumpAllUnitsJson();
+
+                    // Migrate multipliers if version changed and old dump was available
+                    if (oldDump != null && _migrateOldVersion != null)
+                        MigrateMultipliersForVersionChange(oldDump, _migrateOldVersion, _migrateNewVersion);
+
                     UpdateConfigBaseAnnotations();
                     _fieldsDumped = true;
+
+                    // Reload config after migration so in-memory multipliers reflect adjusted values
+                    if (oldDump != null)
+                    {
+                        MelonLogger.Msg("[MIGRATE] Reloading config after migration...");
+                        LoadConfig();
+                    }
                 }
 
                 // Initialize OverrideManager reflection wrapper
@@ -471,6 +506,8 @@ namespace Si_UnitBalance
                 ApplyDispenserTimeoutOverrides(omReady);
                 ApplyProximityDetonationOverrides();
                 ApplyUnitCapOverrides(omReady);
+                ApplyDepositRadiusOverrides(omReady);
+                ApplyExtractionRadiusOverrides(omReady);
 
                 if (_shrimpDisableAim)
                     ApplyShrimpAimDisable();
@@ -484,7 +521,7 @@ namespace Si_UnitBalance
                     $"{_costMultipliers.Count} cost, {_buildTimeMultipliers.Count} buildTime, " +
                     $"{_rangeMultipliers.Count} range, {_moveSpeedMultipliers.Count} moveSpeed, " +
                     $"{_projectileOverrides.Count} projOverrides, {_proximityOverrides.Count} proximity, " +
-                    $"{_minTierOverrides.Count} minTier, {_techTierTimes.Count} techTime");
+                    $"{_minTierOverrides.Count} minTier, {_techTierTimes.Count} techTime, {_techTierCosts.Count} techCost");
             }
             catch (Exception ex)
             {
@@ -500,6 +537,10 @@ namespace Si_UnitBalance
             try
             {
                 if (!_enabled || !_configLoaded) return;
+
+                // (Re)install GameEvents hooks — GameEvents.* is cleared on scene transitions.
+                // /stats is now a player command (registered at init), no chat-event subscription needed.
+                EnsureHQDecayWarningHook();
 
                 // Apply if not yet done (OnFinishLoadingLevel is the primary hook,
                 // this is a fallback for edge cases)

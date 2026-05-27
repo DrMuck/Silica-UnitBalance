@@ -220,6 +220,27 @@ namespace Si_UnitBalance
                 }
             }
 
+            // Tech cost (only diff when value differs from default; -1 sentinel = vanilla / no override)
+            var defaultTechCost = defaultCfg["tech_cost"] as JObject;
+            var activeTechCost = activeCfg["tech_cost"] as JObject;
+            var lastPushTechCost = lastPushCfg?["tech_cost"] as JObject;
+
+            if (defaultTechCost != null && activeTechCost != null)
+            {
+                for (int tier = 1; tier <= 8; tier++)
+                {
+                    string key = $"tier_{tier}";
+                    var dv = defaultTechCost[key];
+                    var av = activeTechCost[key];
+                    if (dv != null && av != null && !TokensEqual(dv, av))
+                    {
+                        bool isNew = lastPushTechCost == null || !TokensEqual(av, lastPushTechCost[key]);
+                        changes.Add(new BalanceChange("Global Settings", "Tech Cost", key,
+                            FormatValue(dv), FormatValue(av), isNew));
+                    }
+                }
+            }
+
             // Bool toggles
             CompareBoolSetting("additional_spawn", "Additional Spawn", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("shrimp_disable_aim", "Shrimp Disable Aim", defaultCfg, activeCfg, lastPushCfg, changes);

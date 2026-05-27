@@ -1716,6 +1716,7 @@
             "build_time_mult": 1.0,
             "min_tier": -1,
             "build_radius": 100,
+            "deposit_radius": -1,
             "_base_sense": "FOW:200 Target:300",
             "fow_distance": 200
         },

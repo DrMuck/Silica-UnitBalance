@@ -78,7 +78,7 @@ namespace Si_UnitBalance
                 }
 
                 // === Deep dump: ALL components on combat units to find weapon/range fields ===
-                string[] dumpTargets = { "Shrimp", "Crab", "Behemoth", "Scorpion", "Defiler", "Colossus", "Dragonfly", "Goliath", "Hunter", "Firebug", "Railgun Tank", "Nest", "Interceptor", "Headquarters", "Combat Tank", "Heavy Tank", "Barrage Truck", "Siege Tank", "Harvester" };
+                string[] dumpTargets = { "Shrimp", "Crab", "Behemoth", "Scorpion", "Defiler", "Colossus", "Dragonfly", "Goliath", "Hunter", "Firebug", "Railgun Tank", "Nest", "Interceptor", "Headquarters", "Combat Tank", "Heavy Tank", "Barrage Truck", "Siege Tank", "Harvester", "Bio Cache" };
                 foreach (string targetName in dumpTargets)
                 {
                     LogDebug($"--- {targetName.ToUpper()} DEEP COMPONENT DUMP ---");
@@ -180,7 +180,7 @@ namespace Si_UnitBalance
                     if (structure == null || structure.ConstructionOptions == null || structure.ConstructionOptions.Count == 0) continue;
 
                     string team = "?";
-                    try { if (structure.DefaultTeam != null) team = structure.DefaultTeam.name; } catch { }
+                    try { var dt = GetDefaultTeam(structure); if (dt != null) team = dt.name; } catch { }
 
                     string prodCd = "";
                     if (info.ConstructionData != null)

@@ -119,7 +119,7 @@ namespace Si_UnitBalance
 
         private static readonly string[][] _paramGroupKeys = {
             // Health & Production
-            new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "build_radius" },
+            new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "build_radius", "deposit_radius", "extraction_radius" },
             // Damage & Weapons (legacy fallback — dynamic groups use pri_/sec_ keys)
             new[] { "damage_mult", "range_mult", "proj_speed_mult", "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult" },
             // Movement
@@ -463,7 +463,7 @@ namespace Si_UnitBalance
             GetWeaponPDObjects(unitName, out object priPDObj, out object secPDObj);
 
             // Detect component types on the prefab for dynamic param selection
-            bool hasSoldier = false, hasVT = false, hasWheeled = false, hasHovered = false, hasAir = false, hasDecapod = false;
+            bool hasSoldier = false, hasVT = false, hasWheeled = false, hasHovered = false, hasAir = false, hasDecapod = false, hasMiningArms = false;
             try
             {
                 var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
@@ -486,6 +486,7 @@ namespace Si_UnitBalance
                         else if (tn == "VehicleHovered") hasHovered = true;
                         else if (tn == "VehicleAir") hasAir = true;
                         else if (tn == "CreatureDecapod") hasDecapod = true;
+                        else if (tn == "MiningClaws" || tn == "MiningArmsBase" || tn == "MiningArmsLaser" || tn == "MiningArmsRoller") hasMiningArms = true;
                     }
                 }
             }
@@ -500,9 +501,11 @@ namespace Si_UnitBalance
             // ── Health & Production (always) ──
             names.Add("Health & Production");
             if (isStructure)
-                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "build_radius" });
+                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "build_radius", "deposit_radius" });
             else if (string.Equals(unitName, "Hover Bike", StringComparison.OrdinalIgnoreCase))
                 keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value", "dispense_timeout" });
+            else if (hasMiningArms)
+                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value", "extraction_radius" });
             else
                 keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value" });
 
@@ -957,6 +960,36 @@ namespace Si_UnitBalance
                             case "build_radius":
                                 if (matchedInfo.ConstructionData != null)
                                     val = matchedInfo.ConstructionData.MaximumBaseStructureDistance.ToString("F0");
+                                break;
+                            case "deposit_radius":
+                                if (matchedInfo.Prefab != null)
+                                {
+                                    var rdpComps = matchedInfo.Prefab.GetComponentsInChildren<Component>(true);
+                                    foreach (var rdpComp in rdpComps)
+                                    {
+                                        if (rdpComp == null || rdpComp.GetType().Name != "ResourceDepositPoint") continue;
+                                        var drField = rdpComp.GetType().GetField("DepositRadius",
+                                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                        if (drField != null && drField.FieldType == typeof(float))
+                                            val = ((float)drField.GetValue(rdpComp)).ToString("F0");
+                                        break;
+                                    }
+                                }
+                                break;
+                            case "extraction_radius":
+                                if (matchedInfo.Prefab != null)
+                                {
+                                    var erComps = matchedInfo.Prefab.GetComponentsInChildren<Component>(true);
+                                    foreach (var erComp in erComps)
+                                    {
+                                        if (erComp == null) continue;
+                                        var erField = erComp.GetType().GetField("ExtractionRadius",
+                                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                        if (erField == null || erField.FieldType != typeof(float)) continue;
+                                        val = ((float)erField.GetValue(erComp)).ToString("F0");
+                                        break;
+                                    }
+                                }
                                 break;
                             case "damage_mult":
                             {
@@ -1809,6 +1842,8 @@ namespace Si_UnitBalance
                     string watchdogStatus = _watchdogEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]  " + _itemColor + "6.</color> Discord");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]  " + _itemColor + "8.</color> Decay");
+                    string capExemptStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "9.</color> Player Cap Exempt [" + capExemptStatus + "] " + _dimColor + "(player soldiers don't fill cap)</color>");
                     break;
                 }
 
@@ -1851,30 +1886,40 @@ namespace Si_UnitBalance
 
                 case MenuLevel.HTPTier:
                 {
-                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Tier</color> " + _dimColor + "(tech-up time per tier, in seconds)</color>");
-                    // Read current tech_time from JSON
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Tier</color> " + _dimColor + "(tech-up time in s + resource cost per tier)</color>");
+                    // Read current tech_time and tech_cost from JSON
                     JObject techTime = null;
+                    JObject techCost = null;
                     try
                     {
                         if (File.Exists(_configPath))
                         {
                             var root = JObject.Parse(File.ReadAllText(_configPath));
                             techTime = root["tech_time"] as JObject;
+                            techCost = root["tech_cost"] as JObject;
                         }
                     }
                     catch { }
 
                     for (int tier = 1; tier <= 8; tier++)
                     {
-                        string val = "-";
+                        string timeStr = "-";
                         if (techTime != null)
                         {
                             float? t = techTime[$"tier_{tier}"]?.Value<float>();
-                            if (t.HasValue) val = t.Value.ToString("F0") + "s";
+                            if (t.HasValue) timeStr = t.Value.ToString("F0") + "s";
                         }
-                        SendChatToPlayer(player, _chatPrefix + _itemColor + tier + ".</color> Tier " + tier + " = " + _valueColor + val + "</color>" + " " + _dimColor + "(default: 30s)</color>");
+                        string costStr = "vanilla";
+                        if (techCost != null)
+                        {
+                            int? c = techCost[$"tier_{tier}"]?.Value<int>();
+                            if (c.HasValue && c.Value >= 0) costStr = c.Value.ToString();
+                        }
+                        SendChatToPlayer(player, _chatPrefix + _itemColor + tier + ".</color> Tier " + tier
+                            + " time=" + _valueColor + timeStr + "</color>"
+                            + " cost=" + _valueColor + costStr + "</color>");
                     }
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 45 (or !b 1 45)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set time: .N <seconds> · Set cost: .Nc <resource> · -1 = vanilla cost</color>");
                     break;
                 }
 
@@ -2165,6 +2210,79 @@ namespace Si_UnitBalance
             }
         }
 
+        private static void HandleHTPTierCostEdit(object player, BalanceMenuState state, int tierNum, string valueStr)
+        {
+            if (tierNum < 1 || tierNum > 8)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick tier 1-8.</color>");
+                return;
+            }
+            if (!int.TryParse(valueStr, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int newCost))
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid cost (integer required): " + valueStr + "</color>");
+                return;
+            }
+            if (newCost < -1)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Cost must be -1 (vanilla) or >= 0.</color>");
+                return;
+            }
+
+            string tierKey = $"tier_{tierNum}";
+            // Read current cost from JSON
+            string oldVal = "vanilla";
+            try
+            {
+                if (File.Exists(_configPath))
+                {
+                    var root = JObject.Parse(File.ReadAllText(_configPath));
+                    var tc = root["tech_cost"] as JObject;
+                    if (tc != null)
+                    {
+                        int? c = tc[tierKey]?.Value<int>();
+                        if (c.HasValue && c.Value >= 0) oldVal = c.Value.ToString();
+                    }
+                }
+            }
+            catch { }
+
+            string newValStr = newCost < 0 ? "vanilla" : newCost.ToString();
+            state.PendingConfirm = true;
+            state.PendingParamKey = tierKey;
+            state.PendingValue = newCost;
+            state.PendingOldVal = oldVal;
+            state.PendingTechTierKey = tierKey;
+            state.PendingIsTechCost = true;
+
+            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Tier " + tierNum + " tech cost " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "</color>");
+            SendChatToPlayer(player, _chatPrefix + _dimColor + "1/yes save · 2/no cancel · 3 save + !rebalance</color>");
+        }
+
+        private static bool WriteTechCostToJson(string tierKey, int value)
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return false;
+                string json = File.ReadAllText(_configPath);
+                var root = JObject.Parse(json);
+                var tc = root["tech_cost"] as JObject;
+                if (tc == null)
+                {
+                    tc = new JObject();
+                    root["tech_cost"] = tc;
+                }
+                tc[tierKey] = value;
+                File.WriteAllText(_configPath, root.ToString());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"WriteTechCostToJson: {ex.Message}");
+                return false;
+            }
+        }
+
         private static bool WriteTechTierToJson(string tierKey, float value)
         {
             try
@@ -2259,7 +2377,7 @@ namespace Si_UnitBalance
                 string json = File.ReadAllText(_configPath);
 
                 string valueStr;
-                if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "target_distance" || paramKey == "fow_distance" || paramKey == "unit_cap_value")
+                if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "deposit_radius" || paramKey == "extraction_radius" || paramKey == "target_distance" || paramKey == "fow_distance" || paramKey == "unit_cap_value")
                     valueStr = ((int)value).ToString();
                 else
                     valueStr = Math.Round(value, 4).ToString(System.Globalization.CultureInfo.InvariantCulture);

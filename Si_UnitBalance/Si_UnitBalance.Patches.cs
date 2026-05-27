@@ -1,3 +1,4 @@
+using HarmonyLib;
 using MelonLoader;
 using System;
 using System.Collections;
@@ -8,6 +9,44 @@ namespace Si_UnitBalance
 {
     public partial class UnitBalance
     {
+        // =============================================
+        // Unit-cap exemption for player-controlled infantry (HTP toggle: player_infantry_ignore_cap)
+        // Team.UpdateUnitCapValues recomputes each cap entry's Current from scratch every call,
+        // adding every unit's ObjectInfo.UnitCapValue with no ControlledBy check. When the toggle is on,
+        // we subtract back the contribution of player-controlled infantry so actively-played soldiers
+        // don't occupy cap slots. Recompute-from-scratch means no compounding across calls.
+        // =============================================
+
+        private static class Patch_UnitCapPlayerInfantry
+        {
+            public static void Postfix(Team __instance)
+            {
+                if (!_playerInfantryIgnoreCap || __instance == null) return;
+                try
+                {
+                    var units = __instance.Units;
+                    if (units == null) return;
+                    for (int i = 0; i < units.Count; i++)
+                    {
+                        var u = units[i];
+                        if (u == null || u.ObjectInfo == null) continue;
+                        if (u.ControlledBy == null) continue;                       // only players actively controlling a soldier
+                        if (u.ObjectInfo.UnitType != UnitType.Infantry) continue;   // soldiers only (creatures are Cavalry/Special/etc.)
+                        var entry = __instance.GetUnitTypeCapEntryForUnit(u.ObjectInfo);
+                        if (entry != null)
+                        {
+                            entry.Current -= u.ObjectInfo.UnitCapValue;
+                            if (entry.Current < 0) entry.Current = 0;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[UnitCap] player-infantry exemption error: {ex.Message}");
+                }
+            }
+        }
+
         // =============================================
         // VehicleDispenser patch — enforce min_tier on dispensed vehicles (e.g., Hoverbike)
         // =============================================
@@ -111,6 +150,20 @@ namespace Si_UnitBalance
 
         private static FieldInfo _humanAnchorField;
 
+        // Perf: avoid per-frame reflection + GetComponent on every structure's UpdateHealDecay.
+        // Called per-structure-per-frame by the engine; body cost dominates over Harmony dispatch.
+        private static AccessTools.FieldRef<HumanStructure, Structure>? _humanAnchorAccessor;
+        // InstanceID -> cached DamageManager (the component never swaps during a structure's lifetime).
+        // Cleared on map change / game end (DecayCacheClear) to avoid stale refs from destroyed objects.
+        private static readonly Dictionary<int, DamageManager> _dmCacheHuman = new Dictionary<int, DamageManager>();
+        private static readonly Dictionary<int, DamageManager> _dmCacheAlien = new Dictionary<int, DamageManager>();
+
+        internal static void DecayCacheClear()
+        {
+            _dmCacheHuman.Clear();
+            _dmCacheAlien.Clear();
+        }
+
 
         // Patch HumanStructure.UpdateHealDecay — PREFIX that REPLACES vanilla method
         // when keep_production is active. Vanilla would set Decay.enabled = !IsFunctional = false
@@ -127,18 +180,26 @@ namespace Si_UnitBalance
                     var hs = __instance as HumanStructure;
                     if (hs == null) return true;
 
-                    if (_humanAnchorField == null)
-                        _humanAnchorField = typeof(HumanStructure).GetField("AnchorStructure",
-                            BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (_humanAnchorField == null) return true;
+                    if (_humanAnchorAccessor == null)
+                    {
+                        if (_humanAnchorField == null)
+                            _humanAnchorField = typeof(HumanStructure).GetField("AnchorStructure",
+                                BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (_humanAnchorField == null) return true;
+                        _humanAnchorAccessor = AccessTools.FieldRefAccess<HumanStructure, Structure>(_humanAnchorField);
+                    }
 
-                    // Check actual unlinked state
-                    var anchor = _humanAnchorField.GetValue(hs) as Structure;
-                    bool isSelfAnchor = hs.IsConstructionAnchor;
-                    bool actuallyUnlinked = !isSelfAnchor && anchor == null;
+                    // Fast field read via compiled accessor (vs. slow FieldInfo.GetValue on Il2Cpp)
+                    var anchor = _humanAnchorAccessor(hs);
+                    bool actuallyUnlinked = !hs.IsConstructionAnchor && anchor == null;
 
-                    // Replace vanilla UpdateHealDecay logic using actual unlinked state
-                    var dm = hs.gameObject.GetComponent<DamageManager>();
+                    // Cache DamageManager by instance — GetComponent is expensive in Il2Cpp
+                    int id = hs.GetInstanceID();
+                    if (!_dmCacheHuman.TryGetValue(id, out var dm) || dm == null)
+                    {
+                        dm = hs.gameObject.GetComponent<DamageManager>();
+                        if (dm != null) _dmCacheHuman[id] = dm;
+                    }
                     if (dm != null && dm.DisableAutoHeal != actuallyUnlinked)
                         dm.DisableAutoHeal = actuallyUnlinked;
 
@@ -165,7 +226,12 @@ namespace Si_UnitBalance
 
                     bool actuallyUnlinked = !alien.IsLinkedToMainBuilding;
 
-                    var dm = alien.gameObject.GetComponent<DamageManager>();
+                    int id = alien.GetInstanceID();
+                    if (!_dmCacheAlien.TryGetValue(id, out var dm) || dm == null)
+                    {
+                        dm = alien.gameObject.GetComponent<DamageManager>();
+                        if (dm != null) _dmCacheAlien[id] = dm;
+                    }
                     if (dm != null && dm.DisableAutoHeal != actuallyUnlinked)
                         dm.DisableAutoHeal = actuallyUnlinked;
 
@@ -263,6 +329,8 @@ namespace Si_UnitBalance
                     ApplyTeleportOverrides(omReady);
                     ApplyDispenserTimeoutOverrides(omReady);
                     ApplyProximityDetonationOverrides();
+                    ApplyDepositRadiusOverrides(omReady);
+                    ApplyExtractionRadiusOverrides(omReady);
 
                     if (_shrimpDisableAim)
                         ApplyShrimpAimDisable();
@@ -301,6 +369,17 @@ namespace Si_UnitBalance
         private static void ProcessMenuInput(object player, string input)
         {
             long key = GetPlayerKey(player);
+
+            // Read-only /stats inspector: handled first, separate from the editor's _menuStates.
+            // Players (no admin permission) never enter _menuStates, so they only ever hit this branch.
+            if (_statsStates.ContainsKey(key))
+            {
+                string statsCmd = (input ?? "").Trim();
+                var sp = statsCmd.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (sp.Length > 0) statsCmd = sp[0];
+                if (TryHandleStatsNavCommand(player, key, statsCmd)) return;
+            }
+
             if (!_menuStates.TryGetValue(key, out var state)) return;
 
             string arg = input;
@@ -324,7 +403,9 @@ namespace Si_UnitBalance
                 {
                     string unitName = state.PendingUnitName ?? _unitNames[state.FactionIdx][state.CategoryIdx][state.UnitIdx];
                     bool ok;
-                    if (state.PendingTechTierKey != null)
+                    if (state.PendingTechTierKey != null && state.PendingIsTechCost)
+                        ok = WriteTechCostToJson(state.PendingTechTierKey, (int)Math.Round(state.PendingValue));
+                    else if (state.PendingTechTierKey != null)
                         ok = WriteTechTierToJson(state.PendingTechTierKey, state.PendingValue);
                     else if (state.PendingParamKey.StartsWith("prox_"))
                         ok = WriteProximityToJson(unitName, state.PendingParamKey.Substring(5), state.PendingValue);
@@ -351,16 +432,22 @@ namespace Si_UnitBalance
                     }
                     else
                         ok = WriteParamToJson(unitName, state.PendingParamKey, state.PendingValue);
+                    // Capture before clearing — display label depends on these flags.
+                    bool wasTechTier = state.PendingTechTierKey != null;
+                    bool wasTechCost = state.PendingIsTechCost;
                     state.PendingConfirm = false;
                     state.PendingUnitName = null;
                     state.PendingTechTierKey = null;
+                    state.PendingIsTechCost = false;
 
                     if (ok)
                     {
                         string playerName = GetPlayerName(player);
                         string steamId = GetPlayerSteamId(player);
                         string newValStr = state.PendingValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                        string displayLabel = state.PendingTechTierKey != null ? ("tech_time." + state.PendingParamKey) : (unitName + " " + state.PendingParamKey);
+                        string displayLabel = wasTechTier
+                            ? ((wasTechCost ? "tech_cost." : "tech_time.") + state.PendingParamKey)
+                            : (unitName + " " + state.PendingParamKey);
                         SendChatToPlayer(player, _chatPrefix + "<color=#55FF55>Saved:</color> " + displayLabel + " " + _valueColor + state.PendingOldVal + "</color> -> " + _valueColor + newValStr + "</color>");
                         WriteAuditLog(playerName, steamId, unitName, state.PendingParamKey, state.PendingOldVal, newValStr);
                         MelonLogger.Msg($"[BAL] {playerName} ({steamId}): {displayLabel} {state.PendingOldVal} -> {newValStr}");
@@ -382,6 +469,7 @@ namespace Si_UnitBalance
                     state.PendingConfirm = false;
                     state.PendingUnitName = null;
                     state.PendingTechTierKey = null;
+                    state.PendingIsTechCost = false;
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Cancelled.</color>");
                     return;
                 }
@@ -390,6 +478,7 @@ namespace Si_UnitBalance
                     state.PendingConfirm = false;
                     state.PendingUnitName = null;
                     state.PendingTechTierKey = null;
+                    state.PendingIsTechCost = false;
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Cancelled.</color>");
                     // Fall through to process as normal input
                 }
@@ -520,6 +609,19 @@ namespace Si_UnitBalance
                     state.Level = (MenuLevel)((int)state.Level - 1);
                 ShowCurrentMenu(player, state);
                 return;
+            }
+
+            // HTP Tier cost edit special-case: ".Nc <value>" before the generic int parse, since "1c" wouldn't parse as int.
+            // Time edit (".N <value>") still falls through to the normal int parse + existing HTPTier dispatch.
+            if (state.Level == MenuLevel.HTPTier && !string.IsNullOrEmpty(arg2)
+                && arg.Length > 1 && (arg[arg.Length - 1] == 'c' || arg[arg.Length - 1] == 'C'))
+            {
+                string tierStr = arg.Substring(0, arg.Length - 1);
+                if (int.TryParse(tierStr, out int costTier) && costTier >= 1 && costTier <= 8)
+                {
+                    HandleHTPTierCostEdit(player, state, costTier, arg2);
+                    return;
+                }
             }
 
             // Parse number
@@ -701,6 +803,18 @@ namespace Si_UnitBalance
                     {
                         state.Level = MenuLevel.HTPDecay;
                     }
+                    else if (selection == 9)
+                    {
+                        // Toggle player-controlled infantry cap exemption
+                        _playerInfantryIgnoreCap = !_playerInfantryIgnoreCap;
+                        WriteBoolToJson("player_infantry_ignore_cap", _playerInfantryIgnoreCap);
+                        string capStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + capStatus + " " + _dimColor + "(applies immediately)</color>");
+                        string pn9 = GetPlayerName(player);
+                        string sid9 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn9, sid9, "htp", "player_infantry_ignore_cap", (!_playerInfantryIgnoreCap).ToString(), _playerInfantryIgnoreCap.ToString());
+                        MelonLogger.Msg($"[BAL] {pn9} ({sid9}): player_infantry_ignore_cap -> {_playerInfantryIgnoreCap}");
+                    }
                     break;
 
                 case MenuLevel.HTPDecay:
@@ -766,7 +880,7 @@ namespace Si_UnitBalance
                 {
                     // Tier 1-8 editable
                     if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: ." + selection + " <seconds> (or !b " + selection + " <seconds>)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set time: ." + selection + " <seconds> · Set cost: ." + selection + "c <resource> · -1 = vanilla cost</color>");
                     return;
                 }
 

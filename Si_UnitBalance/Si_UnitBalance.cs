@@ -20,6 +20,8 @@
  - turn_radius_mult: Scales VehicleWheeled TurningCircleRadius (lower = tighter turns)
  - accuracy_mult: Scales VehicleTurret muzzle spread
  - build_radius: Override MaximumBaseStructureDistance (absolute meters)
+ - deposit_radius: Override ResourceDepositPoint.DepositRadius (absolute meters, Bio Cache)
+ - extraction_radius: Override MiningArmsBase.ExtractionRadius (absolute meters, Shrimp harvester)
 */
 
 using HarmonyLib;
@@ -33,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.0.0", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.0.1", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -50,6 +52,7 @@ namespace Si_UnitBalance
         private static bool _dumpFields = true;
         private static bool _shrimpDisableAim = false;
         private static bool _additionalSpawn = false;
+        private static bool _playerInfantryIgnoreCap = false; // exclude player-controlled infantry from unit cap (HTP toggle)
         // _revertOnRoundEnd removed — always false (reverting breaks starter structure overrides)
         private static bool _healthMultEnabled = true; // always enabled — client mod handles sync
         private static bool _overridesApplied; // tracks if OM overrides are currently active (for no-revert mode)
@@ -77,6 +80,7 @@ namespace Si_UnitBalance
         private static MethodInfo _sendChatToPlayerMethod; // HelperMethods.SendChatMessageToPlayer
         private static MethodInfo _sendConsoleToPlayerMethod; // HelperMethods.SendConsoleMessageToPlayer
         private static MethodInfo _registerAdminCmdMethod;
+        private static MethodInfo _registerPlayerCmdMethod;
         private static Type _adminPowerType;
         private static Type _adminCallbackType;
         private static FieldInfo _playerNameField;
@@ -103,7 +107,8 @@ namespace Si_UnitBalance
             public float PendingValue;
             public string PendingOldVal;
             public string PendingUnitName;     // set by HTP editors (null = use _unitNames lookup)
-            public string PendingTechTierKey;  // e.g. "tier_3" for tech_time edits
+            public string PendingTechTierKey;  // e.g. "tier_3" for tech_time / tech_cost edits
+            public bool PendingIsTechCost;     // when true (and PendingTechTierKey set) -> writes tech_cost; else tech_time
             // JSON handling state
             public bool JsonPendingSave;        // waiting for save name input
             public string JsonPendingAction;    // "blank" or "load" for confirm prompts
@@ -140,6 +145,10 @@ namespace Si_UnitBalance
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _buildRadiusOverrides =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _depositRadiusOverrides =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _extractionRadiusOverrides =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _turnRadiusMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _turboSpeedMultipliers =
@@ -170,6 +179,8 @@ namespace Si_UnitBalance
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         // Tech tier number (1-8) -> build time in seconds
         private static readonly Dictionary<int, float> _techTierTimes = new Dictionary<int, float>();
+        // Per-tier tech upgrade cost overrides. -1 in config = no override (skip apply), keep vanilla.
+        private static readonly Dictionary<int, int> _techTierCosts = new Dictionary<int, int>();
 
         // Original health values (keyed by DamageManagerData asset name) to prevent compounding
         private static readonly Dictionary<string, float> _originalHealth =
@@ -287,7 +298,7 @@ namespace Si_UnitBalance
             }
 
             MelonLogger.Msg($"Unit Balance v7.2.0 initialized. Config: {_configPath}");
-            MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count}");
+            MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
         // =============================================
@@ -396,6 +407,15 @@ namespace Si_UnitBalance
                     MelonLogger.Warning($"[keep_production] Failed to apply patches: {ex.Message}");
                 }
 
+                // Patch Team.UpdateUnitCapValues to optionally exempt player-controlled infantry from the unit cap.
+                var updateUnitCap = AccessTools.Method(typeof(Team), "UpdateUnitCapValues");
+                if (updateUnitCap != null)
+                {
+                    harmony.Patch(updateUnitCap,
+                        postfix: new HarmonyMethod(typeof(Patch_UnitCapPlayerInfantry), "Postfix"));
+                    MelonLogger.Msg("Patched Team.UpdateUnitCapValues for player-infantry cap exemption");
+                }
+
                 // Register chat commands via AdminMod API
                 try
                 {
@@ -413,6 +433,7 @@ namespace Si_UnitBalance
                             _adminCallbackType = helperType.Assembly.GetType("SilicaAdminMod.HelperMethods+CommandCallback");
                         _adminPowerType = helperType.Assembly.GetType("SilicaAdminMod.Power");
                         _registerAdminCmdMethod = helperType.GetMethod("RegisterAdminCommand", BindingFlags.Public | BindingFlags.Static);
+                        _registerPlayerCmdMethod = helperType.GetMethod("RegisterPlayerCommand", BindingFlags.Public | BindingFlags.Static);
 
                         // Cache SendChatMessageToPlayer for UI
                         _sendChatToPlayerMethod = helperType.GetMethod("SendChatMessageToPlayer", BindingFlags.Public | BindingFlags.Static);
@@ -455,21 +476,51 @@ namespace Si_UnitBalance
                                 powerGeneric, "Balance editor UI" });
                             MelonLogger.Msg("Registered !b admin command (balance editor)");
 
-                            // Register shortcut commands: /1 through /9, /0, /back
-                            // These let admins navigate the menu without typing "/b " prefix
-                            // Using / prefix hides chat from other players (AdminMod feature)
+                            // Register navigation shortcuts /1-/20, /0, /back as PLAYER commands
+                            // (not admin commands — anyone can type them, the handler gates write access by
+                            // checking which menu state the caller is in: _menuStates = !b editor (admin),
+                            // _statsStates = /stats read-only inspector). Using / prefix + hideFromChat=true
+                            // keeps the commands hidden from other players.
                             var shortcutShim = MakeShim("MenuShortcutShim", "OnMenuShortcut");
                             string[] shortcuts = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "0", "back" };
-                            foreach (var sc in shortcuts)
+                            if (_registerPlayerCmdMethod != null)
+                            {
+                                foreach (var sc in shortcuts)
+                                {
+                                    try
+                                    {
+                                        _registerPlayerCmdMethod.Invoke(null, new object[] {
+                                            sc, shortcutShim, true /* hideFromChat */ });
+                                    }
+                                    catch { }
+                                }
+                                MelonLogger.Msg("Registered /1-/20, /0, /back as player commands (state-gated)");
+                            }
+                            else
+                            {
+                                MelonLogger.Warning("RegisterPlayerCommand not found — falling back to admin-only shortcuts");
+                                foreach (var sc in shortcuts)
+                                {
+                                    try
+                                    {
+                                        _registerAdminCmdMethod.Invoke(null, new object[] {
+                                            sc, shortcutShim, powerGeneric, null });
+                                    }
+                                    catch { }
+                                }
+                            }
+
+                            // Register /stats as a PLAYER command (read-only unit stats inspector, any player)
+                            if (_registerPlayerCmdMethod != null)
                             {
                                 try
                                 {
-                                    _registerAdminCmdMethod.Invoke(null, new object[] {
-                                        sc, shortcutShim, powerGeneric, null });
+                                    _registerPlayerCmdMethod.Invoke(null, new object[] {
+                                        "stats", MakeShim("StatsShim", "OnStatsCommand"), true /* hideFromChat */ });
+                                    MelonLogger.Msg("Registered /stats as player command");
                                 }
-                                catch { }
+                                catch (Exception sx) { MelonLogger.Warning($"Failed to register /stats: {sx.Message}"); }
                             }
-                            MelonLogger.Msg("Registered /1-/20, /0, /back shortcut commands");
                         }
                         else
                             MelonLogger.Warning("Could not find CommandCallback or RegisterAdminCommand in AdminMod");
@@ -515,8 +566,13 @@ namespace Si_UnitBalance
                 _discordAutoPost = config["discord_auto_post"]?.Value<bool>() ?? false;
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
+                _playerInfantryIgnoreCap = config["player_infantry_ignore_cap"]?.Value<bool>() ?? false;
                 // _revertOnRoundEnd removed — always false (reverting breaks starter structure overrides)
                 _healthMultEnabled = config["health_mult_enabled"]?.Value<bool>() ?? true;
+
+                string configGameVersion = config["game_version"]?.Value<string>() ?? "";
+                if (!string.IsNullOrEmpty(configGameVersion))
+                    MelonLogger.Msg($"[CONFIG] Config calibrated for game version: {configGameVersion}");
 
                 // Read debug logging from Admin mod's MelonPreference
                 try
@@ -542,6 +598,8 @@ namespace Si_UnitBalance
                 _magazineMultipliers.Clear();
                 _fireRateMultipliers.Clear();
                 _buildRadiusOverrides.Clear();
+                _depositRadiusOverrides.Clear();
+                _extractionRadiusOverrides.Clear();
                 _turnRadiusMultipliers.Clear();
                 _turboSpeedMultipliers.Clear();
                 _targetDistanceOverrides.Clear();
@@ -557,6 +615,7 @@ namespace Si_UnitBalance
                 _projectileOverrides.Clear();
                 _proximityOverrides.Clear();
                 _techTierTimes.Clear();
+                _techTierCosts.Clear();
                 _teleportCooldown = -1f;
                 _teleportDuration = -1f;
                 _dispenseTimeout = -1f;
@@ -616,6 +675,8 @@ namespace Si_UnitBalance
                         float turboSpeedMult = overrides["turbo_speed_mult"]?.Value<float>() ?? 1.0f;
                         float targetDistance = overrides["target_distance"]?.Value<float>() ?? -1f;
                         float buildRadius = overrides["build_radius"]?.Value<float>() ?? -1f;
+                        float depositRadius = overrides["deposit_radius"]?.Value<float>() ?? -1f;
+                        float extractionRadius = overrides["extraction_radius"]?.Value<float>() ?? -1f;
                         int minTier = overrides["min_tier"]?.Value<int>() ?? -1;
                         float jumpSpeedMult = overrides["jump_speed_mult"]?.Value<float>() ?? 1.0f;
                         float fowDistance = overrides["fow_distance"]?.Value<float>() ?? -1f;
@@ -701,6 +762,10 @@ namespace Si_UnitBalance
                             _targetDistanceOverrides[unitName] = targetDistance;
                         if (buildRadius >= 0)
                             _buildRadiusOverrides[unitName] = buildRadius;
+                        if (depositRadius >= 0)
+                            _depositRadiusOverrides[unitName] = depositRadius;
+                        if (extractionRadius >= 0)
+                            _extractionRadiusOverrides[unitName] = extractionRadius;
                         if (minTier >= 0)
                             _minTierOverrides[unitName] = minTier;
                         if (Math.Abs(jumpSpeedMult - 1.0f) > 0.001f)
@@ -828,6 +893,18 @@ namespace Si_UnitBalance
                     }
                 }
 
+                // Tech tier resource cost (absolute int per tier; -1 = no override, vanilla kept)
+                var techCost = config["tech_cost"] as JObject;
+                if (techCost != null)
+                {
+                    for (int tier = 1; tier <= 8; tier++)
+                    {
+                        int? cost = techCost[$"tier_{tier}"]?.Value<int>();
+                        if (cost.HasValue && cost.Value >= 0)
+                            _techTierCosts[tier] = cost.Value;
+                    }
+                }
+
                 _configLoaded = true;
             }
             catch (Exception ex)
@@ -846,7 +923,7 @@ namespace Si_UnitBalance
                 if (!File.Exists(defaultPath))
                 {
                     // Fallback: check Mods directory for legacy placement
-                    string modsDefault = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "Si_UnitBalance_Config_Default.json");
+                    string modsDefault = Path.Combine(Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)!, "Si_UnitBalance_Config_Default.json");
                     if (File.Exists(modsDefault)) defaultPath = modsDefault;
                 }
                 if (File.Exists(defaultPath))
@@ -863,6 +940,7 @@ namespace Si_UnitBalance
     ""shrimp_disable_aim"": false,
     ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
     ""tech_time"": { ""tier_1"": 30, ""tier_2"": 30, ""tier_3"": 30, ""tier_4"": 30, ""tier_5"": 30, ""tier_6"": 30, ""tier_7"": 30, ""tier_8"": 30 },
+    ""tech_cost"": { ""tier_1"": -1, ""tier_2"": -1, ""tier_3"": -1, ""tier_4"": -1, ""tier_5"": -1, ""tier_6"": -1, ""tier_7"": -1, ""tier_8"": -1 },
     ""decay"": { ""human"": { ""enabled"": true, ""keep_production"": false }, ""alien"": { ""enabled"": true, ""keep_production"": false } },
     ""units"": {}
 }";

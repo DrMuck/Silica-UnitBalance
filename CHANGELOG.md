@@ -4,6 +4,28 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-04-12 — Extraction Radius (Shrimp harvesting)
+
+- **New parameter** `extraction_radius` (absolute meters, `-1` = default). Overrides the harvester's `ExtractionRadius` field — the distance around the unit's extraction point where it can reach biotics cells.
+- **Component detection**: matches by field name (`ExtractionRadius`) via reflection instead of exact class name, so it handles the Shrimp's `MiningClaws` (alien harvester, default 2m) as well as human harvesters using `MiningArmsBase` subclasses (`MiningArmsLaser`, `MiningArmsRoller`, default 20m). Originally scoped only to `MiningArmsBase`; widened after discovering Shrimp uses `MiningClaws`.
+- **Menu integration**: `hasMiningArms` detection on the unit prefab conditionally adds `extraction_radius` to the Health & Production group for that unit only. Shrimp shows it; non-harvester units don't.
+- **Apply path**: direct prefab mutation (not OverrideManager) — the component is a child MonoBehaviour, not an OM-registered asset. Follows the same pattern as `deposit_radius` (BioCache).
+- **Wiring**: `ApplyExtractionRadiusOverrides` called from both `Lifecycle.cs` (first-load apply) and `Patches.cs` (`!rebalance` re-apply).
+
+---
+
+## 2026-04-12 — UpdateHealDecay Hot-Path Optimization (v7.0.1)
+
+- **Problem**: Si_ModPerfMonitor showed `HumanStructure::UpdateHealDecay` + `AlienStructure::UpdateHealDecay` prefixes burning ~80-100ms/20s sustained. The game calls these per-structure-per-frame to detect linked↔unlinked transitions, so call count is fixed by the engine — only per-call body cost is controllable.
+- **Fix** (both prefixes in `Si_UnitBalance.Patches.cs`):
+  - `DamageManager` lookup was `hs.gameObject.GetComponent<DamageManager>()` every call (expensive in Il2Cpp). Now cached per structure in `Dictionary<int, DamageManager>` keyed by `GetInstanceID()`; one lookup per structure lifetime.
+  - Human prefix read `AnchorStructure` via `FieldInfo.GetValue()` every call (slow reflection marshalling in Il2Cpp). Now uses Harmony's `AccessTools.FieldRefAccess<HumanStructure, Structure>` compiled delegate.
+  - Cache invalidated on map change via `DecayCacheClear()` hook in `Si_UnitBalance.Lifecycle.cs` to avoid stale refs from destroyed structures.
+- **Behavior preserved**: identical unlinked-state detection, identical write guards, vanilla still runs when keep_production/Enabled are off.
+- **Expected savings**: ~50-70% of body cost → combined totals should drop from ~80-100ms/20s to ~25-35ms/20s.
+
+---
+
 ## 2026-04-03 — Remove Redundant Tier Change Handler
 
 - **Problem**: Server lag spike on each tech tier change. `OnTeamTierChanged` subscribed to `GameEvents.OnTeamTechnologyTierChanged` and ran `ResetDispenserLocalTimeout` which scanned all assemblies, resolved reflection members, and iterated all VehicleDispenser instances — all unnecessary.

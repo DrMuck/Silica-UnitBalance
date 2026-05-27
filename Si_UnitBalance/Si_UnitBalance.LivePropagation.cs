@@ -494,7 +494,7 @@ namespace Si_UnitBalance
                         continue;
 
                     string team = "?";
-                    try { if (structure.DefaultTeam != null) team = structure.DefaultTeam.name; } catch { }
+                    try { var dt = GetDefaultTeam(structure); if (dt != null) team = dt.name; } catch { }
 
                     foreach (var cd in structure.ConstructionOptions)
                     {
@@ -578,12 +578,12 @@ namespace Si_UnitBalance
                         var structure = info.Prefab.GetComponent<Structure>();
                         if (structure != null)
                         {
-                            try { if (structure.DefaultTeam != null) team = structure.DefaultTeam.name; } catch { }
+                            try { var dt = GetDefaultTeam(structure); if (dt != null) team = dt.name; } catch { }
                         }
                         var unit = info.Prefab.GetComponent<Unit>();
                         if (unit != null)
                         {
-                            try { if (unit.DefaultTeam != null) team = unit.DefaultTeam.name; } catch { }
+                            try { var dt = GetDefaultTeam(unit); if (dt != null) team = dt.name; } catch { }
                         }
                     }
                     if (team.Contains("Sol")) faction = "Sol";
@@ -1342,6 +1342,266 @@ namespace Si_UnitBalance
                 Jf(dump, pfx + "proj_speed"), Jf(dump, pfx + "proj_lifetime"),
                 Jf(dump, pfx + "spread"), Ji(dump, pfx + "magazine"),
                 Jf(dump, pfx + "fire_interval"), Jf(dump, pfx + "reload"));
+        }
+
+        // =============================================
+        // Version migration: adjust multipliers when vanilla base values change
+        // =============================================
+
+        /// <summary>
+        /// Compare old dump (previous game version) with new dump (current version).
+        /// For each multiplier != 1.0, adjust to preserve the same modded absolute value.
+        /// Formula: new_mult = (old_vanilla * old_mult) / new_vanilla
+        /// </summary>
+        private static void MigrateMultipliersForVersionChange(JObject oldDump, string oldVersion, string newVersion)
+        {
+            try
+            {
+                // Read fresh new dump from disk
+                string dumpPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(_configPath), "Si_UnitBalance_Dump.json");
+                if (!System.IO.File.Exists(dumpPath)) return;
+                var newDump = JObject.Parse(System.IO.File.ReadAllText(dumpPath));
+
+                // Build lookup: config key -> dump entry (both old and new)
+                var oldLookup = BuildDumpLookup(oldDump);
+                var newLookup = BuildDumpLookup(newDump);
+
+                // Migrate both config files
+                string defaultPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(_configPath), "Si_UnitBalance_Config_Default.json");
+
+                int totalAdjusted = 0, totalUnits = 0;
+                if (System.IO.File.Exists(_configPath))
+                {
+                    var (adj, units) = MigrateConfigFile(_configPath, oldLookup, newLookup, oldVersion, newVersion);
+                    totalAdjusted += adj; totalUnits += units;
+                }
+                if (System.IO.File.Exists(defaultPath))
+                {
+                    var (adj, units) = MigrateConfigFile(defaultPath, oldLookup, newLookup, oldVersion, newVersion);
+                    totalAdjusted += adj; totalUnits += units;
+                }
+
+                if (totalAdjusted > 0)
+                    MelonLogger.Msg($"[MIGRATE] Adjusted {totalAdjusted} multipliers across {totalUnits} units for version change {oldVersion} -> {newVersion}");
+                else
+                    MelonLogger.Msg($"[MIGRATE] No multiplier adjustments needed for version change {oldVersion} -> {newVersion}");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"[MIGRATE] Migration error: {ex.Message}");
+            }
+        }
+
+        private static Dictionary<string, JObject> BuildDumpLookup(JObject dump)
+        {
+            var lookup = new Dictionary<string, JObject>(StringComparer.OrdinalIgnoreCase);
+            var units = dump["units"] as JArray;
+            if (units == null) return lookup;
+            foreach (JObject u in units)
+            {
+                string name = Js(u, "name");
+                string intern = Js(u, "internal");
+                string key = ResolveConfigName(name, intern);
+                if (!string.IsNullOrEmpty(key) && !lookup.ContainsKey(key))
+                    lookup[key] = u;
+            }
+            return lookup;
+        }
+
+        private static (int adjusted, int units) MigrateConfigFile(
+            string configPath, Dictionary<string, JObject> oldLookup,
+            Dictionary<string, JObject> newLookup, string oldVersion, string newVersion)
+        {
+            var configJson = JObject.Parse(System.IO.File.ReadAllText(configPath));
+            var configUnits = configJson["units"] as JObject;
+            if (configUnits == null) return (0, 0);
+
+            int totalAdjusted = 0, unitsAdjusted = 0;
+            string fileName = System.IO.Path.GetFileName(configPath);
+
+            foreach (var prop in configUnits.Properties())
+            {
+                string unitName = prop.Name;
+                if (unitName.StartsWith("_")) continue;
+                var entry = prop.Value as JObject;
+                if (entry == null) continue;
+
+                if (!oldLookup.TryGetValue(unitName, out var oldUnit)) continue;
+                if (!newLookup.TryGetValue(unitName, out var newUnit)) continue;
+
+                bool isCreature = Js(oldUnit, "faction") == "Alien" && !Jb(oldUnit, "is_structure");
+                bool hasVT = !string.IsNullOrEmpty(Js(oldUnit, "vt_proj"));
+                int priIdx = 0;
+                _vtPriIndex.TryGetValue(unitName, out priIdx);
+
+                int adjCount = 0;
+
+                // --- Health, cost, build time ---
+                adjCount += MigrateMult(entry, "health_mult", unitName, fileName,
+                    Ji(oldUnit, "hp"), Ji(newUnit, "hp"));
+
+                adjCount += MigrateMult(entry, "cost_mult", unitName, fileName,
+                    Ji(oldUnit, "cost"), Ji(newUnit, "cost"));
+
+                float oldBuildTotal = Jf(oldUnit, "build_time") + Jf(oldUnit, "finished_wait_time") + Jf(oldUnit, "clean_up_time");
+                float newBuildTotal = Jf(newUnit, "build_time") + Jf(newUnit, "finished_wait_time") + Jf(newUnit, "clean_up_time");
+                adjCount += MigrateMult(entry, "build_time_mult", unitName, fileName,
+                    oldBuildTotal, newBuildTotal);
+
+                // --- Movement ---
+                float oldMoveSpd = Jf(oldUnit, "move_speed");
+                float newMoveSpd = Jf(newUnit, "move_speed");
+                if (oldMoveSpd <= 0) { oldMoveSpd = Jf(oldUnit, "run_speed"); newMoveSpd = Jf(newUnit, "run_speed"); }
+                adjCount += MigrateMult(entry, "move_speed_mult", unitName, fileName, oldMoveSpd, newMoveSpd);
+
+                adjCount += MigrateMult(entry, "jump_speed_mult", unitName, fileName,
+                    Jf(oldUnit, "jump_speed"), Jf(newUnit, "jump_speed"));
+
+                // --- Infantry speed subtypes ---
+                adjCount += MigrateMult(entry, "walk_speed_mult", unitName, fileName,
+                    Jf(oldUnit, "walk_speed"), Jf(newUnit, "walk_speed"));
+                adjCount += MigrateMult(entry, "run_speed_mult", unitName, fileName,
+                    Jf(oldUnit, "run_speed"), Jf(newUnit, "run_speed"));
+                adjCount += MigrateMult(entry, "sprint_speed_mult", unitName, fileName,
+                    Jf(oldUnit, "sprint_speed"), Jf(newUnit, "sprint_speed"));
+
+                // --- Weapon multipliers (pri/sec) ---
+                if (hasVT)
+                {
+                    // VehicleTurret-based units
+                    string priPfx = priIdx == 0 ? "vt_" : "vt3_";
+                    string secPfx = priIdx == 0 ? "vt3_" : "vt_";
+
+                    adjCount += MigrateWeaponMults(entry, "pri", unitName, fileName, oldUnit, newUnit, priPfx);
+                    adjCount += MigrateWeaponMults(entry, "sec", unitName, fileName, oldUnit, newUnit, secPfx);
+                }
+                else if (isCreature)
+                {
+                    // Creature attacks
+                    adjCount += MigrateCreatureWeaponMults(entry, "pri", unitName, fileName, oldUnit, newUnit, "", "");
+                    adjCount += MigrateCreatureWeaponMults(entry, "sec", unitName, fileName, oldUnit, newUnit, "2", "2");
+                }
+
+                if (adjCount > 0)
+                {
+                    totalAdjusted += adjCount;
+                    unitsAdjusted++;
+                }
+            }
+
+            // Update version tag
+            string oldTag = (string)configJson["game_version"];
+            configJson["game_version"] = newVersion;
+
+            // Persist when multipliers were adjusted OR the version tag itself changed,
+            // so the tag doesn't go stale on version bumps that need no rescaling.
+            if (totalAdjusted > 0 || !string.Equals(oldTag, newVersion, StringComparison.Ordinal))
+                System.IO.File.WriteAllText(configPath, configJson.ToString());
+
+            return (totalAdjusted, unitsAdjusted);
+        }
+
+        /// <summary>
+        /// Migrate VehicleTurret weapon multipliers. dumpPfx is "vt_" or "vt3_".
+        /// </summary>
+        private static int MigrateWeaponMults(JObject entry, string weapon, string unitName,
+            string fileName, JObject oldUnit, JObject newUnit, string dumpPfx)
+        {
+            int adj = 0;
+            adj += MigrateMult(entry, $"{weapon}_impact_damage_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "impact_dmg"), Jf(newUnit, dumpPfx + "impact_dmg"));
+            adj += MigrateMult(entry, $"{weapon}_splash_damage_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "splash_dmg"), Jf(newUnit, dumpPfx + "splash_dmg"));
+            adj += MigrateMult(entry, $"{weapon}_ricochet_damage_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "ricochet_dmg"), Jf(newUnit, dumpPfx + "ricochet_dmg"));
+            adj += MigrateMult(entry, $"{weapon}_penetrating_damage_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "pen_dmg"), Jf(newUnit, dumpPfx + "pen_dmg"));
+            adj += MigrateMult(entry, $"{weapon}_proj_speed_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "proj_speed"), Jf(newUnit, dumpPfx + "proj_speed"));
+            adj += MigrateMult(entry, $"{weapon}_proj_lifetime_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "proj_lifetime"), Jf(newUnit, dumpPfx + "proj_lifetime"));
+            adj += MigrateMult(entry, $"{weapon}_accuracy_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "spread"), Jf(newUnit, dumpPfx + "spread"));
+            adj += MigrateMult(entry, $"{weapon}_magazine_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "magazine"), Jf(newUnit, dumpPfx + "magazine"));
+            adj += MigrateMult(entry, $"{weapon}_fire_rate_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "fire_interval"), Jf(newUnit, dumpPfx + "fire_interval"));
+            adj += MigrateMult(entry, $"{weapon}_reload_time_mult", unitName, fileName,
+                Jf(oldUnit, dumpPfx + "reload"), Jf(newUnit, dumpPfx + "reload"));
+            return adj;
+        }
+
+        /// <summary>
+        /// Migrate creature weapon multipliers. atkSuffix is "" for primary, "2" for secondary.
+        /// </summary>
+        private static int MigrateCreatureWeaponMults(JObject entry, string weapon, string unitName,
+            string fileName, JObject oldUnit, JObject newUnit, string atkSuffix, string projSuffix)
+        {
+            int adj = 0;
+            adj += MigrateMult(entry, $"{weapon}_impact_damage_mult", unitName, fileName,
+                Jf(oldUnit, "proj" + projSuffix + "_impact_dmg"), Jf(newUnit, "proj" + projSuffix + "_impact_dmg"));
+            adj += MigrateMult(entry, $"{weapon}_splash_damage_mult", unitName, fileName,
+                Jf(oldUnit, "proj" + projSuffix + "_splash_dmg"), Jf(newUnit, "proj" + projSuffix + "_splash_dmg"));
+            adj += MigrateMult(entry, $"{weapon}_ricochet_damage_mult", unitName, fileName,
+                Jf(oldUnit, "proj" + projSuffix + "_ricochet_dmg"), Jf(newUnit, "proj" + projSuffix + "_ricochet_dmg"));
+            adj += MigrateMult(entry, $"{weapon}_proj_speed_mult", unitName, fileName,
+                Jf(oldUnit, "proj_speed" + (projSuffix == "2" ? "2" : "")),
+                Jf(newUnit, "proj_speed" + (projSuffix == "2" ? "2" : "")));
+            adj += MigrateMult(entry, $"{weapon}_proj_lifetime_mult", unitName, fileName,
+                Jf(oldUnit, "proj_lifetime" + (projSuffix == "2" ? "2" : "")),
+                Jf(newUnit, "proj_lifetime" + (projSuffix == "2" ? "2" : "")));
+            adj += MigrateMult(entry, $"{weapon}_accuracy_mult", unitName, fileName,
+                Jf(oldUnit, "atk" + atkSuffix + "_spread"), Jf(newUnit, "atk" + atkSuffix + "_spread"));
+            return adj;
+        }
+
+        /// <summary>
+        /// Adjust a single multiplier to preserve the modded absolute value.
+        /// Returns 1 if adjusted, 0 if skipped.
+        /// </summary>
+        private static int MigrateMult(JObject entry, string key, string unitName,
+            string fileName, float oldVanilla, float newVanilla)
+        {
+            var token = entry[key];
+            if (token == null) return 0;
+
+            float oldMult;
+            if (token.Type == JTokenType.Integer)
+                oldMult = (int)token;
+            else if (token.Type == JTokenType.Float)
+                oldMult = (float)token;
+            else
+                return 0;
+
+            // Skip if multiplier is exactly 1.0 (vanilla, no adjustment needed)
+            if (Math.Abs(oldMult - 1.0f) < 0.0001f) return 0;
+
+            // Skip if vanilla value didn't change
+            if (Math.Abs(oldVanilla - newVanilla) < 0.0001f) return 0;
+
+            // Skip if new vanilla is 0 (avoid div by zero)
+            if (Math.Abs(newVanilla) < 0.0001f)
+            {
+                MelonLogger.Warning($"[MIGRATE] {unitName}.{key}: new vanilla=0, skipping (was {oldMult}x * {oldVanilla})");
+                return 0;
+            }
+
+            // Skip if old vanilla is 0 (can't compute original modded value)
+            if (Math.Abs(oldVanilla) < 0.0001f) return 0;
+
+            float moddedValue = oldVanilla * oldMult;
+            float newMult = moddedValue / newVanilla;
+
+            // Round to 4 decimal places to avoid floating point noise
+            newMult = (float)Math.Round(newMult, 4);
+
+            MelonLogger.Msg($"[MIGRATE] [{fileName}] {unitName}.{key}: {oldMult} -> {newMult} " +
+                $"(vanilla {oldVanilla} -> {newVanilla}, preserving modded={moddedValue:G})");
+
+            entry[key] = newMult;
+            return 1;
         }
 
         private static float GetFloatField(Type t, object obj, string fieldName)

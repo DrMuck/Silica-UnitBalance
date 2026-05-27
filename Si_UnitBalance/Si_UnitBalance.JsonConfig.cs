@@ -192,6 +192,16 @@ namespace Si_UnitBalance
         ""tier_7"": 30,
         ""tier_8"": 30
     },
+    ""tech_cost"": {
+        ""tier_1"": -1,
+        ""tier_2"": -1,
+        ""tier_3"": -1,
+        ""tier_4"": -1,
+        ""tier_5"": -1,
+        ""tier_6"": -1,
+        ""tier_7"": -1,
+        ""tier_8"": -1
+    },
     ""units"": {}
 }";
                 File.WriteAllText(_configPath, blankJson);

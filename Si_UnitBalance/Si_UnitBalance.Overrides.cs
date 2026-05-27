@@ -16,7 +16,7 @@ namespace Si_UnitBalance
         {
             bool hasUnitOverrides = _costMultipliers.Count > 0 || _buildTimeMultipliers.Count > 0
                                  || _minTierOverrides.Count > 0 || _buildRadiusOverrides.Count > 0;
-            bool hasTechOverrides = _techTierTimes.Count > 0;
+            bool hasTechOverrides = _techTierTimes.Count > 0 || _techTierCosts.Count > 0;
 
             if (!hasUnitOverrides && !hasTechOverrides)
                 return;
@@ -101,9 +101,32 @@ namespace Si_UnitBalance
                         LogDebug($"[TECH] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): total {origTotal:F0}s -> {desiredTotal:F0}s (BU:{origBU:F0}->{newBU:F0} FWT:{origFwt:F0} CUT:{origCut:F0}){(omOk ? " (OM)" : "")}");
                         techApplied++;
                     }
-                    else
+
+                    // Tech tier cost override (absolute int per tier). Independent of the time override above.
+                    if (_techTierCosts.TryGetValue(cd.TechnologyTier, out int techCost))
                     {
-                        LogDebug($"[TECH-DIAG] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): no config for this tier, BuildUpTime={cd.BuildUpTime:F0}s");
+                        int origCost = cd.ResourceCost;
+                        bool costOmOk = false;
+                        if (useOM)
+                        {
+                            costOmOk = OMSetInt(cdTarget, "ResourceCost", techCost);
+                            if (!costOmOk)
+                            {
+                                MelonLogger.Warning($"[TECH-COST] OM.Set failed for '{cdTarget}' ResourceCost={techCost}, falling back to direct");
+                                cd.ResourceCost = techCost;
+                            }
+                        }
+                        else
+                        {
+                            cd.ResourceCost = techCost;
+                        }
+                        LogDebug($"[TECH-COST] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): cost {origCost} -> {techCost}{(costOmOk ? " (OM)" : "")}");
+                        techApplied++;
+                    }
+
+                    if (!_techTierTimes.ContainsKey(cd.TechnologyTier) && !_techTierCosts.ContainsKey(cd.TechnologyTier))
+                    {
+                        LogDebug($"[TECH-DIAG] Tier {cd.TechnologyTier} '{name}' (CD={cd.name}): no config for this tier, BuildUpTime={cd.BuildUpTime:F0}s cost={cd.ResourceCost}");
                     }
                     continue;
                 }
@@ -194,6 +217,86 @@ namespace Si_UnitBalance
 
             if (applied > 0 || techApplied > 0)
                 MelonLogger.Msg($"Applied construction overrides: {applied} units/structures, {techApplied} tech tiers");
+        }
+
+        // =============================================
+        // Deposit Radius: override ResourceDepositPoint.DepositRadius (direct prefab mutation)
+        // ResourceDepositPoint is a child MonoBehaviour, not an OM-registered asset.
+        // Deposit check (GetPointWithinDepositBounds) runs server-side only.
+        // =============================================
+
+        private static void ApplyDepositRadiusOverrides(bool useOM)
+        {
+            if (_depositRadiusOverrides.Count == 0) return;
+
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            int applied = 0;
+
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string name = ResolveConfigName(info.DisplayName, info.name);
+                if (string.IsNullOrEmpty(name)) continue;
+                if (!_depositRadiusOverrides.TryGetValue(name, out float depositRadius)) continue;
+
+                var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
+                foreach (var comp in childComps)
+                {
+                    if (comp == null || comp.GetType().Name != "ResourceDepositPoint") continue;
+
+                    var drField = comp.GetType().GetField("DepositRadius",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (drField == null || drField.FieldType != typeof(float)) continue;
+
+                    float orig = (float)drField.GetValue(comp);
+                    drField.SetValue(comp, depositRadius);
+                    LogDebug($"[DEPOSIT_RADIUS] {name}: ResourceDepositPoint.DepositRadius {orig:F0} -> {depositRadius:F0} (direct)");
+                    applied++;
+                }
+            }
+
+            if (applied > 0)
+                MelonLogger.Msg($"[DEPOSIT_RADIUS] Applied deposit radius overrides to {applied} deposit points");
+        }
+
+        // =============================================
+        // Extraction Radius: override MiningArmsBase.ExtractionRadius (direct prefab mutation)
+        // MiningArmsBase is a child MonoBehaviour on harvester units (Shrimp).
+        // Extraction logic runs server-side only.
+        // =============================================
+
+        private static void ApplyExtractionRadiusOverrides(bool useOM)
+        {
+            if (_extractionRadiusOverrides.Count == 0) return;
+
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            int applied = 0;
+
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string name = ResolveConfigName(info.DisplayName, info.name);
+                if (string.IsNullOrEmpty(name)) continue;
+                if (!_extractionRadiusOverrides.TryGetValue(name, out float extractionRadius)) continue;
+
+                var childComps = info.Prefab.GetComponentsInChildren<Component>(true);
+                foreach (var comp in childComps)
+                {
+                    if (comp == null) continue;
+
+                    var erField = comp.GetType().GetField("ExtractionRadius",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (erField == null || erField.FieldType != typeof(float)) continue;
+
+                    float orig = (float)erField.GetValue(comp);
+                    erField.SetValue(comp, extractionRadius);
+                    LogDebug($"[EXTRACTION_RADIUS] {name}: MiningArmsBase.ExtractionRadius {orig:F0} -> {extractionRadius:F0} (direct)");
+                    applied++;
+                }
+            }
+
+            if (applied > 0)
+                MelonLogger.Msg($"[EXTRACTION_RADIUS] Applied extraction radius overrides to {applied} harvester(s)");
         }
 
         // =============================================
@@ -1991,6 +2094,24 @@ namespace Si_UnitBalance
         }
 
         // Helper: get/set float field or property (Il2Cpp exposes fields as properties)
+        /// <summary>
+        /// Get DefaultTeam via reflection (field or property) to survive field→property changes across game versions.
+        /// </summary>
+        private static Team GetDefaultTeam(BaseGameObject obj)
+        {
+            var type = obj.GetType();
+            // Walk up hierarchy — DefaultTeam may be declared on BaseGameObject, not the concrete type
+            while (type != null)
+            {
+                var field = type.GetField("DefaultTeam", BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance);
+                if (field != null) return field.GetValue(obj) as Team;
+                var prop = type.GetProperty("DefaultTeam", BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance);
+                if (prop != null) return prop.GetValue(obj) as Team;
+                type = type.BaseType;
+            }
+            return null;
+        }
+
         private static float GetFloatMember(object obj, string name)
         {
             var type = obj.GetType();
