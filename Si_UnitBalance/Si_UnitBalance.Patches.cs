@@ -370,9 +370,11 @@ namespace Si_UnitBalance
         {
             long key = GetPlayerKey(player);
 
-            // Read-only /stats inspector: handled first, separate from the editor's _menuStates.
-            // Players (no admin permission) never enter _menuStates, so they only ever hit this branch.
-            if (_statsStates.ContainsKey(key))
+            // Read-only /stats inspector: handled only when the caller is NOT already in the
+            // admin editor (_menuStates). The editor takes priority so admins who used /stats
+            // before opening !b still get their /1 confirm-save routed to the editor, not
+            // hijacked by the stats display.
+            if (!_menuStates.ContainsKey(key) && _statsStates.ContainsKey(key))
             {
                 string statsCmd = (input ?? "").Trim();
                 var sp = statsCmd.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -599,6 +601,10 @@ namespace Si_UnitBalance
                     state.Level = MenuLevel.HTPHoverbike;
                 else if (state.Level == MenuLevel.HTPTier)
                     state.Level = MenuLevel.HTPMenu;
+                else if (state.Level == MenuLevel.HTPTierTime)
+                    state.Level = MenuLevel.HTPTier;
+                else if (state.Level == MenuLevel.HTPTierCost)
+                    state.Level = MenuLevel.HTPTier;
                 else if (state.Level == MenuLevel.HTPTeleport)
                     state.Level = MenuLevel.HTPMenu;
                 else if (state.Level == MenuLevel.HTPDecay)
@@ -609,19 +615,6 @@ namespace Si_UnitBalance
                     state.Level = (MenuLevel)((int)state.Level - 1);
                 ShowCurrentMenu(player, state);
                 return;
-            }
-
-            // HTP Tier cost edit special-case: ".Nc <value>" before the generic int parse, since "1c" wouldn't parse as int.
-            // Time edit (".N <value>") still falls through to the normal int parse + existing HTPTier dispatch.
-            if (state.Level == MenuLevel.HTPTier && !string.IsNullOrEmpty(arg2)
-                && arg.Length > 1 && (arg[arg.Length - 1] == 'c' || arg[arg.Length - 1] == 'C'))
-            {
-                string tierStr = arg.Substring(0, arg.Length - 1);
-                if (int.TryParse(tierStr, out int costTier) && costTier >= 1 && costTier <= 8)
-                {
-                    HandleHTPTierCostEdit(player, state, costTier, arg2);
-                    return;
-                }
             }
 
             // Parse number
@@ -645,10 +638,17 @@ namespace Si_UnitBalance
                 return;
             }
 
-            // HTP Tier edit: "/1 45" sets tier_1 to 45 seconds
-            if (state.Level == MenuLevel.HTPTier && !string.IsNullOrEmpty(arg2))
+            // HTP Tier > Time: "/1 45" sets tier_1 time to 45 seconds
+            if (state.Level == MenuLevel.HTPTierTime && !string.IsNullOrEmpty(arg2))
             {
                 HandleHTPTierEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // HTP Tier > Cost: "/1 120" sets tier_1 cost to 120 (-1 = vanilla)
+            if (state.Level == MenuLevel.HTPTierCost && !string.IsNullOrEmpty(arg2))
+            {
+                HandleHTPTierCostEdit(player, state, selection, arg2);
                 return;
             }
 
@@ -878,9 +878,24 @@ namespace Si_UnitBalance
 
                 case MenuLevel.HTPTier:
                 {
-                    // Tier 1-8 editable
+                    // Picker: 1=Time, 2=Cost
+                    if (selection == 1) { state.Level = MenuLevel.HTPTierTime; ShowCurrentMenu(player, state); return; }
+                    if (selection == 2) { state.Level = MenuLevel.HTPTierCost; ShowCurrentMenu(player, state); return; }
+                    SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1 (Time) or 2 (Cost).</color>");
+                    return;
+                }
+
+                case MenuLevel.HTPTierTime:
+                {
                     if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set time: ." + selection + " <seconds> · Set cost: ." + selection + "c <resource> · -1 = vanilla cost</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: ." + selection + " <seconds> (or !b " + selection + " <seconds>)</color>");
+                    return;
+                }
+
+                case MenuLevel.HTPTierCost:
+                {
+                    if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: ." + selection + " <resource>  ·  -1 = vanilla  (or !b " + selection + " <resource>)</color>");
                     return;
                 }
 

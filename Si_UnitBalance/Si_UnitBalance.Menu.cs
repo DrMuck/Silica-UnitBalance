@@ -798,7 +798,10 @@ namespace Si_UnitBalance
                 return;
             }
 
-            // Not in menu → enter menu mode
+            // Not in menu → enter menu mode.
+            // Drop any active /stats session so editor input isn't hijacked by the stats display
+            // (the two states are mutually exclusive on entry).
+            _statsStates.Remove(key);
             var state = new BalanceMenuState();
             _menuStates[key] = state;
 
@@ -1886,16 +1889,50 @@ namespace Si_UnitBalance
 
                 case MenuLevel.HTPTier:
                 {
-                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Tier</color> " + _dimColor + "(tech-up time in s + resource cost per tier)</color>");
-                    // Read current tech_time and tech_cost from JSON
+                    // Picker — choose whether you want to edit research time or resource cost.
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Tier</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Time " + _dimColor + "(seconds per tech-up)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Cost " + _dimColor + "(resources per tech-up; -1 = vanilla)</color>");
+                    break;
+                }
+
+                case MenuLevel.HTPTierTime:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Tier > Time</color> " + _dimColor + "(seconds per tech-up)</color>");
                     JObject techTime = null;
-                    JObject techCost = null;
                     try
                     {
                         if (File.Exists(_configPath))
                         {
                             var root = JObject.Parse(File.ReadAllText(_configPath));
                             techTime = root["tech_time"] as JObject;
+                        }
+                    }
+                    catch { }
+
+                    for (int tier = 1; tier <= 8; tier++)
+                    {
+                        string val = "-";
+                        if (techTime != null)
+                        {
+                            float? t = techTime[$"tier_{tier}"]?.Value<float>();
+                            if (t.HasValue) val = t.Value.ToString("F0") + "s";
+                        }
+                        SendChatToPlayer(player, _chatPrefix + _itemColor + tier + ".</color> Tier " + tier + " = " + _valueColor + val + "</color>" + " " + _dimColor + "(default: 30s)</color>");
+                    }
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .N <seconds>  ·  /back to picker  ·  /0 close</color>");
+                    break;
+                }
+
+                case MenuLevel.HTPTierCost:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Tier > Cost</color> " + _dimColor + "(resources per tech-up; -1 = vanilla)</color>");
+                    JObject techCost = null;
+                    try
+                    {
+                        if (File.Exists(_configPath))
+                        {
+                            var root = JObject.Parse(File.ReadAllText(_configPath));
                             techCost = root["tech_cost"] as JObject;
                         }
                     }
@@ -1903,23 +1940,15 @@ namespace Si_UnitBalance
 
                     for (int tier = 1; tier <= 8; tier++)
                     {
-                        string timeStr = "-";
-                        if (techTime != null)
-                        {
-                            float? t = techTime[$"tier_{tier}"]?.Value<float>();
-                            if (t.HasValue) timeStr = t.Value.ToString("F0") + "s";
-                        }
-                        string costStr = "vanilla";
+                        string val = "vanilla";
                         if (techCost != null)
                         {
                             int? c = techCost[$"tier_{tier}"]?.Value<int>();
-                            if (c.HasValue && c.Value >= 0) costStr = c.Value.ToString();
+                            if (c.HasValue && c.Value >= 0) val = c.Value.ToString();
                         }
-                        SendChatToPlayer(player, _chatPrefix + _itemColor + tier + ".</color> Tier " + tier
-                            + " time=" + _valueColor + timeStr + "</color>"
-                            + " cost=" + _valueColor + costStr + "</color>");
+                        SendChatToPlayer(player, _chatPrefix + _itemColor + tier + ".</color> Tier " + tier + " = " + _valueColor + val + "</color>");
                     }
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set time: .N <seconds> · Set cost: .Nc <resource> · -1 = vanilla cost</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .N <resource>  ·  -1 = vanilla  ·  /back to picker  ·  /0 close</color>");
                     break;
                 }
 
@@ -2200,7 +2229,9 @@ namespace Si_UnitBalance
                     fObj[paramKey] = value > 0.5f;
                 else
                     fObj[paramKey] = Math.Round(value, 4);
-                File.WriteAllText(_configPath, root.ToString(Newtonsoft.Json.Formatting.Indented));
+                // Mono runtime's bundled Newtonsoft.Json (MelonLoader/net472) lacks the
+                // ToString(Formatting) overload — use plain ToString() like all other Write*ToJson.
+                File.WriteAllText(_configPath, root.ToString());
                 return true;
             }
             catch (Exception ex)
