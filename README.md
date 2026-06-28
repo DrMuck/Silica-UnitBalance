@@ -6,6 +6,10 @@ All changes are synced to clients via the game's built-in OverrideManager. No cl
 
 > 🛠️ **Author / preview config JSONs in the browser** with the **[Unit Balance Interactive Tool](https://drmuck.github.io/Si_UnitBalance_Interactive/)** — a single-page web app that lets you see every parameter side-by-side with its vanilla base, edit multipliers and absolute overrides, and export a ready-to-deploy `Si_UnitBalance_Config.json`. Perfect for crafting a full balance pass offline before pushing it to the server. Tool source: [github.com/DrMuck/Si_UnitBalance_Interactive](https://github.com/DrMuck/Si_UnitBalance_Interactive).
 
+![Unit Balance Interactive — Sol Siege Tank parameter sheet](docs/screenshots/unit_balance_interactive_siegetank.jpg)
+
+*Screenshot from the [interactive tool](https://drmuck.github.io/Si_UnitBalance_Interactive/): Sol's Siege Tank parameter sheet, with the vanilla base line shown above each group and live multipliers (e.g. Impact Damage 1.00×, Splash Radius Max 1.00×) plus absolute fields (Target Range, FOW Range). Pick a unit on the left, tune the sliders / inputs on the right, then **Download Config** to grab a ready-to-deploy `Si_UnitBalance_Config.json`.*
+
 ## Requirements
 
 - [MelonLoader](https://github.com/LavaGang/MelonLoader) for Silica
