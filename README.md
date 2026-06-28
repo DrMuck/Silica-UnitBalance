@@ -4,6 +4,8 @@ A [Silica](https://store.steampowered.com/app/504900/Silica/) server mod for fin
 
 All changes are synced to clients via the game's built-in OverrideManager. No client-side mod required.
 
+> 🛠️ **Author / preview config JSONs in the browser** with the **[Unit Balance Interactive Tool](https://drmuck.github.io/Si_UnitBalance_Interactive/)** — a single-page web app that lets you see every parameter side-by-side with its vanilla base, edit multipliers and absolute overrides, and export a ready-to-deploy `Si_UnitBalance_Config.json`. Perfect for crafting a full balance pass offline before pushing it to the server. Tool source: [github.com/DrMuck/Si_UnitBalance_Interactive](https://github.com/DrMuck/Si_UnitBalance_Interactive).
+
 ## Requirements
 
 - [MelonLoader](https://github.com/LavaGang/MelonLoader) for Silica
