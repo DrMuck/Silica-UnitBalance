@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.0.1", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.2.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -70,6 +70,7 @@ namespace Si_UnitBalance
         private static MethodInfo _omRevertAllMethod;
         private static object _omTypeFloat;
         private static object _omTypeInt;
+        private static object _omTypeBool;
         private static bool _omInitialized;
 
         // Override sync: chunked SendPlayerOverrides
@@ -200,6 +201,58 @@ namespace Si_UnitBalance
         // Per-projectile absolute value overrides: unit name -> { projectile name -> { field name -> value } }
         private static readonly Dictionary<string, Dictionary<string, Dictionary<string, float>>> _projectileOverrides =
             new Dictionary<string, Dictionary<string, Dictionary<string, float>>>(StringComparer.OrdinalIgnoreCase);
+
+        // === Per-unit projectile tuning (applied to every ProjectileData the unit fires) ===
+        // impact_scale_by_speed: desired m_bImpactScaleBySpeed. TRUE = impact damage scales
+        //   with current (drag-reduced) speed → damage drops off with range; FALSE = flat
+        //   damage at all ranges (Siege-Tank-style). Omit = leave vanilla.
+        private static readonly Dictionary<string, bool> _impactScaleBySpeedOverrides =
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        // drag_mult: multiplies m_fDragCoefficient. <1 = flatter/longer-carrying trajectory
+        //   and (if impact_scale_by_speed) gentler damage falloff; >1 = steeper.
+        private static readonly Dictionary<string, float> _dragMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // ai_lead_{drag,velocity,gravity}: MULTIPLIERS (default 1.0) on the AI aim-lead
+        //   compensation factors m_AIAimLeadFactor_{Drag,Velocity,Gravity}. Applied on top
+        //   of the speed auto-compensation: final = vanilla × (1/speedMult) × mult. Use to
+        //   fix AI mis-aim (e.g. Crimson under-leads its draggy shell even at vanilla).
+        //   Only takes effect on units that also have a projectile speed/range/lifetime
+        //   override (it rides the same projectile-processing pass).
+        private static readonly Dictionary<string, float> _aiLeadDragOverrides =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _aiLeadVelocityOverrides =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _aiLeadGravityOverrides =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // aim_compensation: forces the turret's ETurretAimCompensation mode.
+        //   -1/absent = leave vanilla. Values:
+        //   0 None · 1 Primary_VerticalOnly · 2 Secondary_VerticalOnly · 3 Primary_Full · 4 Secondary_Full
+        //
+        // ⚠️ KNOWN ISSUE (see CHANGELOG 2026-07-26): this does NOT affect PLAYER-controlled
+        //   units. Player aim + reticle are computed CLIENT-SIDE, and AimCompensation is a
+        //   non-networked VehicleTurret field, so a dedicated-server mod can only change the
+        //   server's copy — the client keeps the base-game value (None for most tanks). Kept
+        //   for AI use / future client build. AI aiming is server-side and DOES honour it (and
+        //   the ai_lead_* factors). Verified: forcing Crimson to Full/VerticalOnly changed
+        //   nothing on the player's screen; Siege (base-game VerticalOnly) works because every
+        //   client already has the flag.
+        private static readonly Dictionary<string, int> _aimCompensationOverrides =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // Vanilla AimCompensation per turret (key "unit|turretGO"), cached on first touch
+        // so removing the override restores the original mode.
+        private static readonly Dictionary<string, int> _aimCompVanilla =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // pitch_max_up / pitch_max_down: absolute VehicleTurret.PitchMax{Up,Down} in degrees
+        //   (default 45). -1/absent = leave vanilla. Raises/lowers how far the barrel can
+        //   elevate/depress. Same VehicleTurret-field client-side caveat as aim_compensation:
+        //   AI turrets honour it server-side; a human player's own turret is likely clamped by
+        //   their client's copy. Applied to prefab + live instances, vanilla cached for restore.
+        private static readonly Dictionary<string, float> _pitchMaxUpOverrides =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _pitchMaxDownOverrides =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _pitchVanilla =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
 
         // Per-projectile proximity detonation overrides: projectile name -> { field name -> value }
         // Fields: MinimumTime (float), SplashRadiusScale (float), FlyingUnits (0/1), GroundUnits (0/1), Structures (0/1)
@@ -613,6 +666,14 @@ namespace Si_UnitBalance
                 _sprintSpeedMultipliers.Clear();
                 _splashRadiusMultipliers.Clear();
                 _projectileOverrides.Clear();
+                _impactScaleBySpeedOverrides.Clear();
+                _dragMultipliers.Clear();
+                _aiLeadDragOverrides.Clear();
+                _aiLeadVelocityOverrides.Clear();
+                _aiLeadGravityOverrides.Clear();
+                _aimCompensationOverrides.Clear();
+                _pitchMaxUpOverrides.Clear();
+                _pitchMaxDownOverrides.Clear();
                 _proximityOverrides.Clear();
                 _techTierTimes.Clear();
                 _techTierCosts.Clear();
@@ -682,6 +743,17 @@ namespace Si_UnitBalance
                         float fowDistance = overrides["fow_distance"]?.Value<float>() ?? -1f;
                         float verMult = overrides["visible_event_radius_mult"]?.Value<float>() ?? 1.0f;
                         float lifetimeMult = overrides["proj_lifetime_mult"]?.Value<float>() ?? 1.0f;
+                        bool? impactScaleBySpeed = overrides["impact_scale_by_speed"]?.Value<bool?>();
+                        float dragMult = overrides["drag_mult"]?.Value<float>() ?? 1.0f;
+                        // AI aim-lead factors are MULTIPLIERS (default 1.0) applied on top of
+                        // the speed auto-compensation: final = vanilla × (1/speedMult) × mult.
+                        float aiLeadDrag = overrides["ai_lead_drag"]?.Value<float>() ?? 1.0f;
+                        float aiLeadVelocity = overrides["ai_lead_velocity"]?.Value<float>() ?? 1.0f;
+                        float aiLeadGravity = overrides["ai_lead_gravity"]?.Value<float>() ?? 1.0f;
+                        int aimCompensation = overrides["aim_compensation"]?.Value<int>() ?? -1;
+                        if (aimCompensation > 4) { MelonLogger.Warning($"[UnitBalance] {unitName}: aim_compensation {aimCompensation} out of range (valid 0-4) — clamping to 4"); aimCompensation = 4; }
+                        float pitchMaxUp = overrides["pitch_max_up"]?.Value<float>() ?? -1f;
+                        float pitchMaxDown = overrides["pitch_max_down"]?.Value<float>() ?? -1f;
                         float strafeSpeedMult = overrides["strafe_speed_mult"]?.Value<float>() ?? 1.0f;
                         float flySpeedMult = overrides["fly_speed_mult"]?.Value<float>() ?? 1.0f;
                         float runSpeedMult = overrides["run_speed_mult"]?.Value<float>() ?? 1.0f;
@@ -776,6 +848,22 @@ namespace Si_UnitBalance
                             _visibleEventRadiusMultipliers[unitName] = verMult;
                         if (Math.Abs(lifetimeMult - 1.0f) > 0.001f)
                             _lifetimeMultipliers[unitName] = lifetimeMult;
+                        if (impactScaleBySpeed.HasValue)
+                            _impactScaleBySpeedOverrides[unitName] = impactScaleBySpeed.Value;
+                        if (Math.Abs(dragMult - 1.0f) > 0.001f)
+                            _dragMultipliers[unitName] = dragMult;
+                        if (Math.Abs(aiLeadDrag - 1.0f) > 0.001f)
+                            _aiLeadDragOverrides[unitName] = aiLeadDrag;
+                        if (Math.Abs(aiLeadVelocity - 1.0f) > 0.001f)
+                            _aiLeadVelocityOverrides[unitName] = aiLeadVelocity;
+                        if (Math.Abs(aiLeadGravity - 1.0f) > 0.001f)
+                            _aiLeadGravityOverrides[unitName] = aiLeadGravity;
+                        if (aimCompensation >= 0)
+                            _aimCompensationOverrides[unitName] = aimCompensation;
+                        if (pitchMaxUp >= 0f)
+                            _pitchMaxUpOverrides[unitName] = pitchMaxUp;
+                        if (pitchMaxDown >= 0f)
+                            _pitchMaxDownOverrides[unitName] = pitchMaxDown;
                         if (Math.Abs(strafeSpeedMult - 1.0f) > 0.001f)
                             _strafeSpeedMultipliers[unitName] = strafeSpeedMult;
                         if (Math.Abs(flySpeedMult - 1.0f) > 0.001f)

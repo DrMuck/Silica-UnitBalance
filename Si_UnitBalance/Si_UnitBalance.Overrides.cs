@@ -1157,7 +1157,7 @@ namespace Si_UnitBalance
                                     {
                                         ScaleProjectileData(pdObj, pdName,
                                             hasAtkRange ? atkRangeMult : 1f, hasAtkSpeed ? atkSpeedMult : 1f, modifiedPD, useOM,
-                                            hasAtkLifetime ? atkLifetimeMult : 1f);
+                                            hasAtkLifetime ? atkLifetimeMult : 1f, name);
                                         foundProjectileOnComponent = true;
                                     }
                                 }
@@ -1297,7 +1297,7 @@ namespace Si_UnitBalance
                             if (!effHasRange && !effHasSpeed && !effHasLifetime) continue;
 
                             ScaleProjectileData(pdObj, pdName, effHasRange ? effRange : 1f, effHasSpeed ? effSpeed : 1f, modifiedPD, useOM,
-                                effHasLifetime ? effLifetime : 1f);
+                                effHasLifetime ? effLifetime : 1f, name);
                             foundProjectileOnComponent = true;
                         }
                     }
@@ -1322,7 +1322,7 @@ namespace Si_UnitBalance
                             if (pd.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
                             ScaleProjectileData(pd, pd.name, fbHasRange ? fbRange : 1f, fbHasSpeed ? fbSpeed : 1f, modifiedPD, useOM,
-                                fbHasLifetime ? fbLifetime : 1f);
+                                fbHasLifetime ? fbLifetime : 1f, name);
                             fallbackCount++;
                         }
                     }
@@ -2093,6 +2093,258 @@ namespace Si_UnitBalance
             return false;
         }
 
+        private static void SetBoolMember(object obj, string name, bool value)
+        {
+            var type = obj.GetType();
+            var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null) { field.SetValue(obj, value); return; }
+            var prop = type.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (prop != null && prop.CanWrite) prop.SetValue(obj, value);
+        }
+
+        // Apply per-unit projectile tuning to every ProjectileData a unit fires:
+        //   impact_scale_by_speed  -> m_bImpactScaleBySpeed (bool)
+        //   drag_mult              -> m_fDragCoefficient *= mult
+        //   ai_lead_drag/vel/grav  -> m_AIAimLeadFactor_{Drag,Velocity,Gravity} (absolute)
+        // Covers direct ProjectileData fields (VehicleTurret.Primary/SecondaryProjectileData) —
+        // every vehicle weapon, which is the case tanks (Crimson/Siege) use.
+        // Handles impact_scale_by_speed + drag_mult. The AI aim-lead multipliers
+        // (ai_lead_*) are applied in ScaleAimLeadFactors instead, so they compose with
+        // the speed auto-compensation (final = vanilla × 1/speedMult × mult).
+        private static void ApplyProjectileTuningOverrides(bool useOM)
+        {
+            if (_impactScaleBySpeedOverrides.Count == 0 && _dragMultipliers.Count == 0) return;
+
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var done = new HashSet<string>();
+            int units = 0;
+
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string name = ResolveConfigName(info.DisplayName, info.name);
+                if (string.IsNullOrEmpty(name)) continue;
+
+                bool hasScale = _impactScaleBySpeedOverrides.TryGetValue(name, out bool wantScale);
+                bool hasDrag  = _dragMultipliers.TryGetValue(name, out float dragMult);
+                if (!hasScale && !hasDrag) continue;
+                units++;
+
+                foreach (var comp in info.Prefab.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp == null) continue;
+                    var ct = comp.GetType();
+                    foreach (var pf in ct.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                    {
+                        if (pf.FieldType.Name != "ProjectileData") continue;
+                        object pdObj;
+                        try { pdObj = pf.GetValue(comp); } catch { continue; }
+                        if (pdObj == null) continue;
+                        string pdName;
+                        try { pdName = ((UnityEngine.Object)pdObj).name; } catch { continue; }
+                        if (string.IsNullOrEmpty(pdName) || done.Contains(pdName)) continue;
+                        done.Add(pdName);
+
+                        string target = useOM ? $"A:{pdName}.asset" : null;
+
+                        if (hasScale)
+                        {
+                            bool cur = GetBoolMember(pdObj, "m_bImpactScaleBySpeed");
+                            if (cur != wantScale)
+                            {
+                                if (useOM) OMSetBool(target, "m_bImpactScaleBySpeed", wantScale);
+                                else SetBoolMember(pdObj, "m_bImpactScaleBySpeed", wantScale);
+                                LogDebug($"[PROJTUNE] {name} -> {pdName}.m_bImpactScaleBySpeed: {cur} -> {wantScale}");
+                            }
+                        }
+                        if (hasDrag)
+                        {
+                            float cur = GetFloatMember(pdObj, "m_fDragCoefficient");
+                            float nv = cur * dragMult;
+                            if (useOM) OMSetFloat(target, "m_fDragCoefficient", nv);
+                            else SetFloatMember(pdObj, "m_fDragCoefficient", nv);
+                            LogDebug($"[PROJTUNE] {name} -> {pdName}.m_fDragCoefficient: {cur:F3} -> {nv:F3} (x{dragMult})");
+                        }
+                    }
+                }
+            }
+            if (done.Count > 0)
+                MelonLogger.Msg($"[UnitBalance] projectile tuning: adjusted {done.Count} projectile(s) across {units} unit(s)");
+        }
+
+        // Force each unit's VehicleTurret.AimCompensation mode. Unlike the projectile
+        // fields this lives on the prefab MonoBehaviour (not a ScriptableObject asset),
+        // so it can't go through OverrideManager — we set it directly and cache the
+        // vanilla value so a removed override restores it. Enables PLAYER aim
+        // compensation on turrets the game ships as None (most tanks).
+        private static void ApplyAimCompensationOverrides()
+        {
+            // Nothing to do until we've either got an override or previously touched a turret.
+            if (_aimCompensationOverrides.Count == 0 && _aimCompVanilla.Count == 0) return;
+
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            int changed = 0;
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string name = ResolveConfigName(info.DisplayName, info.name);
+                if (string.IsNullOrEmpty(name)) continue;
+                bool hasOv = _aimCompensationOverrides.TryGetValue(name, out int ov);
+
+                foreach (var comp in info.Prefab.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp == null || comp.GetType().Name != "VehicleTurret") continue;
+                    var acf = comp.GetType().GetField("AimCompensation", BindingFlags.Public | BindingFlags.Instance);
+                    if (acf == null) continue;
+
+                    int cur;
+                    try { cur = Convert.ToInt32(acf.GetValue(comp)); } catch { continue; }
+
+                    string goName = comp.gameObject != null ? comp.gameObject.name : "?";
+                    string cacheKey = name + "|" + goName;
+                    if (!_aimCompVanilla.ContainsKey(cacheKey)) _aimCompVanilla[cacheKey] = cur; // remember vanilla
+                    int vanilla = _aimCompVanilla[cacheKey];
+
+                    // Only turrets we have (or had) an override for get driven; others are
+                    // left exactly as the game set them.
+                    if (!hasOv && vanilla == cur) continue;
+                    int target = hasOv ? ov : vanilla; // override, or restore vanilla when removed
+                    if (target == cur) continue;
+
+                    try
+                    {
+                        acf.SetValue(comp, Enum.ToObject(acf.FieldType, target));
+                        changed++;
+                        LogDebug($"[AIMCOMP] {name} -> {goName}.AimCompensation: {cur} -> {target}");
+                    }
+                    catch (Exception ex) { MelonLogger.Warning($"[AIMCOMP] {name}/{goName} set failed: {ex.Message}"); }
+                }
+            }
+            if (changed > 0) MelonLogger.Msg($"[UnitBalance] aim_compensation: set {changed} turret(s) [prefab]");
+
+            // Prefab edits only affect FUTURE spawns — Unity copies MonoBehaviour fields at
+            // instantiation. To make a mid-round !b edit hit the tank the player is already
+            // driving, also set every LIVE turret in the scene. (Forces overrides only; the
+            // vanilla restore for a removed override happens on the unit's next spawn.)
+            if (_aimCompensationOverrides.Count == 0) return;
+            int live = 0;
+            try
+            {
+                var units = UnityEngine.Object.FindObjectsOfType(typeof(Unit));
+                foreach (var uObj in units)
+                {
+                    var unit = uObj as Unit;
+                    if (unit == null || unit.ObjectInfo == null) continue;
+                    string name = ResolveConfigName(unit.ObjectInfo.DisplayName, unit.ObjectInfo.name);
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (!_aimCompensationOverrides.TryGetValue(name, out int ov)) continue;
+
+                    foreach (var comp in unit.GetComponentsInChildren<Component>(true))
+                    {
+                        if (comp == null || comp.GetType().Name != "VehicleTurret") continue;
+                        var acf = comp.GetType().GetField("AimCompensation", BindingFlags.Public | BindingFlags.Instance);
+                        if (acf == null) continue;
+                        int cur;
+                        try { cur = Convert.ToInt32(acf.GetValue(comp)); } catch { continue; }
+                        if (cur == ov) continue;
+                        try
+                        {
+                            acf.SetValue(comp, Enum.ToObject(acf.FieldType, ov));
+                            live++;
+                            MelonLogger.Msg($"[AIMCOMP-LIVE] {name}: AimCompensation {cur} -> {ov}");
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[AIMCOMP] live pass failed: {ex.Message}"); }
+            if (live > 0) MelonLogger.Msg($"[UnitBalance] aim_compensation: set {live} LIVE turret(s) in scene");
+        }
+
+        // Force VehicleTurret.PitchMax{Up,Down} (degrees) per unit — prefab + live instances,
+        // vanilla cached for restore. Direct-write (server-side): works for AI-controlled
+        // turrets; a human player's own turret is likely still clamped by their client's copy
+        // (same networking caveat as aim_compensation; see CHANGELOG). The proper player-facing
+        // path is an OM networked ("N:") override — TODO once the target format is confirmed.
+        private static void ApplyTurretPitchOverrides()
+        {
+            if (_pitchMaxUpOverrides.Count == 0 && _pitchMaxDownOverrides.Count == 0 && _pitchVanilla.Count == 0) return;
+
+            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            int changed = 0;
+            foreach (var info in allInfos)
+            {
+                if (info == null || info.Prefab == null) continue;
+                string name = ResolveConfigName(info.DisplayName, info.name);
+                if (string.IsNullOrEmpty(name)) continue;
+                foreach (var comp in info.Prefab.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp == null || comp.GetType().Name != "VehicleTurret") continue;
+                    changed += SetTurretPitchField(comp, name, "PitchMaxUp", _pitchMaxUpOverrides);
+                    changed += SetTurretPitchField(comp, name, "PitchMaxDown", _pitchMaxDownOverrides);
+                }
+            }
+            if (changed > 0) MelonLogger.Msg($"[UnitBalance] pitch clamp: set {changed} field(s) [prefab]");
+
+            if (_pitchMaxUpOverrides.Count == 0 && _pitchMaxDownOverrides.Count == 0) return;
+            int live = 0;
+            try
+            {
+                foreach (var uObj in UnityEngine.Object.FindObjectsOfType(typeof(Unit)))
+                {
+                    var unit = uObj as Unit;
+                    if (unit == null || unit.ObjectInfo == null) continue;
+                    string name = ResolveConfigName(unit.ObjectInfo.DisplayName, unit.ObjectInfo.name);
+                    if (string.IsNullOrEmpty(name)) continue;
+                    bool hasUp = _pitchMaxUpOverrides.TryGetValue(name, out float ovUp);
+                    bool hasDown = _pitchMaxDownOverrides.TryGetValue(name, out float ovDown);
+                    if (!hasUp && !hasDown) continue;
+                    foreach (var comp in unit.GetComponentsInChildren<Component>(true))
+                    {
+                        if (comp == null || comp.GetType().Name != "VehicleTurret") continue;
+                        if (hasUp) live += SetTurretPitchLive(comp, "PitchMaxUp", ovUp);
+                        if (hasDown) live += SetTurretPitchLive(comp, "PitchMaxDown", ovDown);
+                    }
+                }
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[PITCH] live pass failed: {ex.Message}"); }
+            if (live > 0) MelonLogger.Msg($"[UnitBalance] pitch clamp: set {live} LIVE field(s) in scene");
+        }
+
+        private static int SetTurretPitchField(Component comp, string unitName, string field, Dictionary<string, float> dict)
+        {
+            var f = comp.GetType().GetField(field, BindingFlags.Public | BindingFlags.Instance);
+            if (f == null) return 0;
+            float cur; try { cur = (float)f.GetValue(comp); } catch { return 0; }
+            string goName = comp.gameObject != null ? comp.gameObject.name : "?";
+            string key = unitName + "|" + goName + "|" + field;
+            if (!_pitchVanilla.ContainsKey(key)) _pitchVanilla[key] = cur;
+            float vanilla = _pitchVanilla[key];
+            bool hasOv = dict.TryGetValue(unitName, out float ov);
+            if (!hasOv && Math.Abs(vanilla - cur) < 0.01f) return 0;
+            float target = hasOv ? ov : vanilla;
+            if (Math.Abs(target - cur) < 0.01f) return 0;
+            try { f.SetValue(comp, target); LogDebug($"[PITCH] {unitName} -> {goName}.{field}: {cur:F0} -> {target:F0}"); return 1; }
+            catch (Exception ex) { MelonLogger.Warning($"[PITCH] {unitName}/{goName}.{field} set failed: {ex.Message}"); return 0; }
+        }
+
+        private static int SetTurretPitchLive(Component comp, string field, float ov)
+        {
+            var f = comp.GetType().GetField(field, BindingFlags.Public | BindingFlags.Instance);
+            if (f == null) return 0;
+            float cur; try { cur = (float)f.GetValue(comp); } catch { return 0; }
+            if (Math.Abs(cur - ov) < 0.01f) return 0;
+            try { f.SetValue(comp, ov); MelonLogger.Msg($"[PITCH-LIVE] {field} {cur:F0} -> {ov:F0}"); return 1; } catch { return 0; }
+        }
+
+        private static bool HasAnyLeadMult(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            return _aiLeadDragOverrides.ContainsKey(name)
+                || _aiLeadVelocityOverrides.ContainsKey(name)
+                || _aiLeadGravityOverrides.ContainsKey(name);
+        }
+
         // Helper: get/set float field or property (Il2Cpp exposes fields as properties)
         /// <summary>
         /// Get DefaultTeam via reflection (field or property) to survive field→property changes across game versions.
@@ -2133,7 +2385,7 @@ namespace Si_UnitBalance
         }
 
         private static void ScaleProjectileData(object pdObj, string pdName, float rangeMult, float speedMult,
-            HashSet<string> modifiedPD, bool useOM = false, float lifetimeMult = 1f)
+            HashSet<string> modifiedPD, bool useOM = false, float lifetimeMult = 1f, string unitName = null)
         {
             string pdTarget = useOM ? $"A:{pdName}.asset" : null;
 
@@ -2213,12 +2465,15 @@ namespace Si_UnitBalance
 
                 LogDebug($"  ProjectileData '{pdName}': Range {origRange:F0} -> {newRange:F0}{(useOM ? " (OM)" : "")}");
 
-                // AI aim lead compensation: when proj speed changes, AI lead prediction must be adjusted
-                // Faster projectile needs less lead → scale lead factors by 1/speedMult
-                if (Math.Abs(speedMult - 1f) > 0.001f)
+                // AI aim lead compensation: speed change auto-scales lead by 1/speedMult
+                // (faster projectile needs less lead), and any per-unit ai_lead_* multiplier
+                // is layered on top: final = vanilla × (1/speedMult) × mult. Runs when there's
+                // a speed change OR a lead multiplier — otherwise it's a no-op we skip.
+                bool speedChanged = Math.Abs(speedMult - 1f) > 0.001f;
+                if (speedChanged || HasAnyLeadMult(unitName))
                 {
-                    float invSpeed = 1f / speedMult;
-                    ScaleAimLeadFactors(pdObj, pdName, pdTarget, invSpeed, useOM);
+                    float invSpeed = speedChanged ? 1f / speedMult : 1f;
+                    ScaleAimLeadFactors(pdObj, pdName, pdTarget, invSpeed, useOM, unitName);
                 }
             }
 
@@ -2250,13 +2505,18 @@ namespace Si_UnitBalance
         }
 
         /// <summary>
-        /// Scales AI aim lead factors on a ProjectileData to compensate for speed changes.
-        /// When projectile speed is multiplied by X, the AI needs 1/X as much lead.
+        /// Sets the AI aim-lead factors on a ProjectileData to vanilla × speedScale × userMult.
+        /// speedScale (1/speedMult) auto-compensates for a projectile speed change; the per-unit
+        /// ai_lead_{velocity,gravity,drag} multipliers layer a manual correction on top (e.g. to
+        /// fix Crimson under-leading its draggy shell). Anchored to the cached vanilla value so
+        /// re-applies can't compound. A field whose final value equals vanilla is left unwritten
+        /// (no wasted override).
         /// </summary>
-        private static void ScaleAimLeadFactors(object pdObj, string pdName, string pdTarget, float scale, bool useOM)
+        private static void ScaleAimLeadFactors(object pdObj, string pdName, string pdTarget, float scale, bool useOM, string unitName)
         {
             string[] fields = { "m_AIAimLeadFactor_Velocity", "m_AIAimLeadFactor_Gravity", "m_AIAimLeadFactor_Drag" };
             Dictionary<string, float>[] caches = { _originalAimLeadVelocity, _originalAimLeadGravity, _originalAimLeadDrag };
+            Dictionary<string, float>[] userMults = { _aiLeadVelocityOverrides, _aiLeadGravityOverrides, _aiLeadDragOverrides };
 
             for (int i = 0; i < fields.Length; i++)
             {
@@ -2270,10 +2530,22 @@ namespace Si_UnitBalance
                 else
                     orig = caches[i][cacheKey];
 
-                float newVal = orig * scale;
+                float userMult = 1f;
+                if (unitName != null) userMults[i].TryGetValue(unitName, out userMult);
+                if (userMult == 0f) userMult = 1f; // guard against an unset/0 slipping through
+
+                float newVal = orig * scale * userMult;
+                // Skip writing a value that lands back on vanilla — saves an override slot.
+                if (Math.Abs(newVal - orig) < 0.0001f) continue;
+
                 if (useOM) OMSetFloat(pdTarget, field, newVal);
                 else SetFloatMember(pdObj, field, newVal);
-                LogDebug($"  ProjectileData '{pdName}': {field} {orig:F3} -> {newVal:F3}");
+                // Always log when the user has actively tuned this factor, so the applied
+                // value is visible without turning on full debug logging.
+                if (Math.Abs(userMult - 1f) > 0.001f)
+                    MelonLogger.Msg($"[LEADFACTOR] {unitName} '{pdName}': {field} {orig:F3} -> {newVal:F3} (speed x{scale:F3}, user x{userMult:F3})");
+                else
+                    LogDebug($"  ProjectileData '{pdName}': {field} {orig:F3} -> {newVal:F3} (x{scale:F3} speed, x{userMult:F3} user)");
             }
         }
 

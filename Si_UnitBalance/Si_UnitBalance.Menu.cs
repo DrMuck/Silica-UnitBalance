@@ -162,6 +162,52 @@ namespace Si_UnitBalance
             return dict.ContainsKey(unitName) || dict.ContainsKey("pri:" + unitName) || dict.ContainsKey("sec:" + unitName);
         }
 
+        // Boolean menu params store True/False in JSON but are entered as 1/0. Show both,
+        // spelled out, so there's no ambiguity (the field name is a double-negative trap).
+        private static bool IsBoolMenuParam(string key) => key == "impact_scale_by_speed";
+
+        // aim_compensation mode names (enum ETurretAimCompensation).
+        internal static string AimCompName(int v)
+        {
+            switch (v)
+            {
+                case 0: return "None (off)";
+                case 1: return "Primary_VerticalOnly";
+                case 2: return "Secondary_VerticalOnly";
+                case 3: return "Primary_Full";
+                case 4: return "Secondary_Full";
+                default: return "INVALID";
+            }
+        }
+        // Render an aim_compensation config value ("3") as "3 = Primary_Full".
+        private static string FmtAimCompVal(string raw)
+        {
+            if (int.TryParse((raw ?? "").Trim(), out int v)) return v + " = " + AimCompName(v);
+            return raw;
+        }
+
+        // Compact form for confirm/save lines, so "False -> 0" reads as "0 (OFF) -> 0 (OFF)".
+        internal static string FmtBoolCompact(string key, string raw)
+        {
+            if (!IsBoolMenuParam(key)) return raw;
+            string r = (raw ?? "").Trim().ToLowerInvariant();
+            if (r == "true" || r == "1") return "1 (ON)";
+            if (r == "false" || r == "0") return "0 (OFF)";
+            return raw;
+        }
+
+        private static string FmtBoolMenuVal(string key, string raw)
+        {
+            string r = (raw ?? "").Trim().ToLowerInvariant();
+            if (key == "impact_scale_by_speed")
+            {
+                if (r == "true" || r == "1") return "1 = ON (damage falls off w/ range)";
+                if (r == "false" || r == "0") return "0 = OFF (flat damage)";
+                return "- (unset → vanilla)";
+            }
+            return raw;
+        }
+
         private static string CleanWeaponName(string pdName)
         {
             if (string.IsNullOrEmpty(pdName)) return "";
@@ -602,6 +648,18 @@ namespace Si_UnitBalance
                 }
             }
 
+            // ── Ballistics (projectile drop-off + AI aim-lead) ──
+            // Only for units with a projectile weapon. impact_scale_by_speed is a bool
+            // (1=On, 0=Off); the rest are multipliers. ai_lead_* need a projectile
+            // speed/range override on the unit to take effect (they ride that pass).
+            if (priPDObj != null)
+            {
+                names.Add("Ballistics");
+                keys.Add(new[] { "impact_scale_by_speed", "drag_mult",
+                                 "ai_lead_velocity", "ai_lead_gravity", "ai_lead_drag",
+                                 "aim_compensation", "pitch_max_up", "pitch_max_down" });
+            }
+
             // ── Movement (only applicable params per component type) ──
             if (hasSoldier)
             {
@@ -749,7 +807,11 @@ namespace Si_UnitBalance
         private static void OnMenuShortcut(object player, string args)
         {
             long key = GetPlayerKey(player);
-            if (!_menuStates.ContainsKey(key)) return; // Not in menu, silently ignore
+            // Proceed if the player is in EITHER the admin editor (_menuStates) or the
+            // read-only /stats viewer (_statsStates) — ProcessMenuInput routes each to the
+            // right handler. Gating on _menuStates alone silently dropped /1-/N for
+            // /stats-only users (they saw the group list but couldn't drill in).
+            if (!_menuStates.ContainsKey(key) && !_statsStates.ContainsKey(key)) return;
 
             // args is full text like "/1" or "/1 1.5" or "/back"
             // Extract the command and optional extra args
@@ -1136,6 +1198,57 @@ namespace Si_UnitBalance
                                     if (spd > 0) val = spd.ToString("F0");
                                 }
                                 break;
+                            case "impact_scale_by_speed":
+                            case "drag_mult":
+                            case "ai_lead_velocity":
+                            case "ai_lead_gravity":
+                            case "ai_lead_drag":
+                            {
+                                object bpd = priPD ?? twPD;
+                                if (bpd != null)
+                                {
+                                    if (key == "impact_scale_by_speed")
+                                        val = GetBoolMember(bpd, "m_bImpactScaleBySpeed") ? "1 = On (falls off)" : "0 = Off (flat)";
+                                    else if (key == "drag_mult")
+                                        val = GetFloatMember(bpd, "m_fDragCoefficient").ToString("F3");
+                                    else if (key == "ai_lead_velocity")
+                                        val = GetFloatMember(bpd, "m_AIAimLeadFactor_Velocity").ToString("F2");
+                                    else if (key == "ai_lead_gravity")
+                                        val = GetFloatMember(bpd, "m_AIAimLeadFactor_Gravity").ToString("F2");
+                                    else if (key == "ai_lead_drag")
+                                        val = GetFloatMember(bpd, "m_AIAimLeadFactor_Drag").ToString("F2");
+                                }
+                                break;
+                            }
+                            case "aim_compensation":
+                            {
+                                // Show the turret's current mode + its enum number.
+                                if (vtComp != null)
+                                {
+                                    var acf = vtComp.GetType().GetField("AimCompensation", flags);
+                                    if (acf != null)
+                                    {
+                                        try
+                                        {
+                                            object ev = acf.GetValue(vtComp);
+                                            val = ev?.ToString() + " (" + Convert.ToInt32(ev) + ")";
+                                        }
+                                        catch { }
+                                    }
+                                }
+                                break;
+                            }
+                            case "pitch_max_up":
+                            case "pitch_max_down":
+                            {
+                                if (vtComp != null)
+                                {
+                                    string tf = key == "pitch_max_up" ? "PitchMaxUp" : "PitchMaxDown";
+                                    var pf = vtComp.GetType().GetField(tf, flags);
+                                    if (pf != null) { try { val = ((float)pf.GetValue(vtComp)).ToString("0.#") + "°"; } catch { } }
+                                }
+                                break;
+                            }
                             case "proj_lifetime_mult":
                                 if (vtComp != null)
                                 {
@@ -1796,6 +1909,8 @@ namespace Si_UnitBalance
                         }
                         else if (unitConfig != null && unitConfig.ContainsKey(keys[i]))
                             val = unitConfig[keys[i]].ToString();
+                        if (IsBoolMenuParam(keys[i])) val = FmtBoolMenuVal(keys[i], val);
+                        else if (keys[i] == "aim_compensation" && val != "-") val = FmtAimCompVal(val);
                         string baseSuffix = "";
                         if (baseVals.TryGetValue(keys[i], out string bv))
                             baseSuffix = " " + _dimColor + "(base: " + bv + ")</color>";
@@ -1807,7 +1922,7 @@ namespace Si_UnitBalance
                             displayKey = displayKey.Substring(5);
                         SendChatToPlayer(player, _chatPrefix + _itemColor + (i + 1) + ".</color> " + displayKey + " = " + _valueColor + val + "</color>" + baseSuffix);
                     }
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 1.5 (or !b 1 1.5) [bool: 1=True, 0=False]</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 1.5  ·  toggle 1=ON/0=OFF  ·  aim_compensation 0=None 1/3=Primary(Vert/Full) 2/4=Secondary</color>");
                     break;
                 }
 
@@ -1875,6 +1990,8 @@ namespace Si_UnitBalance
                         string val = "-";
                         if (unitConfig != null && unitConfig.ContainsKey(keys[i]))
                             val = unitConfig[keys[i]].ToString();
+                        if (IsBoolMenuParam(keys[i])) val = FmtBoolMenuVal(keys[i], val);
+                        else if (keys[i] == "aim_compensation" && val != "-") val = FmtAimCompVal(val);
                         string baseSuffix = "";
                         if (baseVals.TryGetValue(keys[i], out string bv))
                             baseSuffix = " " + _dimColor + "(base: " + bv + ")</color>";
@@ -2046,7 +2163,7 @@ namespace Si_UnitBalance
             state.PendingValue = newValue;
             state.PendingOldVal = oldVal;
 
-            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> " + unitName + " " + paramKey + " " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "</color>");
+            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> " + unitName + " " + paramKey + " " + _valueColor + FmtBoolCompact(paramKey, oldVal) + "</color> -> " + _valueColor + FmtBoolCompact(paramKey, newValStr) + "</color>");
             SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
         }
 
@@ -2408,7 +2525,9 @@ namespace Si_UnitBalance
                 string json = File.ReadAllText(_configPath);
 
                 string valueStr;
-                if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "deposit_radius" || paramKey == "extraction_radius" || paramKey == "target_distance" || paramKey == "fow_distance" || paramKey == "unit_cap_value")
+                if (paramKey == "impact_scale_by_speed")
+                    valueStr = (value != 0f) ? "true" : "false";   // per-unit bool: menu enters 1/0
+                else if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "deposit_radius" || paramKey == "extraction_radius" || paramKey == "target_distance" || paramKey == "fow_distance" || paramKey == "unit_cap_value" || paramKey == "aim_compensation")
                     valueStr = ((int)value).ToString();
                 else
                     valueStr = Math.Round(value, 4).ToString(System.Globalization.CultureInfo.InvariantCulture);

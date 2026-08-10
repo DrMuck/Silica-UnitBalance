@@ -4,6 +4,69 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-07-26 — Ballistics: drop-off, drag, AI-lead & aim compensation (v7.2.0)
+
+New per-projectile **Ballistics** group (in-game `!b` menu + web editor + config), for tuning
+how shells fall off and how aiming compensates for it. Fields apply to every `ProjectileData`
+a unit fires.
+
+- **`impact_scale_by_speed`** (bool, `1`=on / `0`=off; omit = vanilla). Toggles the game's
+  `m_bImpactScaleBySpeed`: on = impact damage scales with the drag-reduced speed (damage falls
+  off with range); off = flat damage at any range. Written to config as a real JSON boolean.
+  Server-authoritative → works. Menu shows it spelled out (`0 = OFF (flat)` / `1 = ON (falls off)`)
+  to avoid the double-negative confusion.
+- **`drag_mult`** (multiplier, default 1.0). Scales `m_fDragCoefficient`. `<1` = flatter,
+  longer-carrying shot; `>1` = decelerates faster.
+- **`ai_lead_velocity` / `ai_lead_gravity` / `ai_lead_drag`** (multipliers, default 1.0). Scale
+  the projectile's `m_AIAimLeadFactor_*` (the aim-lead compensation factors), layered on top of
+  the automatic speed compensation: `final = vanilla × (1/speedMult) × mult`. Computed in one
+  place (`ScaleAimLeadFactors`) anchored to the cached vanilla value so re-applies can't compound;
+  a factor whose final value lands on vanilla is left unwritten (no wasted OM slot). Only takes
+  effect on units that also have a projectile speed/range override (they ride that pass).
+- **`aim_compensation`** (int enum, `-1`/absent = vanilla). Forces the turret's
+  `ETurretAimCompensation` mode: `0` None · `1` Primary_VerticalOnly · `2` Secondary_VerticalOnly ·
+  `3` Primary_Full · `4` Secondary_Full. Clamped to 0-4. Applied directly to the prefab turret
+  **and** to live scene instances (prefab edits alone don't reach already-spawned units — Unity
+  copies MonoBehaviour fields at instantiation), with the vanilla value cached for restore.
+
+### How aim compensation actually works (from decompiling `ProjectileData.CalculateTargetLeading`)
+- The vertical drop is a real parabolic solve, not a constant: `aimY -= 0.5 · g · gravityScale · t² · m_AIAimLeadFactor_Gravity`, with `t` = distance/speed recomputed per shot. Drag and velocity terms likewise. So `aim_compensation` is the *on/off/mode switch*; the `ai_lead_*` multipliers are the *gradual strength dials*.
+- The same function is called by **both** the AI agent (`Vehicle.Skill`, target velocity) **and** the player path (`if AimCompensation != None && Vehicle.PlayerControlled`). So the `ai_lead_*` factors affect AI aim and (in principle) player aim.
+- Vanilla turret compensation is set for only 6 units (aircraft Interceptor/Gunship = `Primary_Full`; arc weapons Siege plasma / Pyro flamethrower = `Primary_VerticalOnly`). All direct-fire tanks incl. **Crimson ship as `None`**.
+
+### ⚠️ KNOWN ISSUE — `aim_compensation` does NOT work for PLAYER-controlled units from this (server) mod
+- Player aim + the reticle are computed **client-side** (`Vehicle.GetLocallyControlled()`).
+  `AimCompensation` is a plain, **non-networked** `VehicleTurret` field. This mod runs on the
+  **dedicated server**, so setting it changes only the server's copy — the player's client keeps
+  the base-game prefab value (`None` for Crimson) and computes aim/reticle with no compensation.
+- Confirmed empirically: forcing Crimson to `Primary_Full`/`VerticalOnly` produced no reticle,
+  barrel or shell-impact change, at any mode or projectile speed; **Siege** (base-game
+  `VerticalOnly`) compensates correctly because *every* client already has the flag.
+- **AI-controlled** units are unaffected by this limitation — the AI aims server-side, so
+  `ai_lead_*` genuinely tunes AI aim. `impact_scale_by_speed` and `drag_mult` are also
+  server-authoritative and work. Only *player* `aim_compensation` is inert.
+- Enabling player compensation for a `None` unit would require a **client-side** mod or the devs
+  setting the flag in the base game. The `aim_compensation` override is kept in place (code, menu,
+  config plumbing) for AI use and for the day a client build / dev change makes it live — but do
+  not expect it to change a human player's aim.
+- Server-side alternative to improve *player* accuracy on a draggy/arcing shell: flatten the
+  trajectory instead (lower `gravity_scale` / raise speed via `ProjectileData`, which **is**
+  networked). Not yet exposed as an override — candidate follow-up (`gravity_scale`).
+
+### Also in this release
+- **Fix**: `/stats` (read-only player inspector) `/1-/N` navigation was dead — `OnMenuShortcut`
+  only proceeded when the player was in the admin editor (`_menuStates`); now also proceeds for
+  `_statsStates`, so `/stats` drill-in works.
+- **Fix (KoH-adjacent)**: Structure buy-menu display-name collisions — unrelated to this mod.
+- Diagnostic logging: `[LEADFACTOR]` (prints the applied lead-factor value when a unit's
+  `ai_lead_*` is off default) and `[AIMCOMP-LIVE]` (prints each live turret's AimCompensation
+  change) — always-on, low-frequency (only on actual change), no debug flag needed.
+- Dumps added under `UserData/UnitBalance_cfg/` when `dump_fields=true`:
+  `ProjectileData_Dump.csv` (per-projectile drop-off / drag / AI-lead vanilla values) and
+  `TurretAimComp_Dump.csv` (per-unit turret `AimCompensation` mode).
+
+---
+
 ## 2026-04-12 — Extraction Radius (Shrimp harvesting)
 
 - **New parameter** `extraction_radius` (absolute meters, `-1` = default). Overrides the harvester's `ExtractionRadius` field — the distance around the unit's extraction point where it can reach biotics cells.

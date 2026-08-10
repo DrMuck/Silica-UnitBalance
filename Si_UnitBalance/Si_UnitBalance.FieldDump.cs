@@ -224,6 +224,179 @@ namespace Si_UnitBalance
             LogDebug("========== End Field Discovery ==========");
         }
 
+        // Focused projectile dump: one clean CSV row per ProjectileData asset with the
+        // fields that govern damage drop-off and AI aim. Written unconditionally (no
+        // debug flag) to UserData/UnitBalance_cfg/ProjectileData_Dump.csv, from the
+        // same load-time point as the unit JSON dump — i.e. BEFORE OverrideManager
+        // applies, so the values are vanilla.
+        //
+        // Drop-off primer: a projectile only loses damage with range when
+        // m_bImpactScaleBySpeed is TRUE (impact damage then scales with the shell's
+        // current speed, which drag bleeds off over distance). If it is FALSE the shot
+        // hits for full m_fImpactDamage at any range regardless of drag. So the
+        // Siege Tank's plasma (no drop-off) should read ImpactScaleBySpeed=False and
+        // the Crimson Tank's shell (drop-off) should read True.
+        private static float RF(Type t, object o, string name, float def = 0f)
+        {
+            try { var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance);
+                  if (f != null) return Convert.ToSingle(f.GetValue(o)); } catch { }
+            return def;
+        }
+        private static bool RB(Type t, object o, string name, bool def = false)
+        {
+            try { var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance);
+                  if (f != null) return (bool)f.GetValue(o); } catch { }
+            return def;
+        }
+        private static string RS(Type t, object o, string name)
+        {
+            try { var f = t.GetField(name, BindingFlags.Public | BindingFlags.Instance);
+                  if (f != null) return f.GetValue(o)?.ToString() ?? ""; } catch { }
+            return "";
+        }
+
+        internal static void DumpProjectileDataCsv()
+        {
+            try
+            {
+                string outPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(_configPath), "ProjectileData_Dump.csv");
+
+                var all = Resources.FindObjectsOfTypeAll<ProjectileData>();
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("name,instant_hit,impact_scale_by_speed,impact_damage,impact_dmg_type," +
+                    "base_speed,min_speed_pct,lifetime,drag_coeff,air_drag_mult,gravity_scale,mass,diameter," +
+                    "penetrating,penetrating_damage,splash,splash_dmg_max,splash_radius_min,splash_radius_max,splash_radius_pow," +
+                    "ai_lead_drag,ai_lead_velocity,ai_lead_gravity");
+
+                int n = 0;
+                foreach (var pd in all)
+                {
+                    if (pd == null) continue;
+                    var t = pd.GetType();
+                    string name = (pd.name ?? "").Replace(",", " ");
+                    sb.Append(name).Append(',')
+                      .Append(RB(t, pd, "m_InstantHit")).Append(',')
+                      .Append(RB(t, pd, "m_bImpactScaleBySpeed")).Append(',')
+                      .Append(RF(t, pd, "m_fImpactDamage").ToString("0.##")).Append(',')
+                      .Append(RS(t, pd, "m_ImpactDamageType")).Append(',')
+                      .Append(RF(t, pd, "m_fBaseSpeed").ToString("0.##")).Append(',')
+                      .Append(RF(t, pd, "m_fMinSpeedPct").ToString("0.###")).Append(',')
+                      .Append(RF(t, pd, "m_fLifeTime").ToString("0.##")).Append(',')
+                      .Append(RF(t, pd, "m_fDragCoefficient").ToString("0.####")).Append(',')
+                      .Append(RF(t, pd, "AirDragForceMultiplier").ToString("0.####")).Append(',')
+                      .Append(RF(t, pd, "m_fGravityScale").ToString("0.###")).Append(',')
+                      .Append(RF(t, pd, "m_fMass").ToString("0.###")).Append(',')
+                      .Append(RF(t, pd, "m_fDiameter").ToString("0.###")).Append(',')
+                      .Append(RB(t, pd, "m_bPenetrating")).Append(',')
+                      .Append(RF(t, pd, "m_fPenetratingDamage").ToString("0.##")).Append(',')
+                      .Append(RB(t, pd, "m_bSplash")).Append(',')
+                      .Append(RF(t, pd, "m_fSplashDamageMax").ToString("0.##")).Append(',')
+                      .Append(RF(t, pd, "m_fSplashDamageRadiusMin").ToString("0.##")).Append(',')
+                      .Append(RF(t, pd, "m_fSplashDamageRadiusMax").ToString("0.##")).Append(',')
+                      .Append(RF(t, pd, "m_fSplashDamageRadiusPow").ToString("0.###")).Append(',')
+                      .Append(RF(t, pd, "m_AIAimLeadFactor_Drag").ToString("0.###")).Append(',')
+                      .Append(RF(t, pd, "m_AIAimLeadFactor_Velocity").ToString("0.###")).Append(',')
+                      .Append(RF(t, pd, "m_AIAimLeadFactor_Gravity").ToString("0.###"))
+                      .AppendLine();
+                    n++;
+                }
+                System.IO.File.WriteAllText(outPath, sb.ToString());
+                MelonLogger.Msg($"[UnitBalance] Wrote {n} projectiles to {outPath}");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"DumpProjectileDataCsv error: {ex.Message}");
+            }
+        }
+
+        // Dump each unit's VehicleTurret.AimCompensation. This enum gates whether a
+        // PLAYER-controlled turret gets ballistic aim compensation at all: None = no
+        // player compensation (the ai_lead_* factors then only affect AI units);
+        // Primary/Secondary_VerticalOnly = gravity drop only; Primary/Secondary_Full =
+        // full drag+gravity+velocity. Written to UserData/UnitBalance_cfg/TurretAimComp_Dump.csv.
+        internal static void DumpTurretAimCompCsv()
+        {
+            try
+            {
+                string outPath = System.IO.Path.Combine(
+                    System.IO.Path.GetDirectoryName(_configPath), "TurretAimComp_Dump.csv");
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("unit,turret_go,aim_compensation,pitch_max_up,pitch_max_down,pitch_up_yawcurve,pitch_down_yawcurve,pri_projectile,sec_projectile");
+
+                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                int n = 0;
+                var seen = new HashSet<string>();
+                foreach (var info in allInfos)
+                {
+                    if (info == null || info.Prefab == null) continue;
+                    string disp = info.DisplayName ?? info.name ?? "";
+                    if (string.IsNullOrEmpty(disp)) continue;
+
+                    foreach (var comp in info.Prefab.GetComponentsInChildren<Component>(true))
+                    {
+                        if (comp == null || comp.GetType().Name != "VehicleTurret") continue;
+                        var ct = comp.GetType();
+                        var acf = ct.GetField("AimCompensation", BindingFlags.Public | BindingFlags.Instance);
+                        if (acf == null) continue;
+                        string ac = "?";
+                        try { ac = acf.GetValue(comp)?.ToString() ?? "?"; } catch { }
+
+                        float pmu = TurretFloat(ct, comp, "PitchMaxUp");
+                        float pmd = TurretFloat(ct, comp, "PitchMaxDown");
+                        bool puc = TurretBool(ct, comp, "PitchUpClampByYawCurve");
+                        bool pdc = TurretBool(ct, comp, "PitchDownClampByYawCurve");
+                        string pri = ProjName(ct, comp, "PrimaryProjectileData");
+                        string sec = ProjName(ct, comp, "SecondaryProjectileData");
+                        string goName = comp.gameObject != null ? comp.gameObject.name : "?";
+                        string keyd = disp + "|" + goName + "|" + ac;
+                        if (!seen.Add(keyd)) continue;
+
+                        sb.Append(disp.Replace(",", " ")).Append(',')
+                          .Append(goName.Replace(",", " ")).Append(',')
+                          .Append(ac).Append(',')
+                          .Append(pmu.ToString("0.#")).Append(',')
+                          .Append(pmd.ToString("0.#")).Append(',')
+                          .Append(puc).Append(',')
+                          .Append(pdc).Append(',')
+                          .Append(pri).Append(',')
+                          .Append(sec).AppendLine();
+                        n++;
+                    }
+                }
+                System.IO.File.WriteAllText(outPath, sb.ToString());
+                MelonLogger.Msg($"[UnitBalance] Wrote {n} turret aim-compensation rows to {outPath}");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"DumpTurretAimCompCsv error: {ex.Message}");
+            }
+        }
+
+        private static float TurretFloat(Type ct, object comp, string field)
+        {
+            try { var f = ct.GetField(field, BindingFlags.Public | BindingFlags.Instance); if (f != null) return (float)f.GetValue(comp); } catch { }
+            return -1f;
+        }
+        private static bool TurretBool(Type ct, object comp, string field)
+        {
+            try { var f = ct.GetField(field, BindingFlags.Public | BindingFlags.Instance); if (f != null) return (bool)f.GetValue(comp); } catch { }
+            return false;
+        }
+
+        private static string ProjName(Type ct, object comp, string field)
+        {
+            try
+            {
+                var f = ct.GetField(field, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (f == null) return "";
+                var pd = f.GetValue(comp);
+                if (pd == null) return "";
+                return (((UnityEngine.Object)pd).name ?? "").Replace(",", " ");
+            }
+            catch { return ""; }
+        }
+
         private static void DumpTypeFields(string typeName, object obj)
         {
             try

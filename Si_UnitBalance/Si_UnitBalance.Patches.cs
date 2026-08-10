@@ -318,6 +318,9 @@ namespace Si_UnitBalance
                         ReclampLiveHealth();
                     }
                     ApplyProjectileDamageOverrides(omReady);
+                    ApplyProjectileTuningOverrides(omReady);
+                    ApplyAimCompensationOverrides();
+                    ApplyTurretPitchOverrides();
                     ApplyRangeOverrides(omReady);
                     ApplyTargetDistanceOverrides(omReady);
                     ApplyFoWDistanceOverrides(omReady);
@@ -450,7 +453,7 @@ namespace Si_UnitBalance
                         string displayLabel = wasTechTier
                             ? ((wasTechCost ? "tech_cost." : "tech_time.") + state.PendingParamKey)
                             : (unitName + " " + state.PendingParamKey);
-                        SendChatToPlayer(player, _chatPrefix + "<color=#55FF55>Saved:</color> " + displayLabel + " " + _valueColor + state.PendingOldVal + "</color> -> " + _valueColor + newValStr + "</color>");
+                        SendChatToPlayer(player, _chatPrefix + "<color=#55FF55>Saved:</color> " + displayLabel + " " + _valueColor + FmtBoolCompact(state.PendingParamKey, state.PendingOldVal) + "</color> -> " + _valueColor + FmtBoolCompact(state.PendingParamKey, newValStr) + "</color>");
                         WriteAuditLog(playerName, steamId, unitName, state.PendingParamKey, state.PendingOldVal, newValStr);
                         MelonLogger.Msg($"[BAL] {playerName} ({steamId}): {displayLabel} {state.PendingOldVal} -> {newValStr}");
 

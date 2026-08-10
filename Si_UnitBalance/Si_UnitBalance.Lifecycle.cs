@@ -168,6 +168,7 @@ namespace Si_UnitBalance
                 }
                 _omTypeFloat = Enum.Parse(dataTypeEnum, "Float");
                 _omTypeInt = Enum.Parse(dataTypeEnum, "Int");
+                _omTypeBool = Enum.Parse(dataTypeEnum, "Bool");
 
                 // Get Set method: Set(EOverrideDataType type, string target, string memberName, object value, bool enqueue, bool notify)
                 _omSetMethod = _overrideManagerType.GetMethod("Set",
@@ -329,6 +330,23 @@ namespace Si_UnitBalance
             }
         }
 
+        private static bool OMSetBool(string target, string memberName, bool value)
+        {
+            try
+            {
+                object result = _omSetMethod.Invoke(null, new object[] { _omTypeBool, target, memberName, value, true, false });
+                bool ok = result is bool b && b;
+                if (!ok)
+                    MelonLogger.Warning($"[OM] Set failed: Bool '{target}'.'{memberName}' = {value}");
+                return ok;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[OM] Set exception: Bool '{target}'.'{memberName}': {ex.InnerException?.Message ?? ex.Message}");
+                return false;
+            }
+        }
+
         private static bool OMSetInt(string target, string memberName, int value)
         {
             try
@@ -452,6 +470,8 @@ namespace Si_UnitBalance
 
                     DumpFieldDiscovery();
                     DumpAllUnitsJson();
+                    DumpProjectileDataCsv();   // vanilla projectile drop-off / AI-lead reference
+                    DumpTurretAimCompCsv();    // per-unit turret AimCompensation (player aim-comp gate)
 
                     // Migrate multipliers if version changed and old dump was available
                     if (oldDump != null && _migrateOldVersion != null)
@@ -494,6 +514,9 @@ namespace Si_UnitBalance
                     ReclampLiveHealth();
                 }
                 ApplyProjectileDamageOverrides(omReady);
+                ApplyProjectileTuningOverrides(omReady);
+                ApplyAimCompensationOverrides();
+                ApplyTurretPitchOverrides();
                 ApplyRangeOverrides(omReady);
                 ApplyTargetDistanceOverrides(omReady);
                 ApplyFoWDistanceOverrides(omReady);

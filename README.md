@@ -2,7 +2,7 @@
 
 A [Silica](https://store.steampowered.com/app/504900/Silica/) server mod for fine-tuning unit and structure stats. Includes a full **in-game admin UI** (`!b` chat command) for live editing — no config file editing or server restarts needed.
 
-All changes are synced to clients via the game's built-in OverrideManager. No client-side mod required.
+Almost all changes are synced to clients via the game's built-in OverrideManager — no client-side mod required. The exception is the turret-aim overrides (`pitch_max_up` / `pitch_max_down` / `aim_compensation`), which act on non-networked `VehicleTurret` component fields and therefore affect **AI-controlled turrets only** — see [Ballistics & Turret Aim](#ballistics--turret-aim).
 
 > 🛠️ **Author / preview config JSONs in the browser** with the **[Unit Balance Interactive Tool](https://drmuck.github.io/Si_UnitBalance_Interactive/)** — a single-page web app that lets you see every parameter side-by-side with its vanilla base, edit multipliers and absolute overrides, and export a ready-to-deploy `Si_UnitBalance_Config.json`. Perfect for crafting a full balance pass offline before pushing it to the server. Tool source: [github.com/DrMuck/Si_UnitBalance_Interactive](https://github.com/DrMuck/Si_UnitBalance_Interactive).
 
@@ -112,6 +112,24 @@ The JSON config (`Si_UnitBalance_Config.json`) can also be edited manually. The 
 | `dispense_timeout` | absolute | VehicleDispenser cooldown in seconds (Hoverbike) |
 
 Per-weapon variants use `pri_` / `sec_` prefixes (e.g., `pri_damage_mult`, `sec_fire_rate_mult`).
+
+### Ballistics & Turret Aim
+
+Grouped under **Ballistics** in the `!b` menu. The first block acts on the unit's `ProjectileData` and is fully synced to clients; the turret-aim block acts on the `VehicleTurret` component (see the ⚠️ limitation below).
+
+| Parameter | Type | Description |
+|---|---|---|
+| `impact_scale_by_speed` | bool | Impact damage scales with the projectile's current (drag-reduced) speed. `true` = damage falls off with range; `false` = flat damage (e.g. Siege plasma). |
+| `drag_mult` | multiplier | Scales projectile air drag (`m_fDragCoefficient`). `<1` = flatter, longer-carrying shot & gentler falloff; `>1` = slows faster. |
+| `ai_lead_velocity` | multiplier | AI aim-lead velocity factor (layered on the automatic speed compensation). `>1` = AI leads more. |
+| `ai_lead_gravity` | multiplier | AI aim-lead gravity factor. Raise for high-arc shells that land short. |
+| `ai_lead_drag` | multiplier | AI aim-lead drag factor. Raise if AI under-leads a draggy (decelerating) shell. |
+| `pitch_max_up` | absolute° | Max turret **elevation** in degrees (`VehicleTurret.PitchMaxUp`). `-1` = vanilla. |
+| `pitch_max_down` | absolute° | Max turret **depression** in degrees (`VehicleTurret.PitchMaxDown`). `-1` = vanilla. |
+| `aim_compensation` | enum 0–4 | Forces the turret ballistic-drop compensation mode (`ETurretAimCompensation`). `-1` = vanilla. |
+
+> ⚠️ **Turret-aim overrides (`pitch_max_up`, `pitch_max_down`, `aim_compensation`) affect AI-controlled turrets only — not human players.**
+> These are per-instance fields on the `VehicleTurret` component, which is **not** an asset or a networked/`SyncVar` value, so the server cannot push the change to clients (unlike `ProjectileData`, which is a shared asset the OverrideManager *does* sync). For a vehicle a player is driving, the turret's pitch clamp and aim reticle are computed **client-side** from the client's own vanilla component values, so a server-side override is invisible to that player. It does correctly retune **bot** turrets, which aim on the server. There is no server-side path to change a human player's turret elevation or aim compensation; that would require the aim value being networked by the base game or a client-side mod. `aim_compensation` looks like it works on the Siege Tank only because that mode is baked into the Siege Tank's client prefab by the base game.
 
 ### Per-Projectile Absolute Overrides
 
