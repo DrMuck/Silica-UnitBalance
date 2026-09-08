@@ -1538,6 +1538,7 @@ namespace Si_UnitBalance
         {
             try
             {
+                ProbeFoWPrefabs(tag);
                 var teams = Team.Teams;
                 if (teams == null) return;
                 for (int t = 0; t < teams.Count; t++)
@@ -1611,6 +1612,65 @@ namespace Si_UnitBalance
                 }
             }
             catch (Exception ex) { MelonLogger.Warning("[FOW/PROBE] threw: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// THE PREFAB SIDE, READ AT THE SAME MOMENT AS THE INSTANCES.
+        ///
+        /// Two Radar Stations built four seconds apart on 2026-09-08 came out
+        /// permanently different — the first with the vanilla 200, the second
+        /// with the configured 800 — from what is supposed to be one prefab. So
+        /// print what the assets actually hold while those instances are alive:
+        /// every ObjectInfo that resolves to a name with a fow_distance override,
+        /// its prefab, the prefab's Sensors, and the networked twin. If the
+        /// prefab reads 800 the first radar was built from something else; if it
+        /// reads 200 the sweep never reached it and the second radar's 800 comes
+        /// from the OverrideManager overlay instead.
+        /// </summary>
+        static void ProbeFoWPrefabs(string tag)
+        {
+            try
+            {
+                BuildNetworkedPrefabIndex();
+                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                foreach (var info in allInfos)
+                {
+                    if (info == null || info.Prefab == null) continue;
+                    string cfg = ResolveConfigName(info.DisplayName, info.name);
+                    if (string.IsNullOrEmpty(cfg)) continue;
+                    if (!_fowDistanceOverrides.TryGetValue(cfg, out float want)) continue;
+
+                    string vals = SensorValues(info.Prefab);
+                    var twin = NetworkedTwin(info.Prefab);
+                    string twinTxt = twin == null ? "none" : $"#{twin.GetInstanceID()} [{SensorValues(twin)}]";
+                    MelonLogger.Msg(
+                        $"[FOW/PREFAB {tag}] {cfg} asset={info.name} prefab#{info.Prefab.GetInstanceID()} " +
+                        $"sensors=[{vals}] want={want:F0} twin={twinTxt}");
+                }
+            }
+            catch (Exception ex) { MelonLogger.Warning("[FOW/PREFAB] threw: " + ex.Message); }
+        }
+
+        /// <summary>Comma separated FogOfWarViewDistance of every Sensor under a GameObject.</summary>
+        static string SensorValues(GameObject go)
+        {
+            string vals = "";
+            int n = 0;
+            try
+            {
+                var comps = go.GetComponentsInChildren<Component>(true);
+                foreach (var c in comps)
+                {
+                    if (c == null || c.GetType().Name != "Sensor") continue;
+                    var f = c.GetType().GetField("FogOfWarViewDistance",
+                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (f == null || f.FieldType != typeof(float)) continue;
+                    vals += (n > 0 ? "," : "") + ((float)f.GetValue(c)).ToString("F0");
+                    n++;
+                }
+            }
+            catch { }
+            return n == 0 ? "none" : vals;
         }
 
         /// <summary>
