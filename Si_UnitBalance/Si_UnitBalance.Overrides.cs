@@ -1534,6 +1534,70 @@ namespace Si_UnitBalance
         /// actually uses, and the team's CurrentSensorScale, which multiplies it.
         /// The index disambiguates the first Radar Station from the second.
         /// </summary>
+
+        // =============================================
+        // THE PREFAB POOL, WHICH HANDS OUT PRE-OVERRIDE CLONES
+        //
+        // Game.SpawnPrefab does not instantiate the prefab. It calls
+        // PrefabPool.Instantiate, and PrefabPool keeps
+        // Dictionary<GameObject, Stack<GameObject>> Pools of clones made ahead of
+        // time by WarmUpAsync (UnityEngine.Object.InstantiateAsync). A clone is a
+        // frozen copy: mutating the prefab afterwards does not reach back into
+        // clones that already exist.
+        //
+        // That is the whole mystery. The overrides are applied before the round,
+        // and the client does receive them, but the starter HQ and the FIRST
+        // Radar Station are served from clones warmed BEFORE the override, so
+        // they carry vanilla values (600 and 200). The SECOND Radar Station finds
+        // the pool empty, falls through to a real Instantiate of the prefab we
+        // mutated, and comes out right (800). Verified on 2026-09-08: every
+        // prefab and networked twin read the configured value at the exact moment
+        // the HQ spawned vanilla.
+        //
+        // So drop the stale clones once the overrides are on the prefabs. The
+        // pool refills itself on demand, and everything it makes from now on is
+        // cloned from an overridden prefab. This costs the warm-up benefit once
+        // per apply and buys correctness for every component-level override, not
+        // just fog of war.
+        // =============================================
+        internal static void FlushPrefabPool(string reason)
+        {
+            try
+            {
+                var poolType = typeof(PrefabPool);
+                var poolsField = poolType.GetField("Pools", BindingFlags.NonPublic | BindingFlags.Static)
+                              ?? poolType.GetField("Pools", BindingFlags.Public | BindingFlags.Static);
+                if (poolsField == null)
+                {
+                    MelonLogger.Warning("[POOL] PrefabPool.Pools not found — stale clones cannot be dropped");
+                    return;
+                }
+                var pools = poolsField.GetValue(null) as System.Collections.IDictionary;
+                if (pools == null) { MelonLogger.Warning("[POOL] PrefabPool.Pools is not a dictionary"); return; }
+
+                int prefabs = 0, clones = 0;
+                var stacks = new List<System.Collections.IEnumerable>();
+                foreach (System.Collections.DictionaryEntry e in pools)
+                {
+                    if (e.Value is System.Collections.IEnumerable en) stacks.Add(en);
+                }
+                foreach (var st in stacks)
+                {
+                    prefabs++;
+                    foreach (var o in st)
+                    {
+                        var go = o as GameObject;
+                        if (go == null) continue;
+                        clones++;
+                        try { UnityEngine.Object.Destroy(go); } catch { }
+                    }
+                }
+                pools.Clear();
+                MelonLogger.Msg($"[POOL] {reason}: dropped {clones} pre-override clone(s) across {prefabs} prefab(s) — the pool refills from the overridden prefabs");
+            }
+            catch (Exception ex) { MelonLogger.Warning("[POOL] flush threw: " + ex.Message); }
+        }
+
         internal static void ProbeLiveFoW(string tag)
         {
             try

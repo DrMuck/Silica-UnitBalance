@@ -545,6 +545,12 @@ namespace Si_UnitBalance
                     $"{_rangeMultipliers.Count} range, {_moveSpeedMultipliers.Count} moveSpeed, " +
                     $"{_projectileOverrides.Count} projOverrides, {_proximityOverrides.Count} proximity, " +
                     $"{_minTierOverrides.Count} minTier, {_techTierTimes.Count} techTime, {_techTierCosts.Count} techCost");
+
+                // The prefabs now carry our values, but PrefabPool is holding clones
+                // taken before that. Game.SpawnPrefab hands those out first, which is
+                // why the starter HQ and the first Radar Station spawned vanilla while
+                // the second Radar Station, built once the pool ran dry, came out right.
+                FlushPrefabPool("after overrides applied");
             }
             catch (Exception ex)
             {
