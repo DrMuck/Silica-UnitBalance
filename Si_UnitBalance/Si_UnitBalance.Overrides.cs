@@ -1354,6 +1354,73 @@ namespace Si_UnitBalance
         };
 
         // =============================================
+        // Networked prefab twins
+        //
+        // Beta 0.9.47 split the prefab registries: the GameObjects in
+        // GameDatabase.AllNetworkedPrefabs are no longer the same instances as
+        // ObjectInfo.Prefab. Anything spawned through HelperMethods.SpawnAtLocation
+        // comes from the networked list — including the starter HQ, which Si_MapBalance
+        // places itself — so mutating only ObjectInfo.Prefab left those spawns on
+        // vanilla values: on 0.9.47 the starter HQ spawned with FogOfWarViewDistance
+        // 600 instead of the configured 700 and was only corrected afterwards by live
+        // propagation. On 0.9.46 both lists held the same object, so one mutation did.
+        //
+        // The list also holds null entries on 0.9.47 — the NRE thrown out of
+        // GameDatabase.GetSpawnablePrefabIndex(string) when another mod spawns by name —
+        // so it is indexed defensively here.
+        // =============================================
+        private static readonly Dictionary<string, GameObject> _networkedPrefabs =
+            new Dictionary<string, GameObject>(StringComparer.OrdinalIgnoreCase);
+
+        private static void BuildNetworkedPrefabIndex()
+        {
+            _networkedPrefabs.Clear();
+            try
+            {
+                var db = GameDatabase.Database;
+                if (db == null) return;
+                var list = db.AllNetworkedPrefabs;
+                if (list == null) return;
+                int nulls = 0;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var go = list[i];
+                    if (go == null) { nulls++; continue; }
+                    _networkedPrefabs[go.name] = go;
+                }
+                if (nulls > 0)
+                    MelonLogger.Warning($"[PREFAB] GameDatabase.AllNetworkedPrefabs holds {nulls} null entries — GetSpawnablePrefabIndex(string) throws on those");
+                LogDebug($"[PREFAB] indexed {_networkedPrefabs.Count} networked prefabs");
+            }
+            catch (Exception ex) { MelonLogger.Warning("[PREFAB] could not index networked prefabs: " + ex.Message); }
+        }
+
+        /// <summary>The networked-list twin of a prefab: null when it is the same object (0.9.46) or absent.</summary>
+        private static GameObject NetworkedTwin(GameObject prefab)
+        {
+            if (prefab == null) return null;
+            if (!_networkedPrefabs.TryGetValue(prefab.name, out var twin) || twin == null) return null;
+            return ReferenceEquals(twin, prefab) ? null : twin;
+        }
+
+        /// <summary>Sets a float field on the first Sensor under a prefab. Returns the previous value, or -1 when not found.</summary>
+        private static float SetSensorFloat(GameObject prefab, string field, float value)
+        {
+            if (prefab == null) return -1f;
+            var comps = prefab.GetComponentsInChildren<Component>(true);
+            foreach (var comp in comps)
+            {
+                if (comp == null || comp.GetType().Name != "Sensor") continue;
+                var f = comp.GetType().GetField(field, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (f == null || f.FieldType != typeof(float)) continue;
+                float orig = (float)f.GetValue(comp);
+                f.SetValue(comp, value);
+                return orig;
+            }
+            return -1f;
+        }
+
+        // =============================================
         // Target distance: absolute override for Sensor.TargetingDistance (applied after range_mult)
         // =============================================
 
@@ -1361,8 +1428,9 @@ namespace Si_UnitBalance
         {
             if (_targetDistanceOverrides.Count == 0) return;
 
+            BuildNetworkedPrefabIndex();
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
-            int applied = 0;
+            int applied = 0, twins = 0;
 
             foreach (var info in allInfos)
             {
@@ -1385,6 +1453,9 @@ namespace Si_UnitBalance
                     float orig = (float)tdField.GetValue(comp);
                     tdField.SetValue(comp, targetDist);
                     if (useOM) OMSetFloat(oiTarget, "TargetingDistance", targetDist);
+                    // 0.9.47: also the networked-list twin, or spawns by name stay vanilla
+                    var tdTwin = NetworkedTwin(info.Prefab);
+                    if (tdTwin != null && SetSensorFloat(tdTwin, "TargetingDistance", targetDist) >= 0f) twins++;
                     LogDebug($"[TARGETDIST] {name}: Sensor.TargetingDistance {orig} -> {targetDist}{(useOM ? " (OM+direct)" : " (direct)")}");
                     applied++;
                     break;
@@ -1392,7 +1463,7 @@ namespace Si_UnitBalance
             }
 
             if (applied > 0)
-                MelonLogger.Msg($"[TARGETDIST] Applied target distance overrides to {applied} units");
+                MelonLogger.Msg($"[TARGETDIST] Applied target distance overrides to {applied} units ({twins} networked prefab twins)");
         }
 
         // =============================================
@@ -1401,8 +1472,9 @@ namespace Si_UnitBalance
         private static void ApplyFoWDistanceOverrides(bool useOM)
         {
             if (_fowDistanceOverrides.Count == 0) return;
+            BuildNetworkedPrefabIndex();
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
-            int applied = 0;
+            int applied = 0, twins = 0;
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
@@ -1422,13 +1494,16 @@ namespace Si_UnitBalance
                     // Also set via OM to sync to clients.
                     fowField.SetValue(comp, fowDist);
                     if (useOM) OMSetFloat(oiTarget, "FogOfWarViewDistance", fowDist);
+                    // 0.9.47: also the networked-list twin, or spawns by name stay vanilla
+                    var fowTwin = NetworkedTwin(info.Prefab);
+                    if (fowTwin != null && SetSensorFloat(fowTwin, "FogOfWarViewDistance", fowDist) >= 0f) twins++;
                     LogDebug($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist}{(useOM ? " (OM+direct)" : " (direct)")}");
                     applied++;
                     break;
                 }
             }
             if (applied > 0)
-                MelonLogger.Msg($"[FOW] Applied FoW distance overrides to {applied} units");
+                MelonLogger.Msg($"[FOW] Applied FoW distance overrides to {applied} units ({twins} networked prefab twins)");
         }
 
         // =============================================
