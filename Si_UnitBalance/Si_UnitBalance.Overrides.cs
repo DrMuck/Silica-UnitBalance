@@ -1372,6 +1372,9 @@ namespace Si_UnitBalance
         private static readonly Dictionary<string, GameObject> _networkedPrefabs =
             new Dictionary<string, GameObject>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>Prefabs the FoW sweep mutated this pass, to tell whether the base-structure prefab is a distinct object.</summary>
+        private static readonly HashSet<int> _fowPrefabsTouched = new HashSet<int>();
+
         private static void BuildNetworkedPrefabIndex()
         {
             _networkedPrefabs.Clear();
@@ -1473,6 +1476,7 @@ namespace Si_UnitBalance
         {
             if (_fowDistanceOverrides.Count == 0) return;
             BuildNetworkedPrefabIndex();
+            _fowPrefabsTouched.Clear();
             var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
             int applied = 0, twins = 0;
             foreach (var info in allInfos)
@@ -1495,16 +1499,77 @@ namespace Si_UnitBalance
                     fowField.SetValue(comp, fowDist);
                     if (useOM) OMSetFloat(oiTarget, "FogOfWarViewDistance", fowDist);
                     // 0.9.47: also the networked-list twin, or spawns by name stay vanilla
+                    _fowPrefabsTouched.Add(info.Prefab.GetInstanceID());
                     var fowTwin = NetworkedTwin(info.Prefab);
-                    if (fowTwin != null && SetSensorFloat(fowTwin, "FogOfWarViewDistance", fowDist) >= 0f) twins++;
+                    if (fowTwin != null && SetSensorFloat(fowTwin, "FogOfWarViewDistance", fowDist) >= 0f)
+                    {
+                        _fowPrefabsTouched.Add(fowTwin.GetInstanceID());
+                        twins++;
+                    }
                     LogDebug($"[FOW] {name}: FogOfWarViewDistance {orig} -> {fowDist}{(useOM ? " (OM+direct)" : " (direct)")}");
                     applied++;
                     break;
                 }
             }
+            ApplyFoWToBaseStructures(useOM);
+
             if (applied > 0)
                 MelonLogger.Msg($"[FOW] Applied FoW distance overrides to {applied} units ({twins} networked prefab twins)");
         }
+
+        /// <summary>
+        /// THE STARTER HQ, WHICH IS SPAWNED FROM A PREFAB WE MAY NEVER SEE.
+        ///
+        /// The base structures are not placed through the construction system: the
+        /// game (and Si_MapBalance's SpawnBaseStructures prefix) spawns
+        /// team.BaseStructure.Prefab directly. On 0.9.47 that ObjectInfo is resolved
+        /// through GameDatabase.GetObjectInfoByIndex, and the asset graph changed
+        /// under us this build — 37 of 115 prefabs now have a distinct twin in
+        /// AllNetworkedPrefabs where previously there was one shared object. The
+        /// starter HQ kept spawning with the vanilla FogOfWarViewDistance of 600
+        /// while every later-built structure carried the configured value, so the
+        /// sweep over Resources.FindObjectsOfTypeAll&lt;ObjectInfo&gt;() evidently does
+        /// not reach the prefab the base spawn uses.
+        ///
+        /// This walks the teams and mutates that prefab by the same route, and logs
+        /// the identity of what it found: when "covered by sweep" is false, or the
+        /// value read back was vanilla, this is a distinct object and this pass is
+        /// what fixes it.
+        /// </summary>
+        private static void ApplyFoWToBaseStructures(bool useOM)
+        {
+            try
+            {
+                var teams = Team.Teams;
+                if (teams == null) return;
+                for (int i = 0; i < teams.Count; i++)
+                {
+                    var team = teams[i];
+                    if (team == null) continue;
+                    ObjectInfo bs = null;
+                    try { bs = team.BaseStructure; } catch { }
+                    if (bs == null || bs.Prefab == null) continue;
+
+                    string name = ResolveConfigName(bs.DisplayName, bs.name);
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (!_fowDistanceOverrides.TryGetValue(name, out float fowDist)) continue;
+
+                    int prefabId = bs.Prefab.GetInstanceID();
+                    bool covered = _fowPrefabsTouched.Contains(prefabId);
+                    float orig = SetSensorFloat(bs.Prefab, "FogOfWarViewDistance", fowDist);
+                    MelonLogger.Msg($"[FOW/BASE] {team.name} BaseStructure {name}: prefab#{prefabId} sensor {orig} -> {fowDist} (covered by sweep: {covered})");
+
+                    var twin = NetworkedTwin(bs.Prefab);
+                    if (twin != null)
+                    {
+                        float twinOrig = SetSensorFloat(twin, "FogOfWarViewDistance", fowDist);
+                        MelonLogger.Msg($"[FOW/BASE] {team.name} BaseStructure {name}: networked twin#{twin.GetInstanceID()} sensor {twinOrig} -> {fowDist}");
+                    }
+                }
+            }
+            catch (Exception ex) { MelonLogger.Warning("[FOW/BASE] threw: " + ex.Message); }
+        }
+
 
         // =============================================
         // Jump Speed: scale Soldier.JumpSpeed via OverrideManager
