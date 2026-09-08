@@ -409,6 +409,32 @@ namespace Si_UnitBalance
                 else
                     MelonLogger.Warning("SendPlayerOverrides method not found — override sync may fail for large configs");
 
+                // Bracket the base-structure spawn. 0.9.47 defers it out of
+                // SetTeamVersusMode into OnPlayerChangedTeam, so the starter HQ is
+                // instantiated at a moment this mod never anticipated. Patch by name:
+                // SpawnStructuresAndStartingResources is the 0.9.47 entry point,
+                // SpawnBaseStructures the older one, and a build that lacks either
+                // simply logs and carries on.
+                {
+                    int bracketed = 0;
+                    foreach (var spawnName in new[] { "SpawnStructuresAndStartingResources", "SpawnBaseStructures" })
+                    {
+                        try
+                        {
+                            var m = AccessTools.Method(typeof(MP_Strategy), spawnName);
+                            if (m == null) { MelonLogger.Msg($"MP_Strategy.{spawnName} not present on this build"); continue; }
+                            harmony.Patch(m,
+                                prefix:  new HarmonyMethod(typeof(Patch_BaseSpawn), "Prefix"),
+                                postfix: new HarmonyMethod(typeof(Patch_BaseSpawn), "Postfix"));
+                            bracketed++;
+                            MelonLogger.Msg($"Bracketed MP_Strategy.{spawnName} — overrides applied before the base spawn, propagated after");
+                        }
+                        catch (Exception bex) { MelonLogger.Warning($"Patching {spawnName} threw: {bex.Message}"); }
+                    }
+                    if (bracketed == 0)
+                        MelonLogger.Warning("No base-spawn method found — starter structures may keep vanilla values");
+                }
+
                 // Patch OverrideManager.RevertAll — BLOCK the game's revert during scene transitions
                 // so our OM overrides persist through map changes. Only allow revert when we explicitly request it.
                 var omRevertAll = typeof(OverrideManager).GetMethod("RevertAll",

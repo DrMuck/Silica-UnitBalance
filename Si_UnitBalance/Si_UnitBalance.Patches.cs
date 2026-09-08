@@ -975,6 +975,66 @@ namespace Si_UnitBalance
             }
         }
 
+
+        // =============================================
+        // THE DEFERRED BASE SPAWN (Beta 0.9.47)
+        //
+        // Up to 0.9.46, and still on the game's main branch, MP_Strategy.
+        // SetTeamVersusMode called SpawnBaseStructures() inline: the base
+        // structures existed the moment the versus mode was set, long after our
+        // overrides had been applied at level load, so the starter HQ was
+        // instantiated from prefabs that already carried the configured values.
+        //
+        // 0.9.47 split that apart. SetTeamVersusMode now only sets
+        // QueueCoopSpawnBaseStructures, and the spawn fires later from
+        // OnPlayerChangedTeam — the instant a player picks a team, which is a
+        // moment nothing in this mod anticipates and which can fall anywhere in
+        // the lobby. The starter HQ kept coming out with the vanilla
+        // FogOfWarViewDistance of 600 instead of the configured 700 (DrMuck
+        // measured 600 m in game, and [LIVE-FOW] read 600 -> 700 every round:
+        // the instance was vanilla until propagation patched it afterwards).
+        //
+        // So bracket that spawn. The prefix guarantees the prefabs carry our
+        // values before anything is instantiated; the postfix propagates to what
+        // was just spawned and pushes the overrides to the clients, which render
+        // their own copies of these structures.
+        //
+        // Patched by name: SpawnStructuresAndStartingResources does not exist
+        // before 0.9.47, and SpawnBaseStructures is the older entry point, so
+        // whichever the running build has is the one that gets bracketed.
+        // =============================================
+        private static class Patch_BaseSpawn
+        {
+            public static void Prefix()
+            {
+                try
+                {
+                    if (!_enabled || !_configLoaded) return;
+                    if (!_overridesApplied)
+                    {
+                        MelonLogger.Msg("[BASESPAWN] overrides not applied yet at the base spawn — applying now");
+                        ApplyOverridesLogic();
+                    }
+                }
+                catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] prefix threw: " + ex.Message); }
+            }
+
+            public static void Postfix()
+            {
+                try
+                {
+                    if (!_enabled || !_configLoaded) return;
+                    MelonLogger.Msg("[BASESPAWN] base structures spawned — propagating and re-syncing");
+                    try { PropagateToLiveInstances(); }
+                    catch (Exception pex) { MelonLogger.Warning("[BASESPAWN] propagation threw: " + pex.Message); }
+                    ProbeLiveFoW("after-base-spawn");
+                    try { MelonCoroutines.Start(SyncOverridesToAllPlayers(0.5f)); }
+                    catch (Exception sex) { MelonLogger.Warning("[BASESPAWN] sync threw: " + sex.Message); }
+                }
+                catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] postfix threw: " + ex.Message); }
+            }
+        }
+
         private static class Patch_SendPlayerOverrides
         {
             public static bool Prefix(object __0)
