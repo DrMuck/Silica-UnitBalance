@@ -1557,7 +1557,11 @@ namespace Si_UnitBalance
                     int prefabId = bs.Prefab.GetInstanceID();
                     bool covered = _fowPrefabsTouched.Contains(prefabId);
                     float orig = SetSensorFloat(bs.Prefab, "FogOfWarViewDistance", fowDist);
-                    MelonLogger.Msg($"[FOW/BASE] {team.name} BaseStructure {name}: prefab#{prefabId} sensor {orig} -> {fowDist} (covered by sweep: {covered})");
+                    // The direct mutation is server-side only. The client renders its own
+                    // instance, so the override has to reach this asset by name as well or
+                    // the commander keeps seeing the vanilla radius around the starter HQ.
+                    if (useOM) OMSetFloat($"A:{bs.name}.asset", "FogOfWarViewDistance", fowDist);
+                    MelonLogger.Msg($"[FOW/BASE] {team.name} BaseStructure {name}: prefab#{prefabId} sensor {orig} -> {fowDist} (covered by sweep: {covered}, om: {useOM})");
 
                     var twin = NetworkedTwin(bs.Prefab);
                     if (twin != null)
