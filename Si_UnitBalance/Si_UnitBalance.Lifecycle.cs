@@ -582,6 +582,13 @@ namespace Si_UnitBalance
 
                 MelonLogger.Msg($"[UnitBalance] Game started — propagation complete");
 
+                // Read the live buildings back after the round is running: the prefab
+                // says 700 and the starter HQ still reveals 600. Three samples, so a
+                // Radar Station built later can be compared with the first one.
+                MelonCoroutines.Start(FowProbeAfter(30f, "t+30s"));
+                MelonCoroutines.Start(FowProbeAfter(120f, "t+120s"));
+                MelonCoroutines.Start(FowProbeAfter(300f, "t+300s"));
+
                 // Spawn additional units if enabled
                 if (_additionalSpawn)
                     MelonCoroutines.Start(SpawnAdditionalUnits(5f));
@@ -599,6 +606,12 @@ namespace Si_UnitBalance
 
         // Send all OM overrides to each connected player after game start.
         // Calls SendPlayerOverrides per-player (our Prefix chunks it per-target automatically).
+        private static IEnumerator FowProbeAfter(float delay, string tag)
+        {
+            yield return new WaitForSeconds(delay);
+            ProbeLiveFoW(tag);
+        }
+
         private static IEnumerator SyncOverridesToAllPlayers(float initialDelay)
         {
             if (initialDelay > 0)

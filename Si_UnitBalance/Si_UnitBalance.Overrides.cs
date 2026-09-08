@@ -1517,6 +1517,95 @@ namespace Si_UnitBalance
                 MelonLogger.Msg($"[FOW] Applied FoW distance overrides to {applied} units ({twins} networked prefab twins)");
         }
 
+
+        /// <summary>
+        /// WHAT THE LIVE BUILDINGS ACTUALLY CARRY, READ BACK AFTER ROUND START.
+        ///
+        /// The prefab reads 700 and the starter HQ still reveals 600 (DrMuck
+        /// measured 600 m in game on 2026-09-08), and the first Radar Station
+        /// built uncovers less than the second built from the same prefab. Both
+        /// say the value is not being read from where we write it, so stop
+        /// arguing from the prefab and read the instances.
+        ///
+        /// For every live structure that has a fow_distance override this logs
+        /// each Sensor on the object (there may be more than one — the game's fog
+        /// uses BaseGameObject.FogOfWarViewDistance, which is the MAX over them,
+        /// while we only ever wrote the first), the computed value the fog
+        /// actually uses, and the team's CurrentSensorScale, which multiplies it.
+        /// The index disambiguates the first Radar Station from the second.
+        /// </summary>
+        internal static void ProbeLiveFoW(string tag)
+        {
+            try
+            {
+                var teams = Team.Teams;
+                if (teams == null) return;
+                for (int t = 0; t < teams.Count; t++)
+                {
+                    var team = teams[t];
+                    if (team == null) continue;
+                    float scale = 1f;
+                    try
+                    {
+                        var sp = team.GetType().GetProperty("CurrentSensorScale", BindingFlags.Public | BindingFlags.Instance);
+                        if (sp != null) scale = (float)sp.GetValue(team);
+                    }
+                    catch { }
+
+                    var structures = team.Structures;
+                    if (structures == null) continue;
+                    var seen = new Dictionary<string, int>();
+                    for (int i = 0; i < structures.Count; i++)
+                    {
+                        var s = structures[i];
+                        if (s == null) continue;
+                        string disp = "?";
+                        try { disp = s.ObjectInfo?.DisplayName ?? "?"; } catch { }
+                        string cfg = ResolveConfigName(disp, disp);
+                        if (string.IsNullOrEmpty(cfg) || !_fowDistanceOverrides.TryGetValue(cfg, out float want)) continue;
+
+                        seen.TryGetValue(cfg, out int idx);
+                        seen[cfg] = idx + 1;
+
+                        string vals = "";
+                        int n = 0;
+                        try
+                        {
+                            var comps = s.GetComponentsInChildren<Component>(true);
+                            foreach (var c in comps)
+                            {
+                                if (c == null || c.GetType().Name != "Sensor") continue;
+                                var f = c.GetType().GetField("FogOfWarViewDistance",
+                                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                                if (f == null || f.FieldType != typeof(float)) continue;
+                                bool en = true;
+                                try { en = ((Behaviour)c).enabled; } catch { }
+                                vals += (n > 0 ? "," : "") + ((float)f.GetValue(c)).ToString("F0") + (en ? "" : "(off)");
+                                n++;
+                            }
+                        }
+                        catch { }
+
+                        float computed = -1f;
+                        try
+                        {
+                            var p = s.GetType().GetProperty("FogOfWarViewDistance", BindingFlags.Public | BindingFlags.Instance);
+                            if (p != null) computed = (float)p.GetValue(s);
+                        }
+                        catch { }
+
+                        Vector3 at = Vector3.zero;
+                        try { at = s.transform.position; } catch { }
+
+                        MelonLogger.Msg(
+                            $"[FOW/PROBE {tag}] {team.name} {cfg}#{idx} at=({at.x:F0},{at.z:F0}) " +
+                            $"sensors=[{vals}] n={n} computed={computed:F0} want={want:F0} sensorScale={scale:F3}");
+                    }
+                }
+            }
+            catch (Exception ex) { MelonLogger.Warning("[FOW/PROBE] threw: " + ex.Message); }
+        }
+
         /// <summary>
         /// THE STARTER HQ, WHICH IS SPAWNED FROM A PREFAB WE MAY NEVER SEE.
         ///
