@@ -1559,10 +1559,16 @@ namespace Si_UnitBalance
                     {
                         var s = structures[i];
                         if (s == null) continue;
-                        string disp = "?";
+                        string disp = "?", intern = "";
                         try { disp = s.ObjectInfo?.DisplayName ?? "?"; } catch { }
-                        string cfg = ResolveConfigName(disp, disp);
-                        if (string.IsNullOrEmpty(cfg) || !_fowDistanceOverrides.TryGetValue(cfg, out float want)) continue;
+                        try { intern = s.ObjectInfo?.name ?? ""; } catch { }
+                        // The internal asset name is what separates "Sol Headquarters"
+                        // from "Cent Headquarters": both carry the DisplayName
+                        // "Headquarters", so passing the display name twice resolved to
+                        // a key no override uses and the first probe logged nothing.
+                        string cfg = ResolveConfigName(disp, intern);
+                        if (string.IsNullOrEmpty(cfg)) cfg = disp;
+                        if (!_fowDistanceOverrides.TryGetValue(cfg, out float want)) want = -1f;
 
                         seen.TryGetValue(cfg, out int idx);
                         seen[cfg] = idx + 1;
@@ -1597,6 +1603,7 @@ namespace Si_UnitBalance
                         Vector3 at = Vector3.zero;
                         try { at = s.transform.position; } catch { }
 
+                        if (n == 0) continue;   // no Sensor on this building, nothing to say
                         MelonLogger.Msg(
                             $"[FOW/PROBE {tag}] {team.name} {cfg}#{idx} at=({at.x:F0},{at.z:F0}) " +
                             $"sensors=[{vals}] n={n} computed={computed:F0} want={want:F0} sensorScale={scale:F3}");
