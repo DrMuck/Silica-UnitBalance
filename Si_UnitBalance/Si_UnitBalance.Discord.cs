@@ -241,9 +241,73 @@ namespace Si_UnitBalance
                 }
             }
 
+            // Unit cap multiplier per match type (-1 sentinel = vanilla / server setting)
+            var activeCapMult = activeCfg["unit_cap_mult"] as JObject;
+            if (activeCapMult != null)
+            {
+                var defaultCapMult = defaultCfg["unit_cap_mult"] as JObject;
+                var lastPushCapMult = lastPushCfg?["unit_cap_mult"] as JObject;
+                foreach (string key in new[] { "two_way", "three_way" })
+                {
+                    int av = activeCapMult[key]?.Value<int>() ?? -1;
+                    int dv = defaultCapMult?[key]?.Value<int>() ?? -1;
+                    if (av == dv) continue;
+                    int lastVal = lastPushCapMult?[key]?.Value<int>() ?? dv;
+                    changes.Add(new BalanceChange("Global Settings", "Unit Cap Mult", key,
+                        FmtCapMult(dv), FmtCapMult(av), av != lastVal));
+                }
+            }
+
+            // Absolute unit count caps (-1 = unlimited)
+            var activeCountCaps = activeCfg["count_caps"] as JObject;
+            if (activeCountCaps != null)
+            {
+                var defaultCountCaps = defaultCfg["count_caps"] as JObject;
+                var lastPushCountCaps = lastPushCfg?["count_caps"] as JObject;
+                foreach (string key in new[] { "shrimp", "harvester" })
+                {
+                    int av = activeCountCaps[key]?.Value<int>() ?? -1;
+                    int dv = defaultCountCaps?[key]?.Value<int>() ?? -1;
+                    if (av == dv) continue;
+                    int lastVal = lastPushCountCaps?[key]?.Value<int>() ?? dv;
+                    changes.Add(new BalanceChange("Global Settings", "Count Cap", key,
+                        FmtCountCap(dv), FmtCountCap(av), av != lastVal));
+                }
+            }
+
+            // Alien nest reach radius (-1 = vanilla)
+            {
+                float av = activeCfg["alien_nest_reach_radius"]?.Value<float>() ?? -1f;
+                float dv = defaultCfg["alien_nest_reach_radius"]?.Value<float>() ?? -1f;
+                if (av < 1f) av = -1f;
+                if (dv < 1f) dv = -1f;
+                if (Math.Abs(av - dv) > 0.01f)
+                {
+                    float lastVal = lastPushCfg?["alien_nest_reach_radius"]?.Value<float>() ?? dv;
+                    if (lastVal < 1f) lastVal = -1f;
+                    changes.Add(new BalanceChange("Global Settings", "Alien Nest Reach Radius", "alien_nest_reach_radius",
+                        FmtNestReach(dv), FmtNestReach(av), Math.Abs(av - lastVal) > 0.01f));
+                }
+            }
+
+            // Alien queens max (-1 = vanilla, 0 = every Nest)
+            {
+                int av = activeCfg["alien_queens_max"]?.Value<int>() ?? -1;
+                int dv = defaultCfg["alien_queens_max"]?.Value<int>() ?? -1;
+                if (av != dv)
+                {
+                    int lastVal = lastPushCfg?["alien_queens_max"]?.Value<int>() ?? dv;
+                    changes.Add(new BalanceChange("Global Settings", "Alien Queens", "alien_queens_max",
+                        FmtQueensMax(dv), FmtQueensMax(av), av != lastVal));
+                }
+            }
+
             // Bool toggles
             CompareBoolSetting("additional_spawn", "Additional Spawn", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("shrimp_disable_aim", "Shrimp Disable Aim", defaultCfg, activeCfg, lastPushCfg, changes);
+            CompareBoolSetting("alien_nest_only_build", "Alien Nest-Only Build", defaultCfg, activeCfg, lastPushCfg, changes);
+            CompareBoolSetting("alien_nest_finished_anchor_only", "Alien Nest Finished-Anchor Only", defaultCfg, activeCfg, lastPushCfg, changes);
+            CompareBoolSetting("alien_queen_logistics_per_nest", "Queen Logistics per Nest", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("health_mult_enabled", "Health Mult (server-only)", defaultCfg, activeCfg, lastPushCfg, changes);
         }
 

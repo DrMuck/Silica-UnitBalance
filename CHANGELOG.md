@@ -4,6 +4,193 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-09-26 — Watchdog waits for map loads (v7.7.1)
+
+The round-transition watchdog forced `EndRound()` while the next map was already loading. On the
+2026-09-25 server log, all 4 vanilla `Game ended during loading!` errors match a
+`[Watchdog] … forcing EndRound` line to the millisecond (16:17:15, 23:28:08, 23:54:02, 00:19:38).
+The load had started 0.3–7 s earlier, so every one of these was a false positive.
+
+- While `GameLevelLoader.IsLoading` is set, the countdown pauses (log: `Level load in progress … —
+  countdown paused`). When the load finishes, the watchdog restarts the full countdown for the new
+  round to start.
+- The announced countdown is now **60 s** (was 40 s) after the 20 s silent wait, so recovery happens
+  80 s after game end at the earliest. New constants `WatchdogSilentSeconds` / `WatchdogCountdownSeconds`
+  replace `WatchdogTimeoutSeconds`.
+- The "stalled" chat and warning only appear once the countdown is really running, so they no
+  longer show during a load. The same check runs right before recovery, so a load that starts in
+  the last 10 s wait is also respected.
+
+---
+
+## 2026-09-18 — Queen logistics per Nest (v7.7.0)
+
+New top-level config bool **`alien_queen_logistics_per_nest`** (default `false`). Vanilla gates all
+alien building on `Team.GetNeedConstructionLogistics()`, which is **team-wide**: building is allowed
+as long as *any* logistics compartment on the team (a Nest's `AlienQueenCompartment`, flagged
+`IsConstructionLogistics`) has a docked unit. That's why the starter Queen leaving blocks the whole
+team while an expansion Nest's Queen leaving changes nothing (the starter Queen is still docked).
+
+- **Rule**: with this on, every alien structure belongs to its **nearest finished Nest** (2D
+  distance, same "reach" notion as Nest Reach Radius; a Nest belongs to itself) and may only build /
+  produce while *that* Nest's Queen is docked. With a single Nest that is exactly vanilla; with
+  expansion Nests every structure depends on the Queen of the Nest it sits closest to.
+- **Mechanism**: fourth prefix on `Structure.Construct` (base; `AlienStructure.Construct` calls it
+  after its own link check). Nearest Nest = min `GameMath.Distance2D` over `Team.Structures` whose
+  `ObjectInfo` is the Nest; docked = any `UnitCompartment.IsConstructionLogistics` on it with a
+  `DriverUnit` (only the Nest's `QueenDock` `AlienQueenCompartment` carries that flag — verified in
+  `sharedassets0`). Not docked → returns `ProductionActionResult.MissingLogistics` (vanilla's own
+  result), nothing queued, no resources taken. No built Nest at all → left to vanilla. Skipped when
+  `ConstructionSite.LimitationsDisabled`. Covers unit production from cysts too, like vanilla.
+  (First cut used the alien link graph `_linkedStructures`; dropped because with chained nodes/cysts
+  the whole base is one connected graph, which collapsed back into the team-wide vanilla rule.)
+- **Feedback**: commander chat (`Queen away — Spawning Cyst can't build (no docked Queen in the Nest it
+  is linked to) — return the Queen to that Nest.`) + AdminMod denied sound, 3 s throttle per team.
+  The client UI still shows the structure as buildable (it computes the team-wide check locally).
+- **Requires** `alien_queens_max` `0` (every Nest) or `N`: with vanilla `-1` expansion Nests never
+  get a Queen, so their clusters could never build. The menu toggle prints a warning when Alien Queens
+  is still `-1`.
+- **In-game**: `!b` → Strategystyle → `5. Queen Logistics per Nest [ON/OFF]`, immediate. Discord report
+  lists it under Global Settings.
+- **Menu split**: new root entry `7. Strategystyle` (alien nest-centric build rules) takes
+  `1. Alien Nest-Only Build`, `2. Alien Nest Reach Radius`, `3. Alien Queens`,
+  `4. Alien Nest Finished-Anchor Only`, `5. Queen Logistics per Nest` off Cap&Decay, which is back to
+  Decay / Player Cap Exempt / Unit Cap Mult 2-way / 3-way / `5.` Shrimp Cap / `6.` Harvester Cap.
+  `/back` from the Nest Reach and Alien Queens pages returns to Strategystyle. Audit-log category
+  for the moved toggles is `strategy`.
+
+## 2026-09-18 — Alien nest finished-anchor only (v7.6.0)
+
+New top-level config bool **`alien_nest_finished_anchor_only`** (default `false`): a new Nest must be
+within anchor range of a **finished** structure. Vanilla's placement test
+(`ConstructionPreview.GetWithinBaseStructuresDistanceAndFogOfWar`) accepts construction *sites* as
+anchors, so aliens could chain Nest → Nest → Nest outward while the previous Nest was still growing.
+With this on, a Nest under construction can't anchor the next one; a finished Nest can anchor any
+number of new Nests (parallel expansion off a finished base stays allowed).
+
+- **Mechanism**: third prefix on `Structure.Construct` (same server gate as count caps / nest
+  reach). For a placeable request whose `ObjectInfo` is the team's `BaseStructure` /
+  `ObjectInfo_Alien_Nest`, the mod re-runs the game's anchor distance test over `Structure.Structures`
+  only (same team, `IsConstructionAnchor`, alive — same bounds-to-bounds 2D distance and
+  `MaximumDistanceUseRadius` variant as the game), skipping `ConstructionSite.ConstructionSites`. If
+  no finished anchor is within `ConstructionData.MaximumBaseStructureDistance` (= `build_radius`),
+  the request returns `ProductionActionResult.AreaObstructed` — nothing placed, no resources taken.
+  Skipped when `ConstructionSite.LimitationsDisabled`. With `alien_nest_only_build` off, a finished
+  linked cyst/node also counts as an anchor, exactly as in vanilla.
+- **Feedback**: commander chat line (`Nest needs a finished anchor (nearest finished anchor 312 m) —
+  the Nest under construction (37%) can't anchor it yet — wait for it to finish or build next to a
+  finished Nest.`) + the AdminMod denied sound, throttled to one per 3 s per team (client preview
+  still shows green, as with nest reach).
+- **In-game**: `!b` → Cap&Decay → `10. Alien Nest Finished-Anchor Only [ON/OFF]`, applies immediately
+  (checked live per placement, no `!rebalance`). Discord report lists it under Global Settings.
+  Cap&Decay guard widened to `1-10`.
+- Independent of `alien_nest_only_build` / `alien_nest_reach_radius`; all three together = strictly
+  sequential nest-centric expansion. Nodes / cysts around a Nest under construction are unaffected.
+
+- Nest reach warning (Cap&Decay /8) now ends with `… build closer to a Nest. A Nest is required for
+  further expansion.` so the commander knows what unlocks the area.
+
+## 2026-09-17 — Alien nest reach radius + Queens per Nest (v7.5.0)
+
+New top-level config number **`alien_nest_reach_radius`** (metres, default `-1` = vanilla): Nodes and
+Bio Caches may only be placed within this 2D distance of a friendly Nest (built or under
+construction). Idea: aliens expand via Nest bases; a Nest reaches out to resources through
+Nodes/Bio Caches, but only within its reach — anything further needs a new Nest first. Other alien
+structures (cysts, cortex, spires) are unaffected and still follow the normal anchor rule.
+
+- **Mechanism**: second prefix on `Structure.Construct` (same server gate the count caps use; it
+  carries the requested world position for placeable structures). Nearest Nest = min 2D distance
+  over `Team.Structures` (alive) + `ConstructionSite.ConstructionSites` (active, same team) whose
+  `ObjectInfo` is the team's `BaseStructure` / `ObjectInfo_Alien_Nest`. Out of reach → returns
+  `ProductionActionResult.AreaObstructed`, nothing is placed, no resources taken.
+- **Feedback**: the client's placement preview can't know the rule (it'd show green), so the team's
+  commander gets a chat line (`Node out of Nest reach (nearest Nest 312 m, limit 250 m) — …`) and the
+  AdminMod `AudioHelper.PlaySoundFile("sounds/access_denied.wav", commander)` denied sound, throttled
+  to one per 3 s per team. Sound falls back to chat-only if AdminMod's AudioHelper or the WAV is
+  missing (checked once, logged).
+- **In-game**: `!b` → Cap&Decay → `8. Alien Nest Reach Radius`, page edited with `.1 <metres>`
+  (`.1 -1` = vanilla). Applies immediately on save. Discord report lists non-default values under
+  Global Settings.
+- **Alien Queens** (`alien_queens_max`, default `-1` = vanilla): the Nest prefab's `SpawnOnInit`
+  spawns a Queen into every Nest's `AlienQueenCompartment` on the server, but its `MaxPerTeam` (1)
+  makes only the starting Nest get one. The mod mutates `MaxPerTeam` on the Nest prefab (`0` = no
+  limit → every expansion Nest spawns its own docked Queen, `N` = at most N per team). Server-side
+  only (clients never run the spawn), immediate on save for Nests built afterwards; the prefab pool
+  is flushed so the next Nest isn't a pre-change clone (the pool is now also flushed after
+  `!rebalance`). Cap&Decay `9. Alien Queens`, `.1 <n>`.
+- Combines with `alien_nest_only_build` (both on = pure nest-centric play: everything anchors to a
+  Nest AND resource reach is bounded) but is independent of it. Not for the RTS-AI server for the same
+  reason as nest-only build.
+
+## 2026-09-16 — Alien nest-only building (v7.4.0)
+
+New top-level config bool **`alien_nest_only_build`** (default `false`) for a nest-centric alien
+playstyle: every alien structure except the Nest stops counting as a construction anchor, so new
+alien buildings can only be placed within `build_radius` of a Nest and expansion happens by building
+new Nests (tier 3) instead of creeping cysts/nodes outward.
+
+- **Mechanism**: `ObjectInfo.StructureConstructionAnchor` (vanilla `true` on all alien structures;
+  humans have it only on the HQ) is set to `false` via OverrideManager on Node, the four Spawning
+  Cysts, Quantum Cortex, Hive/Thorn Spire and Bio Cache. Placement
+  (`ConstructionData.GetWithinBaseStructuresDistanceAndFogOfWar`) and the alien link chain
+  (`AlienStructure.InitLink`, filtered on `CanBeConstructionAnchor`) both read the flag live from the
+  asset, so the OM overlay is enough and it syncs to clients (placement preview agrees with the
+  server). Side effect: structures link straight to a Nest (star instead of chain), so losing a cyst
+  no longer cuts off what was built behind it — only losing the Nest unlinks.
+- **In-game**: `!b` → Cap&Decay → `5. Alien Nest-Only Build [ON/OFF]`, then `!rebalance` (already
+  placed structures keep their spawn-time links; new placements see the rule). Discord report lists it
+  under Global Settings.
+- **Menu split**: new root entry `6. Cap&Decay` takes Decay, Player Cap Exempt, Unit Cap Mult and
+  Alien Nest-Only Build off the HTP menu (which is back to Hoverbike / Tier / Teleportation / Shrimp
+  Aim / Additional Spawn / Discord / Watchdog). Unit Cap Mult is now two separate entries (`3.` 2-way,
+  `4.` 3-way), each its own page edited with `.1 <mult>`. `/back` from Decay / Unit Cap pages returns
+  to Cap&Decay.
+- **Count caps** (`count_caps` config section: `shrimp`, `harvester`; `-1` = unlimited): absolute
+  per-team limits on alien Shrimps and Sol/Centauri harvesters, counted as alive + queued + in
+  production (the same three sources `Team.UpdateUnitCapValues` uses). Enforced by a prefix on
+  `Structure.Construct` — the single server-side gate for client build requests, AI commanders and
+  cyst pops — which answers `ProductionActionResult.UnitCap` once the cap is hit. The client's build
+  button stays enabled (its local cap check passes), so the team's commander
+  (`GameModeExt.GetCommanderForTeam`) gets a chat warning instead, throttled to one per 3 s per cap.
+  Cap&Decay `6. Shrimp Cap` / `7. Harvester Cap`, edited with `.1 <max>`; applies immediately on
+  save. Discord report lists non-default values.
+- **Fix**: HTP selection guard rejected `10` (Unit Cap Mult was unreachable from the menu).
+- **Fix (0.9.47 hotfix for other mods)**: `GameDatabase.GetSpawnablePrefabIndex(string)` is replaced
+  by a null-safe prefix. 0.9.47 leaves a null entry in `AllNetworkedPrefabs`, so every by-name spawn
+  (Si_Resources' reveal scout at the versus vote, Si_MapBalance, `AdminMod.SpawnAtLocation`) threw an
+  NRE — and Si_Resources' team loop aborted after the first team, leaving the other teams without
+  their starting-resources adjustment.
+- **Not for the RTS-AI server**: Si_RTS_AI's alien planner expands via Node lines and would be stuck
+  at the starting Nest radius with this on (vanilla commander AI likewise picks its expansion
+  building by the anchor flag).
+
+---
+
+## 2026-09-13 — Unit cap multiplier per match type (v7.3.0)
+
+New top-level config section **`unit_cap_mult`** with `two_way` / `three_way` (int; `-1` = keep the
+server's `capmult` setting, `0` = unlimited, `N` = every cap entry's `CapBase × N`). 2-way covers
+`HUMANS_VS_HUMANS` and `HUMANS_VS_ALIENS`; 3-way covers `HUMANS_VS_HUMANS_VS_ALIENS` and
+`HUMANS2_VS_ALIENS` (still three teams' worth of units on the map).
+
+- **Why**: vanilla derives `GameModeExt.UnitCapMultiplier` once from the server's `capmult` param in
+  `Restart → UpdateInitialStrategySettings`, while `TeamsVersus` is still `NONE`; the versus vote resolves
+  later via `SetTeamVersusMode`, which never touches the multiplier. data-bomb's Si_MatchSettings only
+  postfixes that same recompute with one global value, so neither can tell a 2-way from a 3-way match.
+- **How**: `MP_Strategy.SetTeamVersusMode` postfix re-derives the multiplier for the decided mode via
+  `SetUnitCapMultiplier` (the setter RPC-syncs to clients, and `UnitCapEntry.Max` reads it live, so no cap
+  entry has to be rewritten). A second postfix on `GameModeExt.UpdateUnitCapMultFromSetting` re-asserts
+  the per-mode value if the game (or Si_MatchSettings) recomputes it after the mode is known. `-1` calls
+  the vanilla recompute instead, so reverting to `-1` + `!rebalance` (or `!rebalance default`) restores the
+  server setting mid-match.
+- **In-game**: `!b` → HTP → `10. Unit Cap Mult` shows both values plus the live mode/multiplier;
+  `.1 3` / `.2 2` edit with the usual confirm flow. A confirmed save applies immediately to the running
+  match (no `!rebalance` needed).
+- **Discord** balance report lists non-vanilla values under Global Settings. Default config, the live
+  server config and `gen_default_config.py` carry the section with `-1/-1` (no behaviour change until set).
+
+---
+
 ## 2026-07-26 — Ballistics: drop-off, drag, AI-lead & aim compensation (v7.2.0)
 
 New per-projectile **Ballistics** group (in-game `!b` menu + web editor + config), for tuning

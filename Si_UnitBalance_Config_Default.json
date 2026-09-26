@@ -2,6 +2,16 @@
     "enabled": true,
     "dump_fields": false,
     "shrimp_disable_aim": false,
+    "alien_nest_only_build": false,
+    "alien_nest_reach_radius": -1,
+    "alien_nest_finished_anchor_only": false,
+    "alien_queen_logistics_per_nest": false,
+    "alien_queens_max": -1,
+    "count_caps": {
+        "_note": "Absolute per-team unit count caps (alive + queued + in production). -1 = unlimited. shrimp = alien Shrimps; harvester = Sol + Centauri harvesters. Enforced server-side; the commander gets a chat warning when a build is refused.",
+        "shrimp": -1,
+        "harvester": -1
+    },
     "description": "Vanilla base config. All multipliers at 1.00 = no change. _base/_pri_weapon/_sec_weapon show actual game values. Use !rebalance to hot-reload.",
     "tech_time": {
         "_note": "Build time in seconds per tech tier research (all factions). Vanilla: 30s all tiers.",
@@ -32,6 +42,11 @@
             "randomize_pct": -1,
             "keep_production": false
         }
+    },
+    "unit_cap_mult": {
+        "_note": "Unit cap multiplier per match type (CapBase x mult for every cap entry). -1 = keep the server's capmult setting (vanilla: 0/1/2 -> x1/x2/x3, default x2), 0 = unlimited. two_way = HvH / HvA, three_way = HvHvA / H2vA. Applied when the versus vote resolves; !rebalance or the !b HTP menu apply mid-match.",
+        "two_way": -1,
+        "three_way": -1
     },
     "units": {
         "_teleport": {
@@ -405,6 +420,27 @@
             "_base_sense": "FOW:300 Target:1000",
             "target_distance": 1000,
             "fow_distance": 300,
+            "visible_event_radius_mult": 1.0
+        },
+        "Repair Rig": {
+            "_base": "HP:6000 Cost:1500 Build:15.0s T0",
+            "health_mult": 1.0,
+            "cost_mult": 1.0,
+            "build_time_mult": 1.0,
+            "min_tier": -1,
+            "_pri_weapon": "RepairPulse | pen:-50 spd:2000 life:0.1 spread:0.0 mag:0 fi:0.095 reload:1.0",
+            "pri_penetrating_damage_mult": 1.0,
+            "pri_proj_speed_mult": 1.0,
+            "pri_proj_lifetime_mult": 1.0,
+            "pri_accuracy_mult": 1.0,
+            "pri_magazine_mult": 1.0,
+            "pri_fire_rate_mult": 1.0,
+            "pri_reload_time_mult": 1.0,
+            "move_speed_mult": 1.0,
+            "turn_radius_mult": 1.0,
+            "_base_sense": "FOW:200 Target:400",
+            "target_distance": 400,
+            "fow_distance": 200,
             "visible_event_radius_mult": 1.0
         },
         "_comment_sol_uhf": "========== SOL \u2014 Ultra Heavy Factory ==========",
@@ -1123,6 +1159,27 @@
             "_base_sense": "FOW:300 Target:1000",
             "target_distance": 1000,
             "fow_distance": 300,
+            "visible_event_radius_mult": 1.0
+        },
+        "Repair Truck": {
+            "_base": "HP:6000 Cost:1500 Build:15.0s T0",
+            "health_mult": 1.0,
+            "cost_mult": 1.0,
+            "build_time_mult": 1.0,
+            "min_tier": -1,
+            "_pri_weapon": "RepairRay | pen:-25 spd:2000 life:0.1 spread:0.0 mag:0 fi:0.19 reload:1.0",
+            "pri_penetrating_damage_mult": 1.0,
+            "pri_proj_speed_mult": 1.0,
+            "pri_proj_lifetime_mult": 1.0,
+            "pri_accuracy_mult": 1.0,
+            "pri_magazine_mult": 1.0,
+            "pri_fire_rate_mult": 1.0,
+            "pri_reload_time_mult": 1.0,
+            "move_speed_mult": 1.0,
+            "turn_radius_mult": 1.0,
+            "_base_sense": "FOW:200 Target:400",
+            "target_distance": 400,
+            "fow_distance": 200,
             "visible_event_radius_mult": 1.0
         },
         "_comment_cen_uhf": "========== CENTAURI \u2014 Ultra Heavy Factory ==========",

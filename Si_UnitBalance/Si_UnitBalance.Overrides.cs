@@ -3040,6 +3040,126 @@ namespace Si_UnitBalance
         // Shrimp: prevent AI from auto-attacking (player attacks still work)
         // =============================================
 
+        // =============================================
+        // Nest-only alien building ("alien_nest_only_build")
+        //
+        // ObjectInfo.StructureConstructionAnchor decides which structures new buildings may be
+        // placed around (ConstructionData.GetWithinBaseStructuresDistanceAndFogOfWar only measures
+        // against IsConstructionAnchor structures) and which existing structures a freshly spawned
+        // AlienStructure links to (AlienStructure.InitLink filters on CanBeConstructionAnchor).
+        // Vanilla has it true on every alien structure, so cysts/nodes/caches creep the build area
+        // outward. With the flag off on everything but the Nest, aliens can only build within
+        // build_radius of a Nest and expand by building new Nests.
+        //
+        // The game reads the flag live from the ObjectInfo asset, so the OM overlay is enough (no
+        // prefab-baked copy, no PrefabPool concern) and it syncs to clients, keeping the client-side
+        // placement preview in agreement with the server. Structures already placed keep the links
+        // they made at spawn; only new placements/spawns see the change.
+        // =============================================
+
+        private static readonly HashSet<string> _nestOnlyMutated = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private static void ApplyAlienNestOnlyBuild(bool useOM)
+        {
+            // Toggle off: OM path is already clean (RevertAll ran before this apply); the direct
+            // path restores whatever we flipped.
+            if (!_alienNestOnlyBuild)
+            {
+                if (!useOM && _nestOnlyMutated.Count > 0)
+                {
+                    foreach (var info in Resources.FindObjectsOfTypeAll<ObjectInfo>())
+                        if (info != null && _nestOnlyMutated.Contains(info.name))
+                            info.StructureConstructionAnchor = true;
+                    _nestOnlyMutated.Clear();
+                }
+                return;
+            }
+
+            try
+            {
+                int applied = 0;
+                var names = new List<string>();
+                foreach (var info in Resources.FindObjectsOfTypeAll<ObjectInfo>())
+                {
+                    if (info == null || info.Prefab == null) continue;
+                    if (!info.name.StartsWith("ObjectInfo_Alien_", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (info.name.Equals("ObjectInfo_Alien_Nest", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (info.Prefab.GetComponent<AlienStructure>() == null) continue; // creatures/tech tiers aren't anchors anyway
+                    if (!info.StructureConstructionAnchor) continue;
+
+                    bool ok;
+                    if (useOM)
+                        ok = OMSetBool($"A:{info.name}.asset", "StructureConstructionAnchor", false);
+                    else
+                    {
+                        info.StructureConstructionAnchor = false;
+                        _nestOnlyMutated.Add(info.name);
+                        ok = true;
+                    }
+                    if (ok) { applied++; names.Add(info.DisplayName); }
+                }
+                MelonLogger.Msg($"[NESTONLY] Alien nest-only build ON: anchor flag off on {applied} structures ({string.Join(", ", names)}){(useOM ? " (OM)" : "")}");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[NESTONLY] Failed: {ex.Message}");
+            }
+        }
+
+        // =============================================
+        // Alien queens per team ("alien_queens_max")
+        //
+        // The Nest prefab carries a SpawnOnInit whose SpawnObject is the Queen and whose
+        // MoveToCompartment is the Nest's AlienQueenCompartment. SpawnOnInit.Start runs on the server
+        // for every Nest instance (built ones included) and skips the spawn once
+        // Team.GetUnitCount(Queen) >= MaxPerTeam — vanilla 1, hence only the starting Nest has a
+        // Queen. Raising MaxPerTeam (0 = no limit) gives expansion Nests their own docked Queen.
+        // Server-side only (clients never run Start's spawn), so a direct prefab mutation is enough;
+        // applies to Nests spawned after the change.
+        // =============================================
+
+        private static int? _originalQueenMaxPerTeam; // never cleared: prefab survives map changes and we always re-apply
+
+        private static string FmtQueensMax(int v) => v < 0 ? "vanilla" : v == 0 ? "every Nest" : v.ToString();
+
+        private static void ApplyAlienQueensMax()
+        {
+            try
+            {
+                SpawnOnInit target = null;
+                foreach (var info in Resources.FindObjectsOfTypeAll<ObjectInfo>())
+                {
+                    if (info == null || info.Prefab == null) continue;
+                    if (!info.name.Equals("ObjectInfo_Alien_Nest", StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (var soi in info.Prefab.GetComponentsInChildren<SpawnOnInit>(true))
+                    {
+                        if (soi == null || soi.SpawnObject == null) continue;
+                        if (soi.SpawnObject.name.IndexOf("Queen", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        target = soi;
+                        break;
+                    }
+                    if (target != null) break;
+                }
+                if (target == null)
+                {
+                    if (_alienQueensMax >= 0)
+                        MelonLogger.Warning("[QUEENS] Nest prefab has no SpawnOnInit for the Queen — alien_queens_max inactive");
+                    return;
+                }
+
+                if (_originalQueenMaxPerTeam == null) _originalQueenMaxPerTeam = target.MaxPerTeam;
+                int wanted = _alienQueensMax < 0 ? _originalQueenMaxPerTeam.Value : _alienQueensMax;
+                int before = target.MaxPerTeam;
+                target.MaxPerTeam = wanted;
+                if (before != wanted || _alienQueensMax >= 0)
+                    MelonLogger.Msg($"[QUEENS] Nest SpawnOnInit.MaxPerTeam {before} -> {wanted} (vanilla {_originalQueenMaxPerTeam.Value}; config {FmtQueensMax(_alienQueensMax)})");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[QUEENS] Failed: {ex.Message}");
+            }
+        }
+
         private static void ApplyShrimpAimDisable()
         {
             try

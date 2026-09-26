@@ -1,6 +1,6 @@
 import json
 
-data = json.load(open('C:/Users/schwe/Projects/Si_UnitBalance/dumps/Si_UnitBalance_Dump_2026-03-04_v4_multiturret.json'))
+data = json.load(open('C:/Users/schwe/Projects/Si_UnitBalanceUI/dumps/Si_UnitBalance_Dump_2026-09-05_beta0.9.46.json'))
 units_list = data['units']
 
 by_name = {}
@@ -44,6 +44,9 @@ projectile_db = {
     'ProjectileData_SMG':           {'impact': 27, 'speed': 350, 'life': 3},
     'ProjectileData_SMG2':          {'impact': 85, 'speed': 450, 'life': 3},
     'ProjectileData_SniperRifle':   {'impact': 700, 'speed': 800, 'life': 5},
+    # Repair beams — negative penetrating damage = heal per shot, splash flag off
+    'ProjectileData_RepairPulse':          {'pen': -50, 'speed': 2000, 'life': 0.1},   # Sol Repair Rig
+    'ProjectileData_RepairRay':            {'pen': -25, 'speed': 2000, 'life': 0.1},   # Cent Repair Truck
     # Vehicle LMG/MMG
     'ProjectileData_LMG_LightQuad':        {'impact': 50, 'ricochet': 8, 'speed': 400, 'life': 3},
     'ProjectileData_LMG_LightArmoredCar':  {'impact': 75, 'ricochet': 25, 'speed': 500, 'life': 5},
@@ -135,6 +138,7 @@ vehicle_projectiles = {
     'Barrage Truck':  {'pri': 'ProjectileData_Rocket_BarrageTruck'},
     'Railgun Tank':   {'pri': 'ProjectileData_Railgun_RailgunTank', 'sec': 'ProjectileData_Rocket_RailgunTank'},
     'Pulse Truck':    {'pri': 'ProjectileData_PulseTank'},
+    'Repair Rig':     {'pri': 'ProjectileData_RepairPulse'},
     # Sol Ultra Heavy Factory
     'Siege Tank':     {'pri': 'ProjectileData_Plasma_SiegeTank'},
     # Sol Air Factory
@@ -154,6 +158,7 @@ vehicle_projectiles = {
     'Rocket Tank':    {'pri': 'ProjectileData_Rocket_RocketTank'},
     'Heavy Tank':     {'pri': 'ProjectileData_Shell_HeavyTank', 'sec': 'ProjectileData_HMG_HeavyTank'},
     'Pyro Tank':      {'pri': 'ProjectileData_Flamethrower'},
+    'Repair Truck':   {'pri': 'ProjectileData_RepairRay'},
     # Centauri Ultra Heavy Factory
     'Crimson Tank':   {'pri': 'ProjectileData_Shell_CrimsonTank'},
     # Centauri Air Factory
@@ -263,7 +268,7 @@ def fmt_damage_parts(pd_name):
     if stats.get('splash', 0) > 0:
         sr_max = stats.get('splash_r_max', 10)
         parts.append(f"spl:{int(stats['splash'])}/r{sr_max:g}")
-    if stats.get('pen', 0) > 0: parts.append(f"pen:{int(stats['pen'])}")
+    if stats.get('pen', 0) != 0: parts.append(f"pen:{int(stats['pen'])}")
     if stats.get('ricochet', 0) > 0: parts.append(f"ric:{int(stats['ricochet'])}")
     return ' '.join(parts) if parts else 'dmg:0'
 
@@ -311,7 +316,7 @@ def emit_damage_keys(e, pd_name, prefix=''):
     if stats.get('splash', 0) > 0:
         e[f'{prefix}splash_damage_mult'] = 1.00
         emitted = True
-    if stats.get('pen', 0) > 0:
+    if stats.get('pen', 0) != 0:
         e[f'{prefix}penetrating_damage_mult'] = 1.00
         emitted = True
     if stats.get('ricochet', 0) > 0:
@@ -578,6 +583,16 @@ config = {
     "enabled": True,
     "dump_fields": False,
     "shrimp_disable_aim": False,
+    "alien_nest_only_build": False,
+    "alien_nest_reach_radius": -1,
+    "alien_nest_finished_anchor_only": False,
+    "alien_queen_logistics_per_nest": False,
+    "alien_queens_max": -1,
+    "count_caps": {
+        "_note": "Absolute per-team unit count caps (alive + queued + in production). -1 = unlimited. shrimp = alien Shrimps; harvester = Sol + Centauri harvesters. Enforced server-side; the commander gets a chat warning when a build is refused.",
+        "shrimp": -1,
+        "harvester": -1,
+    },
     "revert_on_round_end": True,
     "health_mult_enabled": False,  # Server-only: health changes are NOT synced to clients (health bars/cheat mode show vanilla values)
     "description": "Vanilla base config. All multipliers at 1.00 = no change. _base/_pri_weapon/_sec_weapon show actual game values. Use !rebalance to hot-reload.",
@@ -587,6 +602,12 @@ config["tech_time"] = {
     "_note": "Build time in seconds per tech tier research (all factions). Vanilla: 30s all tiers.",
     "tier_1": 30, "tier_2": 30, "tier_3": 30, "tier_4": 30,
     "tier_5": 30, "tier_6": 30, "tier_7": 30, "tier_8": 30,
+}
+
+config["unit_cap_mult"] = {
+    "_note": "Unit cap multiplier per match type (CapBase x mult for every cap entry). -1 = keep the server's capmult setting (vanilla: 0/1/2 -> x1/x2/x3, default x2), 0 = unlimited. two_way = HvH / HvA, three_way = HvHvA / H2vA. Applied when the versus vote resolves; !rebalance or the !b HTP menu apply mid-match.",
+    "two_way": -1,
+    "three_way": -1,
 }
 
 uc = {}
@@ -604,7 +625,7 @@ for n in ['Light Quad', 'Platoon Hauler', 'Heavy Quad', 'Light Striker', 'Heavy 
 
 uc["_comment_sol_hf"] = "========== SOL — Heavy Factory =========="
 uc['Hover Tank'] = build_unit('Hover Tank', by_name['Hover Tank'], 'hovered_vehicle')
-for n in ['Barrage Truck', 'Railgun Tank', 'Pulse Truck']:
+for n in ['Barrage Truck', 'Railgun Tank', 'Pulse Truck', 'Repair Rig']:
     uc[n] = build_unit(n, by_name[n], 'wheeled_vehicle')
 
 uc["_comment_sol_uhf"] = "========== SOL — Ultra Heavy Factory =========="
@@ -632,7 +653,7 @@ for n in ['Light Raider', 'Squad Transport', 'Heavy Raider', 'Assault Car', 'Str
     uc[n] = build_unit(n, by_name[n], 'wheeled_vehicle')
 
 uc["_comment_cen_hf"] = "========== CENTAURI — Heavy Factory =========="
-for n in ['Combat Tank', 'Rocket Tank', 'Heavy Tank', 'Pyro Tank']:
+for n in ['Combat Tank', 'Rocket Tank', 'Heavy Tank', 'Pyro Tank', 'Repair Truck']:
     uc[n] = build_unit(n, by_name[n], 'wheeled_vehicle')
 
 uc["_comment_cen_uhf"] = "========== CENTAURI — Ultra Heavy Factory =========="
@@ -776,7 +797,8 @@ for n in ['Scout', 'Rifleman', 'Sniper', 'Heavy', 'Commando', 'Militia', 'Troope
 for n in ['Light Quad', 'Platoon Hauler', 'Heavy Quad', 'Light Striker', 'Heavy Striker', 'AA Truck',
           'Barrage Truck', 'Railgun Tank', 'Pulse Truck', 'Cent Harvester', 'Siege Tank',
           'Light Raider', 'Squad Transport', 'Heavy Raider', 'Assault Car', 'Strike Tank', 'Flak Car',
-          'Combat Tank', 'Rocket Tank', 'Heavy Tank', 'Pyro Tank', 'Crimson Tank']:
+          'Combat Tank', 'Rocket Tank', 'Heavy Tank', 'Pyro Tank', 'Crimson Tank',
+          'Repair Rig', 'Repair Truck']:
     unit_types[n] = 'wheeled_vehicle'
 for n in ['Hover Tank', 'Hover Bike', 'Sol Harvester']:
     unit_types[n] = 'hovered_vehicle'

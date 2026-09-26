@@ -32,7 +32,9 @@ Admins can type `!b` in chat to open an interactive menu for editing any unit or
 ├── 2. Centauri         — Centauri faction units & structures
 ├── 3. Alien            — Alien faction units & structures
 ├── 4. JSON             — Save / Load / Reset configs
-└── 5. HTP              — Hoverbike, Tier, Teleportation, Shrimp Aim
+├── 5. HTP              — Hoverbike, Tier, Teleportation, misc toggles
+├── 6. Cap&Decay        — Unit cap, structure decay, count caps
+└── 7. Strategystyle    — Alien nest-centric build rules
 ```
 
 ### Unit Parameter Groups
@@ -62,6 +64,32 @@ To set a value: `.1 1.5` (sets parameter #1 to 1.5), then confirm with `.1` (sav
 | **2. Tier** | Tech-up research time per tier (Tier 1-8, default 30s each) |
 | **3. Teleportation** | HQ teleport cooldown (default 120s) and duration (default 5s) |
 | **4. Shrimp Aim** | Toggle shrimp AI targeting on/off (shown as `[ON]`/`[OFF]`) |
+| **5. Additional Spawn** | Toggle (applies next game) |
+| **6. Discord** | Auto-post toggle + webhook URL |
+| **7. Watchdog** | Round-transition stall recovery toggle |
+
+### Cap&Decay Menu
+
+| Option | Description |
+|---|---|
+| **1. Decay** | Per-faction structure decay when unlinked from HQ/Nest (enable, keep_production, delay, tick, amount_pct, randomize_pct) |
+| **2. Player Cap Exempt** | Toggle: player-controlled infantry don't fill the unit cap (immediate) |
+| **3. Unit Cap Mult 2-way** | CapBase × mult for HvH / HvA matches. `.1 <mult>`; `-1` = server capmult, `0` = unlimited. Applies to the running match on save |
+| **4. Unit Cap Mult 3-way** | Same for HvHvA / H2vA matches |
+| **5. Shrimp Cap** | Absolute per-team max of alien Shrimps (alive + queued + in production). `.1 <max>`; `-1` = unlimited. Builds beyond the cap are refused and the commander gets a chat warning. Immediate |
+| **6. Harvester Cap** | Same for Sol/Centauri harvesters |
+
+### Strategystyle Menu
+
+Alien nest-centric build rules. Not for the RTS-AI server (its alien planner expands via Node lines).
+
+| Option | Description |
+|---|---|
+| **1. Alien Nest-Only Build** | Toggle: only Nests act as construction anchors for aliens (cysts/nodes/caches no longer extend the build area — expand by building new Nests). `!rebalance` to apply |
+| **2. Alien Nest Reach Radius** | Nodes and Bio Caches may only be placed within this distance (metres, 2D) of a friendly Nest — built or under construction. Further placements are refused and the commander gets a chat warning + a sound. `.1 <metres>`; `-1` = vanilla (no limit). Immediate |
+| **3. Alien Queens** | Max Queens per team. Every newly built Nest spawns its own docked Queen while the team is below max (vanilla `1` = only the starting Nest). `.1 <n>`; `0` = every Nest; `-1` = vanilla. Server-side, immediate for Nests built after saving |
+| **4. Alien Nest Finished-Anchor Only** | Toggle: a new Nest must be within anchor range (`build_radius`) of a *finished* structure — a Nest still under construction can't anchor the next one (vanilla accepts construction sites as anchors, so aliens can chain Nest → Nest → Nest before the previous one exists). Parallel Nests off a finished Nest are fine. Refused placements cost nothing; the commander gets a chat warning + a sound. Immediate |
+| **5. Queen Logistics per Nest** | Toggle: an alien structure can only build / produce while its **nearest finished Nest** (2D distance; a Nest counts as its own) has its Queen docked. Vanilla checks team-wide — one docked Queen anywhere unlocks everything, so only the starter Queen leaving (with no other Queen docked) ever blocks building. With one Nest identical to vanilla; with expansion Nests every structure depends on the Queen of the Nest it sits closest to. Needs **3. Alien Queens** `0` (or N) so expansion Nests have a Queen. Refused requests cost nothing; commander gets a chat warning + a sound. Immediate |
 
 ### JSON Config Management
 

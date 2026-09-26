@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.2.0", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.7.1", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -53,6 +53,32 @@ namespace Si_UnitBalance
         private static bool _shrimpDisableAim = false;
         private static bool _additionalSpawn = false;
         private static bool _playerInfantryIgnoreCap = false; // exclude player-controlled infantry from unit cap (HTP toggle)
+        // Nest-only alien building ("alien_nest_only_build"): every alien structure except the Nest
+        // stops counting as a construction anchor, so aliens can only build around Nests.
+        private static bool _alienNestOnlyBuild = false;
+        // Absolute per-team unit count caps ("count_caps" config section): -1 = unlimited.
+        // Enforced in a Structure.Construct prefix; the team's commander gets a chat warning.
+        private static int _countCapShrimp = -1;
+        private static int _countCapHarvester = -1;
+        // Alien nest reach ("alien_nest_reach_radius", metres): Nodes and Bio Caches may only be placed
+        // within this 2D distance of a friendly Nest (built or under construction). -1 = vanilla, no limit.
+        private static float _alienNestReachRadius = -1f;
+        // Alien nest finished-anchor only ("alien_nest_finished_anchor_only"): a new Nest must be within
+        // anchor range of a FINISHED structure. Vanilla also accepts construction sites as anchors, so
+        // aliens can chain Nest -> Nest -> Nest outward before the previous Nest exists.
+        private static bool _alienNestFinishedAnchorOnly = false;
+        // Alien Queen logistics per Nest ("alien_queen_logistics_per_nest"): an alien structure may only
+        // build / produce while its NEAREST finished Nest (2D; a Nest = itself) has its Queen docked.
+        // Vanilla's Team.GetNeedConstructionLogistics is team-wide — one docked Queen anywhere unlocks everything.
+        private static bool _alienQueenLogisticsPerNest = false;
+        // Alien queens ("alien_queens_max"): how many Queens a team may have. The Nest prefab's SpawnOnInit
+        // spawns a Queen into every Nest's compartment, capped by MaxPerTeam (vanilla 1 → only the
+        // starting Nest gets one). -1 = vanilla, 0 = every Nest gets a Queen, N = at most N per team.
+        private static int _alienQueensMax = -1;
+        // Unit cap multiplier per match type ("unit_cap_mult" config section). -1 = keep the server's
+        // capmult setting, 0 = unlimited, N = CapBase x N. Applied when the versus mode is decided.
+        private static int _unitCapMult2Way = -1;
+        private static int _unitCapMult3Way = -1;
         // _revertOnRoundEnd removed — always false (reverting breaks starter structure overrides)
         private static bool _healthMultEnabled = true; // always enabled — client mod handles sync
         private static bool _overridesApplied; // tracks if OM overrides are currently active (for no-revert mode)
@@ -80,6 +106,7 @@ namespace Si_UnitBalance
         // Chat commands: !rebalance, !b (balance editor UI)
         private static MethodInfo _sendChatToPlayerMethod; // HelperMethods.SendChatMessageToPlayer
         private static MethodInfo _sendConsoleToPlayerMethod; // HelperMethods.SendConsoleMessageToPlayer
+        private static MethodInfo _playSoundFileMethod;        // AudioHelper.PlaySoundFile(string, Player) — streams a UserData WAV to one player
         private static MethodInfo _registerAdminCmdMethod;
         private static MethodInfo _registerPlayerCmdMethod;
         private static Type _adminPowerType;
@@ -90,7 +117,8 @@ namespace Si_UnitBalance
         // Per-player menu state for !b command (keyed by SteamID for stable identity across Il2Cpp wrappers)
         private static readonly Dictionary<long, BalanceMenuState> _menuStates = new Dictionary<long, BalanceMenuState>();
 
-        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTierTime, HTPTierCost, HTPTeleport, HTPDecay, HTPDecayFaction, DiscordMenu }
+        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTierTime, HTPTierCost, HTPTeleport, HTPDecay, HTPDecayFaction, HTPUnitCap, DiscordMenu, CapDecayMenu, CountCap, NestReach, QueensMax, StrategyMenu }
+        // HTPDecay* / HTPUnitCap live under Cap&Decay (root 6) since v7.4.0; enum names kept for the save/audit plumbing.
         private class BalanceMenuState
         {
             public MenuLevel Level = MenuLevel.Root;
@@ -102,6 +130,8 @@ namespace Si_UnitBalance
             public int HTPParamGroupIdx;       // for Hoverbike param groups
             public int HTPTeleportStructIdx;   // for Teleportation structure selection
             public int HTPDecayFactionIdx;     // 0=Human, 1=Alien
+            public int HTPUnitCapModeIdx;      // 0=2-way, 1=3-way (Cap&Decay > Unit Cap Mult pages)
+            public int CountCapIdx;            // 0=Shrimp, 1=Harvester (Cap&Decay > count cap pages)
             // Pending confirmation
             public bool PendingConfirm;
             public string PendingParamKey;
@@ -350,7 +380,7 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
-            MelonLogger.Msg($"Unit Balance v7.2.0 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.7.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -495,6 +525,63 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("Patched Team.UpdateUnitCapValues for player-infantry cap exemption");
                 }
 
+                // 0.9.47: null entries in GameDatabase.AllNetworkedPrefabs make the vanilla by-name
+                // prefab lookup throw for every mod that spawns by name. Replace it with a null-safe copy.
+                try
+                {
+                    var byName = AccessTools.Method(typeof(GameDatabase), "GetSpawnablePrefabIndex", new[] { typeof(string) });
+                    if (byName != null)
+                    {
+                        harmony.Patch(byName, prefix: new HarmonyMethod(typeof(Patch_GetSpawnablePrefabIndex), "Prefix"));
+                        MelonLogger.Msg("Patched GameDatabase.GetSpawnablePrefabIndex(string) to skip null prefab entries");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[PREFAB] Failed to patch GetSpawnablePrefabIndex: {ex.Message}");
+                }
+
+                // Absolute unit count caps (Shrimp / Harvester): every production request — client RPC,
+                // AI commander, alien cyst pop — funnels through Structure.Construct on the server.
+                try
+                {
+                    var construct = AccessTools.Method(typeof(Structure), "Construct",
+                        new[] { typeof(ConstructionData), typeof(Vector3), typeof(Quaternion), typeof(bool) });
+                    if (construct != null)
+                    {
+                        harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_CountCap), "Prefix"));
+                        harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_NestReach), "Prefix"));
+                        harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_NestFinishedAnchor), "Prefix"));
+                        harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_QueenLogisticsPerNest), "Prefix"));
+                        MelonLogger.Msg("Patched Structure.Construct for Shrimp/Harvester count caps + alien nest reach + nest finished-anchor + queen logistics per nest");
+                    }
+                    else MelonLogger.Warning("[CountCap] Structure.Construct not found — count caps / nest reach / nest finished-anchor / queen logistics inactive");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[CountCap] Failed to patch Structure.Construct: {ex.Message}");
+                }
+
+                // Unit cap multiplier per match type: the game derives UnitCapMultiplier from the
+                // server's capmult param at round restart, before the versus vote has resolved, so
+                // re-derive it the moment the versus mode is set (and whenever the game recomputes it).
+                try
+                {
+                    var setVersus = AccessTools.Method(typeof(MP_Strategy), "SetTeamVersusMode");
+                    if (setVersus != null)
+                    {
+                        harmony.Patch(setVersus, postfix: new HarmonyMethod(typeof(Patch_UnitCapMultVersus), "Postfix"));
+                        MelonLogger.Msg("Patched MP_Strategy.SetTeamVersusMode for per-match-type unit cap multiplier");
+                    }
+                    var updateCapMult = AccessTools.Method(typeof(GameModeExt), "UpdateUnitCapMultFromSetting");
+                    if (updateCapMult != null)
+                        harmony.Patch(updateCapMult, postfix: new HarmonyMethod(typeof(Patch_UnitCapMultSetting), "Postfix"));
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[UnitCapMult] Failed to apply patches: {ex.Message}");
+                }
+
                 // Register chat commands via AdminMod API
                 try
                 {
@@ -517,6 +604,7 @@ namespace Si_UnitBalance
                         // Cache SendChatMessageToPlayer for UI
                         _sendChatToPlayerMethod = helperType.GetMethod("SendChatMessageToPlayer", BindingFlags.Public | BindingFlags.Static);
                         _sendConsoleToPlayerMethod = helperType.GetMethod("SendConsoleMessageToPlayer", BindingFlags.Public | BindingFlags.Static);
+                        _playSoundFileMethod = helperType.Assembly.GetType("SilicaAdminMod.AudioHelper")?.GetMethod("PlaySoundFile", BindingFlags.Public | BindingFlags.Static);
 
                         // Cache Player.PlayerName and Player.PlayerID for audit log
                         _playerNameField = typeof(Player).GetField("PlayerName", BindingFlags.Public | BindingFlags.Instance);
@@ -646,6 +734,21 @@ namespace Si_UnitBalance
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
                 _playerInfantryIgnoreCap = config["player_infantry_ignore_cap"]?.Value<bool>() ?? false;
+                _alienNestOnlyBuild = config["alien_nest_only_build"]?.Value<bool>() ?? false;
+                _alienNestReachRadius = config["alien_nest_reach_radius"]?.Value<float>() ?? -1f;
+                if (_alienNestReachRadius < 1f) _alienNestReachRadius = -1f;
+                if (_alienNestReachRadius > 0f)
+                    MelonLogger.Msg($"[CONFIG] Alien nest reach radius: {_alienNestReachRadius:F0} m (Nodes / Bio Caches only within reach of a Nest)");
+                _alienNestFinishedAnchorOnly = config["alien_nest_finished_anchor_only"]?.Value<bool>() ?? false;
+                if (_alienNestFinishedAnchorOnly)
+                    MelonLogger.Msg("[CONFIG] Alien nest finished-anchor only: a new Nest must anchor to a finished structure, not a construction site");
+                _alienQueenLogisticsPerNest = config["alien_queen_logistics_per_nest"]?.Value<bool>() ?? false;
+                if (_alienQueenLogisticsPerNest)
+                    MelonLogger.Msg("[CONFIG] Alien Queen logistics per Nest: structures build only while their own Nest's Queen is docked");
+                _alienQueensMax = config["alien_queens_max"]?.Value<int>() ?? -1;
+                if (_alienQueensMax < -1) _alienQueensMax = -1;
+                if (_alienQueensMax >= 0)
+                    MelonLogger.Msg($"[CONFIG] Alien queens max: {FmtQueensMax(_alienQueensMax)}");
                 // _revertOnRoundEnd removed — always false (reverting breaks starter structure overrides)
                 _healthMultEnabled = config["health_mult_enabled"]?.Value<bool>() ?? true;
 
@@ -708,6 +811,36 @@ namespace Si_UnitBalance
                 _dispenseTimeout = -1f;
                 _decayHuman = new DecaySettings();
                 _decayAlien = new DecaySettings();
+                _unitCapMult2Way = -1;
+                _unitCapMult3Way = -1;
+                _countCapShrimp = -1;
+                _countCapHarvester = -1;
+
+                // Load absolute unit count caps
+                var countCapSection = config["count_caps"] as JObject;
+                if (countCapSection != null)
+                {
+                    _countCapShrimp = countCapSection["shrimp"]?.Value<int>() ?? -1;
+                    _countCapHarvester = countCapSection["harvester"]?.Value<int>() ?? -1;
+                    if (_countCapShrimp < -1) _countCapShrimp = -1;
+                    if (_countCapHarvester < -1) _countCapHarvester = -1;
+                    if (_countCapShrimp >= 0 || _countCapHarvester >= 0)
+                        MelonLogger.Msg($"[CONFIG] Count caps — Shrimp: {FmtCountCap(_countCapShrimp)}, Harvester: {FmtCountCap(_countCapHarvester)}");
+                }
+
+                // Load unit cap multiplier per match type
+                var capMultSection = config["unit_cap_mult"] as JObject;
+                if (capMultSection != null)
+                {
+                    _unitCapMult2Way = capMultSection["two_way"]?.Value<int>() ?? -1;
+                    _unitCapMult3Way = capMultSection["three_way"]?.Value<int>() ?? -1;
+                    if (_unitCapMult2Way < -1) _unitCapMult2Way = -1;
+                    if (_unitCapMult3Way < -1) _unitCapMult3Way = -1;
+                    if (_unitCapMult2Way > 255) _unitCapMult2Way = 255; // synced to clients as a byte
+                    if (_unitCapMult3Way > 255) _unitCapMult3Way = 255;
+                    if (_unitCapMult2Way >= 0 || _unitCapMult3Way >= 0)
+                        MelonLogger.Msg($"[CONFIG] Unit cap mult — 2-way: {FmtCapMult(_unitCapMult2Way)}, 3-way: {FmtCapMult(_unitCapMult3Way)}");
+                }
 
                 // Load per-faction decay settings
                 var decaySection = config["decay"] as JObject;
@@ -1052,10 +1185,17 @@ namespace Si_UnitBalance
     ""enabled"": true,
     ""dump_fields"": false,
     ""shrimp_disable_aim"": false,
+    ""alien_nest_only_build"": false,
+    ""alien_nest_reach_radius"": -1,
+    ""alien_nest_finished_anchor_only"": false,
+    ""alien_queen_logistics_per_nest"": false,
+    ""alien_queens_max"": -1,
     ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
     ""tech_time"": { ""tier_1"": 30, ""tier_2"": 30, ""tier_3"": 30, ""tier_4"": 30, ""tier_5"": 30, ""tier_6"": 30, ""tier_7"": 30, ""tier_8"": 30 },
     ""tech_cost"": { ""tier_1"": -1, ""tier_2"": -1, ""tier_3"": -1, ""tier_4"": -1, ""tier_5"": -1, ""tier_6"": -1, ""tier_7"": -1, ""tier_8"": -1 },
     ""decay"": { ""human"": { ""enabled"": true, ""keep_production"": false }, ""alien"": { ""enabled"": true, ""keep_production"": false } },
+    ""unit_cap_mult"": { ""two_way"": -1, ""three_way"": -1 },
+    ""count_caps"": { ""shrimp"": -1, ""harvester"": -1 },
     ""units"": {}
 }";
                 File.WriteAllText(_configPath, defaultJson);

@@ -87,7 +87,7 @@ namespace Si_UnitBalance
             new[] {
                 new[] { "Scout", "Rifleman", "Sniper", "Heavy", "Commando" },
                 new[] { "Light Quad", "Platoon Hauler", "Heavy Quad", "Light Striker", "Heavy Striker", "AA Truck" },
-                new[] { "Hover Tank", "Barrage Truck", "Railgun Tank", "Pulse Truck" },
+                new[] { "Hover Tank", "Barrage Truck", "Railgun Tank", "Pulse Truck", "Repair Rig" },
                 new[] { "Sol Harvester", "Siege Tank" },
                 new[] { "Gunship", "Dropship", "Fighter", "Bomber" },
                 new[] { "Sol Headquarters", "Refinery", "Research Facility", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Silo", "Radar Station", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
@@ -96,7 +96,7 @@ namespace Si_UnitBalance
             new[] {
                 new[] { "Militia", "Trooper", "Marksman", "Juggernaut", "Templar" },
                 new[] { "Light Raider", "Squad Transport", "Heavy Raider", "Assault Car", "Strike Tank", "Flak Car" },
-                new[] { "Combat Tank", "Rocket Tank", "Heavy Tank", "Pyro Tank" },
+                new[] { "Combat Tank", "Rocket Tank", "Heavy Tank", "Pyro Tank", "Repair Truck" },
                 new[] { "Cent Harvester", "Crimson Tank" },
                 new[] { "Shuttle", "Dreadnought", "Interceptor", "Freighter" },
                 new[] { "Cent Headquarters", "Refinery", "Research Facility", "Barracks", "Air Factory", "Heavy Factory", "Ultra Heavy Factory", "Silo", "Radar Station", "Turret", "Heavy Turret", "Anti-Air Rocket Turret" },
@@ -1840,7 +1840,7 @@ namespace Si_UnitBalance
             switch (state.Level)
             {
                 case MenuLevel.Root:
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Sol  " + _itemColor + "2.</color> Centauri  " + _itemColor + "3.</color> Alien  " + _itemColor + "4.</color> JSON  " + _itemColor + "5.</color> HTP");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Sol  " + _itemColor + "2.</color> Centauri  " + _itemColor + "3.</color> Alien  " + _itemColor + "4.</color> JSON  " + _itemColor + "5.</color> HTP  " + _itemColor + "6.</color> Cap&Decay  " + _itemColor + "7.</color> Strategystyle");
                     break;
 
                 case MenuLevel.Faction:
@@ -1953,15 +1953,43 @@ namespace Si_UnitBalance
                 // ── HTP (Hover · Tier · Teleportation) ──────────────
                 case MenuLevel.HTPMenu:
                 {
-                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP</color> " + _dimColor + "(Hover · Tier · Teleportation)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP</color> " + _dimColor + "(Hover · Tier · Teleportation · misc)</color>");
                     string shrimpStatus = _shrimpDisableAim ? "<color=#FF5555>OFF</color>" : "<color=#55FF55>ON</color>";
                     string spawnStatus = _additionalSpawn ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Hoverbike  " + _itemColor + "2.</color> Tier  " + _itemColor + "3.</color> Teleportation  " + _itemColor + "4.</color> Shrimp Aim [" + shrimpStatus + "]");
                     string watchdogStatus = _watchdogEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]  " + _itemColor + "6.</color> Discord");
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]  " + _itemColor + "8.</color> Decay");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]");
+                    break;
+                }
+
+                // ── Cap&Decay (unit cap · structure decay · count caps) ──
+                case MenuLevel.CapDecayMenu:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Cap&Decay</color> " + _dimColor + "(unit cap · structure decay · count caps)</color>");
+                    string humanDecay = _decayHuman.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    string alienDecay = _decayAlien.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Decay " + _dimColor + "(Human [</color>" + humanDecay + _dimColor + "] · Alien [</color>" + alienDecay + _dimColor + "])</color>");
                     string capExemptStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "9.</color> Player Cap Exempt [" + capExemptStatus + "] " + _dimColor + "(player soldiers don't fill cap)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Player Cap Exempt [" + capExemptStatus + "] " + _dimColor + "(player soldiers don't fill cap)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "3.</color> Unit Cap Mult 2-way = " + _valueColor + FmtCapMult(_unitCapMult2Way) + "</color> " + _dimColor + "(HvH, HvA)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "4.</color> Unit Cap Mult 3-way = " + _valueColor + FmtCapMult(_unitCapMult3Way) + "</color> " + _dimColor + "(HvHvA, H2vA)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Shrimp Cap = " + _valueColor + FmtCountCap(_countCapShrimp) + "</color>  " + _itemColor + "6.</color> Harvester Cap = " + _valueColor + FmtCountCap(_countCapHarvester) + "</color> " + _dimColor + "(max per team)</color>");
+                    break;
+                }
+
+                // ── Strategystyle (alien nest-centric build rules) ──
+                case MenuLevel.StrategyMenu:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Strategystyle</color> " + _dimColor + "(alien nest-centric build rules)</color>");
+                    string nestOnlyStatus = _alienNestOnlyBuild ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Alien Nest-Only Build [" + nestOnlyStatus + "] " + _dimColor + "(only Nests anchor new buildings; !rebalance)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Alien Nest Reach Radius = " + _valueColor + FmtNestReach(_alienNestReachRadius) + "</color> " + _dimColor + "(Nodes/Bio Caches only this close to a Nest)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "3.</color> Alien Queens = " + _valueColor + FmtQueensMax(_alienQueensMax) + "</color> " + _dimColor + "(Queens per team; new Nests spawn one until reached)</color>");
+                    string nestAnchorStatus = _alienNestFinishedAnchorOnly ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "4.</color> Alien Nest Finished-Anchor Only [" + nestAnchorStatus + "] " + _dimColor + "(a new Nest can't anchor to a Nest still under construction)</color>");
+                    string qlStatus = _alienQueenLogisticsPerNest ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Queen Logistics per Nest [" + qlStatus + "] " + _dimColor + "(structures build only while their nearest Nest's Queen is docked; needs 3. = 0)</color>");
                     break;
                 }
 
@@ -2091,7 +2119,7 @@ namespace Si_UnitBalance
                 {
                     string humanEnabled = _decayHuman.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     string alienEnabled = _decayAlien.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Decay</color> " + _dimColor + "(structure decay when unanchored)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Cap&Decay > Decay</color> " + _dimColor + "(structure decay when unanchored)</color>");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Human (Sol/Centauri) [" + humanEnabled + "]");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Alien [" + alienEnabled + "]");
                     break;
@@ -2112,6 +2140,59 @@ namespace Si_UnitBalance
                     string keepProdStr = ds.KeepProduction ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "6.</color> Keep Production [" + keepProdStr + "]");
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 30 (delay=30s) or .4 0.05 (5% per tick)</color>");
+                    break;
+                }
+
+                // ── Unit Cap Multiplier ──────────────────────────────
+                case MenuLevel.HTPUnitCap:
+                {
+                    string liveMode = "-";
+                    string liveMult = "-";
+                    try
+                    {
+                        var gm = GameMode.CurrentGameMode as GameModeExt;
+                        if (gm != null) { liveMode = gm.TeamsVersus.ToString(); liveMult = FmtCapMult(gm.UnitCapMultiplier); }
+                    }
+                    catch { }
+                    bool is3Way = state.HTPUnitCapModeIdx == 1;
+                    string modeLabel = is3Way ? "3-way" : "2-way";
+                    string modeHint = is3Way ? "HvHvA, H2vA" : "HvH, HvA";
+                    int modeVal = is3Way ? _unitCapMult3Way : _unitCapMult2Way;
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Cap&Decay > Unit Cap Mult " + modeLabel + "</color> " + _dimColor + "(" + modeHint + ")</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> mult = " + _valueColor + FmtCapMult(modeVal) + "</color> " + _dimColor + "(CapBase x mult for every cap entry)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Live: " + liveMode + " -> " + liveMult + " · -1 = server setting, 0 = unlimited</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 3 (x3) · .1 -1 (server) · .1 0 (unlimited)</color>");
+                    break;
+                }
+
+                case MenuLevel.CountCap:
+                {
+                    bool isHarv = state.CountCapIdx == 1;
+                    string ccLabel = isHarv ? "Harvester" : "Shrimp";
+                    string ccHint = isHarv ? "Sol + Centauri harvesters, per team" : "alien Shrimps, per team";
+                    int ccVal = isHarv ? _countCapHarvester : _countCapShrimp;
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Cap&Decay > " + ccLabel + " Cap</color> " + _dimColor + "(" + ccHint + ")</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> max = " + _valueColor + FmtCountCap(ccVal) + "</color> " + _dimColor + "(alive + queued + in production)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Commander gets a chat warning when the cap blocks a build. Applies immediately on save.</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 12 (max 12) · .1 -1 (unlimited)</color>");
+                    break;
+                }
+
+                case MenuLevel.NestReach:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Strategystyle > Alien Nest Reach Radius</color> " + _dimColor + "(nest-centric expansion)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> radius = " + _valueColor + FmtNestReach(_alienNestReachRadius) + "</color> " + _dimColor + "(2D distance to nearest Nest, built or under construction)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Nodes and Bio Caches further away are refused; the commander gets a chat warning + sound. Other alien buildings are unaffected. Applies immediately on save.</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 250 (250 m) · .1 -1 (vanilla, no limit)</color>");
+                    break;
+                }
+
+                case MenuLevel.QueensMax:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Strategystyle > Alien Queens</color> " + _dimColor + "(a Queen per Nest)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> max = " + _valueColor + FmtQueensMax(_alienQueensMax) + "</color> " + _dimColor + "(Queens per team; every newly built Nest spawns a docked Queen while below max)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Vanilla = 1 (only the starting Nest). Server-side, applies to Nests built after saving.</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 0 (every Nest) · .1 3 (at most 3) · .1 -1 (vanilla)</color>");
                     break;
                 }
 
@@ -2321,6 +2402,183 @@ namespace Si_UnitBalance
 
             SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Decay " + factionLabel + " " + paramKey + " " + _valueColor + oldVal + "</color> -> " + _valueColor + newValStr + "</color>");
             SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
+        }
+
+        // ── Unit Cap Multiplier Edit Handler ─────────────────────────
+
+        private static void HandleHTPUnitCapEdit(object player, BalanceMenuState state, int paramIdx, string valueStr)
+        {
+            if (paramIdx != 1)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use .1 <mult> on this page.</color>");
+                return;
+            }
+            bool is3Way = state.HTPUnitCapModeIdx == 1;
+            if (!int.TryParse(valueStr, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int newValue) || newValue < -1 || newValue > 255)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (integer -1..255)</color>");
+                return;
+            }
+
+            string paramKey = is3Way ? "three_way" : "two_way";
+            string label = is3Way ? "3-way" : "2-way";
+            int oldValue = is3Way ? _unitCapMult3Way : _unitCapMult2Way;
+
+            state.PendingConfirm = true;
+            state.PendingParamKey = "unitcapmult_" + paramKey;
+            state.PendingValue = newValue;
+            state.PendingOldVal = oldValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            state.PendingUnitName = "_unit_cap_mult"; // pseudo-unit for save routing / audit log
+
+            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Unit Cap Mult " + label + " " + _valueColor + FmtCapMult(oldValue) + "</color> -> " + _valueColor + FmtCapMult(newValue) + "</color>");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
+        }
+
+        private static void HandleCountCapEdit(object player, BalanceMenuState state, int paramIdx, string valueStr)
+        {
+            if (paramIdx != 1)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use .1 <max> on this page.</color>");
+                return;
+            }
+            if (!int.TryParse(valueStr, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int newValue) || newValue < -1 || newValue > 1000)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (integer -1..1000)</color>");
+                return;
+            }
+
+            bool isHarv = state.CountCapIdx == 1;
+            string paramKey = isHarv ? "harvester" : "shrimp";
+            string label = isHarv ? "Harvester" : "Shrimp";
+            int oldValue = isHarv ? _countCapHarvester : _countCapShrimp;
+
+            state.PendingConfirm = true;
+            state.PendingParamKey = "countcap_" + paramKey;
+            state.PendingValue = newValue;
+            state.PendingOldVal = oldValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            state.PendingUnitName = "_count_caps"; // pseudo-unit for save routing / audit log
+
+            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> " + label + " Cap " + _valueColor + FmtCountCap(oldValue) + "</color> -> " + _valueColor + FmtCountCap(newValue) + "</color>");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
+        }
+
+        private static void HandleNestReachEdit(object player, BalanceMenuState state, int paramIdx, string valueStr)
+        {
+            if (paramIdx != 1)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use .1 <metres> on this page.</color>");
+                return;
+            }
+            if (!float.TryParse(valueStr, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float newValue) || float.IsNaN(newValue)
+                || !(newValue == -1f || (newValue >= 1f && newValue <= 100000f)))
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (metres 1..100000, or -1 = vanilla)</color>");
+                return;
+            }
+            newValue = (float)Math.Round(newValue);
+
+            state.PendingConfirm = true;
+            state.PendingParamKey = "nestreach";
+            state.PendingValue = newValue;
+            state.PendingOldVal = _alienNestReachRadius.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            state.PendingUnitName = "_alien_nest_reach"; // pseudo-unit for save routing / audit log
+
+            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Alien Nest Reach Radius " + _valueColor + FmtNestReach(_alienNestReachRadius) + "</color> -> " + _valueColor + FmtNestReach(newValue) + "</color>");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
+        }
+
+        private static void HandleQueensMaxEdit(object player, BalanceMenuState state, int paramIdx, string valueStr)
+        {
+            if (paramIdx != 1)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use .1 <n> on this page.</color>");
+                return;
+            }
+            if (!int.TryParse(valueStr, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int newValue) || newValue < -1 || newValue > 100)
+            {
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (integer -1..100; 0 = every Nest)</color>");
+                return;
+            }
+
+            state.PendingConfirm = true;
+            state.PendingParamKey = "queensmax";
+            state.PendingValue = newValue;
+            state.PendingOldVal = _alienQueensMax.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            state.PendingUnitName = "_alien_queens"; // pseudo-unit for save routing / audit log
+
+            SendChatToPlayer(player, _chatPrefix + _headerColor + "Confirm:</color> Alien Queens " + _valueColor + FmtQueensMax(_alienQueensMax) + "</color> -> " + _valueColor + FmtQueensMax(newValue) + "</color>");
+            SendChatToPlayer(player, _chatPrefix + _itemColor + "/1</color>=Save  " + _itemColor + "/2</color>=Cancel  " + _itemColor + "/3</color>=Save+Rebalance");
+        }
+
+        // Top-level numeric config key; integral values are written without a fractional part.
+        private static bool WriteNumberToJson(string key, float value)
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return false;
+                string json = File.ReadAllText(_configPath);
+                var root = JObject.Parse(json);
+                root[key] = Math.Abs(value - Math.Round(value)) < 0.0001f ? (JToken)(int)Math.Round(value) : (JToken)value;
+                File.WriteAllText(_configPath, root.ToString());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"WriteNumberToJson: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool WriteCountCapToJson(string paramKey, int value)
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return false;
+                string json = File.ReadAllText(_configPath);
+                var root = JObject.Parse(json);
+                var section = root["count_caps"] as JObject;
+                if (section == null)
+                {
+                    section = new JObject();
+                    root["count_caps"] = section;
+                }
+                section[paramKey] = value;
+                File.WriteAllText(_configPath, root.ToString());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"WriteCountCapToJson: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool WriteUnitCapMultToJson(string paramKey, int value)
+        {
+            try
+            {
+                if (!File.Exists(_configPath)) return false;
+                string json = File.ReadAllText(_configPath);
+                var root = JObject.Parse(json);
+                var section = root["unit_cap_mult"] as JObject;
+                if (section == null)
+                {
+                    section = new JObject();
+                    root["unit_cap_mult"] = section;
+                }
+                section[paramKey] = value;
+                File.WriteAllText(_configPath, root.ToString());
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Error($"WriteUnitCapMultToJson: {ex.Message}");
+                return false;
+            }
         }
 
         private static bool WriteDecayToJson(string factionKey, string paramKey, float value)

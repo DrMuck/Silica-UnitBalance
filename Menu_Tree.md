@@ -160,24 +160,37 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
 │       ├── ...
 │       └── confirm: .1=Load  .2=Cancel
 │
-└── 5. HTP (Hover · Tier · Teleportation)
-    ├── 1. Hoverbike ....................... "Hover Bike" unit (moved from Sol > Barracks)
-    │   ├── 1. Health & Production
-    │   │   └── (health_mult, cost_mult, build_time_mult, min_tier, build_radius)
-    │   ├── 2. Primary Weapon
-    │   │   └── (damage, proj_speed, proj_lifetime, accuracy, magazine, fire_rate, reload_time)
-    │   ├── 3. Movement
-    │   │   └── (move_speed, jump_speed, turbo_speed, turn_radius)
-    │   └── 4. Vision & Sense
-    │       └── (target_distance, fow_distance, visible_event_radius)
-    ├── 2. Tier ............................ tech-up research time per tier (absolute seconds)
-    │   ├── 1. Tier 1 = <time>s          (default: 30s)
-    │   ├── 2. Tier 2 = <time>s
-    │   ├── ...
-    │   └── 8. Tier 8 = <time>s
-    └── 3. Teleportation .................. HQ teleport settings (all structures)
-        ├── 1. Cooldown = <seconds>       (base: 120s, TeleportUI.TeleportCooldownTime)
-        └── 2. Duration = <seconds>       (base: 5s, TeleportUI.TeleportTime)
+├── 5. HTP (Hover · Tier · Teleportation · misc)
+│   ├── 1. Hoverbike ....................... "Hover Bike" unit (moved from Sol > Barracks)
+│   │   ├── 1. Health & Production
+│   │   │   └── (health_mult, cost_mult, build_time_mult, min_tier, build_radius)
+│   │   ├── 2. Primary Weapon
+│   │   │   └── (damage, proj_speed, proj_lifetime, accuracy, magazine, fire_rate, reload_time)
+│   │   ├── 3. Movement
+│   │   │   └── (move_speed, jump_speed, turbo_speed, turn_radius)
+│   │   └── 4. Vision & Sense
+│   │       └── (target_distance, fow_distance, visible_event_radius)
+│   ├── 2. Tier ............................ 1. Time (seconds per tier) · 2. Cost (resources per tier, -1 = vanilla)
+│   ├── 3. Teleportation .................. HQ teleport settings (all structures)
+│   │   ├── 1. Cooldown = <seconds>       (base: 120s, TeleportUI.TeleportCooldownTime)
+│   │   └── 2. Duration = <seconds>       (base: 5s, TeleportUI.TeleportTime)
+│   ├── 4. Shrimp Aim [ON/OFF] ............ shrimp_disable_aim (inverted display; !rebalance)
+│   ├── 5. Additional Spawn [ON/OFF] ...... additional_spawn (next game)
+│   ├── 6. Discord ........................ auto-post toggle + webhook URL
+│   └── 7. Watchdog [ON/OFF] .............. watchdog_enabled
+├── 6. Cap&Decay (unit cap · structure decay · count caps)
+│   ├── 1. Decay .......................... 1. Human · 2. Alien → enable, keep_production, delay, tick, amount_pct, randomize_pct
+│   ├── 2. Player Cap Exempt [ON/OFF] ..... player_infantry_ignore_cap (immediate)
+│   ├── 3. Unit Cap Mult 2-way = <mult> ... unit_cap_mult.two_way   (.1 <mult>; -1 = server, 0 = unlimited)
+│   ├── 4. Unit Cap Mult 3-way = <mult> ... unit_cap_mult.three_way (.1 <mult>)
+│   ├── 5. Shrimp Cap = <max> ............. count_caps.shrimp    (.1 <max>; -1 = unlimited; immediate)
+│   └── 6. Harvester Cap = <max> .......... count_caps.harvester (.1 <max>; -1 = unlimited; immediate)
+└── 7. Strategystyle (alien nest-centric build rules)
+    ├── 1. Alien Nest-Only Build [ON/OFF] . alien_nest_only_build (!rebalance)
+    ├── 2. Alien Nest Reach Radius = <m> .. alien_nest_reach_radius (.1 <metres>; -1 = vanilla; immediate)
+    ├── 3. Alien Queens = <n> ............. alien_queens_max (.1 <n>; 0 = every Nest, -1 = vanilla; immediate)
+    ├── 4. Alien Nest Finished-Anchor Only [ON/OFF] alien_nest_finished_anchor_only (a new Nest must anchor to a finished structure, not a Nest under construction; immediate)
+    └── 5. Queen Logistics per Nest [ON/OFF]  alien_queen_logistics_per_nest (structures build only while their nearest Nest has its Queen docked; needs Alien Queens 0/N; immediate)
 
 
 ═══════════════════════════════════════════════════════════════════

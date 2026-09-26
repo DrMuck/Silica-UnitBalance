@@ -18,7 +18,8 @@ namespace Si_UnitBalance
 
         private static bool _gameStartedRan; // tracks if Harmony hook fired
         private static int _watchdogGeneration; // incremented each game start to cancel stale watchdogs
-        private const float WatchdogTimeoutSeconds = 60f; // time after game end before forcing recovery
+        private const float WatchdogSilentSeconds = 20f; // quiet wait after game end — normal transitions finish within this
+        private const float WatchdogCountdownSeconds = 60f; // announced countdown before forcing recovery (restarts after a map load)
         private static bool _watchdogEnabled = true;
         private static bool _watchdogFired; // prevents re-triggering after recovery EndRound
         private static string _lastMapName = ""; // tracks current map to detect map changes
@@ -535,6 +536,9 @@ namespace Si_UnitBalance
                 if (_shrimpDisableAim)
                     ApplyShrimpAimDisable();
 
+                ApplyAlienNestOnlyBuild(omReady);
+                ApplyAlienQueensMax();
+
                 ApplyDecayOverrides();
 
                 _overridesApplied = true;
@@ -868,16 +872,43 @@ namespace Si_UnitBalance
         private static IEnumerator RoundTransitionWatchdog(int generation)
         {
             // Wait initial 20s silently — normal transitions complete well within this
-            yield return new WaitForSeconds(20f);
+            yield return new WaitForSeconds(WatchdogSilentSeconds);
             if (generation != _watchdogGeneration) yield break;
 
             // Remaining countdown with 10s intervals and player notifications
-            float remaining = WatchdogTimeoutSeconds - 20f;
-            BroadcastChat($"{_chatPrefix}<color=#FFAA00>[Watchdog] Round transition stalled — auto-recovery in {remaining:0}s</color>");
-            MelonLogger.Warning($"[Watchdog] Round transition stalled — countdown started ({remaining}s)");
+            float remaining = WatchdogCountdownSeconds;
+            bool announced = false;
 
-            while (remaining > 0f)
+            while (true)
             {
+                // A map load means the transition is progressing. EndRound mid-load only
+                // produces "Game ended during loading!", so hold until the load finishes
+                // and then give the new round a fresh countdown to start.
+                if (GameLevelLoader.IsLoading)
+                {
+                    MelonLogger.Msg($"[Watchdog] Level load in progress ({GameLevelLoader.CurrentLoadingPath}) — countdown paused");
+                    while (GameLevelLoader.IsLoading)
+                    {
+                        yield return new WaitForSeconds(1f);
+                        if (generation != _watchdogGeneration) yield break;
+                    }
+                    remaining = WatchdogCountdownSeconds;
+                    MelonLogger.Msg($"[Watchdog] Level load finished — countdown restarted ({remaining}s)");
+                }
+
+                if (remaining <= 0f) break;
+
+                if (!announced)
+                {
+                    announced = true;
+                    BroadcastChat($"{_chatPrefix}<color=#FFAA00>[Watchdog] Round transition stalled — auto-recovery in {remaining:0}s</color>");
+                    MelonLogger.Warning($"[Watchdog] Round transition stalled — countdown started ({remaining}s)");
+                }
+                else
+                {
+                    BroadcastChat($"{_chatPrefix}<color=#FFAA00>[Watchdog] Auto-recovery in {remaining:0}s...</color>");
+                }
+
                 float wait = remaining > 10f ? 10f : remaining;
                 yield return new WaitForSeconds(wait);
                 remaining -= wait;
@@ -888,17 +919,12 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("[Watchdog] New round started — watchdog cancelled");
                     yield break;
                 }
-
-                if (remaining > 0f)
-                {
-                    BroadcastChat($"{_chatPrefix}<color=#FFAA00>[Watchdog] Auto-recovery in {remaining:0}s...</color>");
-                }
             }
 
             // Timeout reached — force recovery (set flag to prevent loop)
             _watchdogFired = true;
             BroadcastChat($"{_chatPrefix}<color=#FF5555>[Watchdog] Forcing round end — server recovery</color>");
-            MelonLogger.Warning($"[Watchdog] No new game started within {WatchdogTimeoutSeconds}s — forcing EndRound");
+            MelonLogger.Warning($"[Watchdog] No new game started within {WatchdogSilentSeconds + WatchdogCountdownSeconds}s — forcing EndRound");
 
             try
             {

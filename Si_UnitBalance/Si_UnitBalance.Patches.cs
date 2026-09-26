@@ -3,7 +3,10 @@ using MelonLoader;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
+using Silica;
+using UnityEngine;
 
 namespace Si_UnitBalance
 {
@@ -245,6 +248,549 @@ namespace Si_UnitBalance
         }
 
         // =============================================
+        // Null-safe GameDatabase.GetSpawnablePrefabIndex(string)
+        //
+        // Beta 0.9.47 leaves null entries in GameDatabase.AllNetworkedPrefabs (see
+        // BuildNetworkedPrefabIndex). The vanilla lookup does list[i].name on every entry, so any
+        // mod that spawns by name (Si_Resources' reveal scout at the versus vote, Si_MapBalance,
+        // AdminMod.SpawnAtLocation callers) throws — and Si_Resources' team loop aborts on the first
+        // throw, leaving later teams without their starting-resource adjustment. Same lookup,
+        // same result, just skipping nulls. Falls back to vanilla if anything unexpected happens.
+        // =============================================
+        private static class Patch_GetSpawnablePrefabIndex
+        {
+            public static bool Prefix(string prefabName, ref int __result)
+            {
+                try
+                {
+                    __result = -1;
+                    var db = GameDatabase.Database;
+                    if (db == null || prefabName == null) return false;
+                    var list = db.AllNetworkedPrefabs;
+                    if (list == null) return false;
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        var go = list[i];
+                        if (go == null) continue;
+                        if (string.Equals(go.name, prefabName, StringComparison.OrdinalIgnoreCase)) { __result = i; return false; }
+                    }
+                    return false;
+                }
+                catch { return true; }
+            }
+        }
+
+        // =============================================
+        // Absolute unit count caps (config "count_caps": shrimp / harvester; -1 = unlimited)
+        //
+        // Structure.Construct is the one server-side gate for every production request (client
+        // CONSTRUCT_REQUEST RPC, AI commander, alien cysts). We count the team's live units plus
+        // everything queued / under construction of the same ObjectInfo — the same three sources
+        // Team.UpdateUnitCapValues uses — and refuse with ProductionActionResult.UnitCap once the cap
+        // is reached. The client's build button stays enabled (its own cap checks pass), so the
+        // team's commander gets a chat warning instead; throttled so click-spam doesn't flood chat.
+        // =============================================
+
+        private static readonly Dictionary<string, float> _countCapLastWarn = new Dictionary<string, float>();
+
+        private static string FmtCountCap(int v) => v < 0 ? "unlimited" : v.ToString();
+
+        // Which cap (if any) applies to this ObjectInfo. Asset names are stable across the display
+        // names ("Sol Harvester" / "Cent Harvester" / localized variants).
+        private static int CountCapFor(ObjectInfo info, out string label)
+        {
+            label = null;
+            if (info == null) return -1;
+            string n = info.name ?? "";
+            if (n.Equals("ObjectInfo_Alien_Shrimp", StringComparison.OrdinalIgnoreCase)) { label = "Shrimp"; return _countCapShrimp; }
+            if (n.IndexOf("Harvester", StringComparison.OrdinalIgnoreCase) >= 0 && !n.Contains("_Intro")) { label = "Harvester"; return _countCapHarvester; }
+            return -1;
+        }
+
+        private static int CountTeamUnitsOf(Team team, ObjectInfo info)
+        {
+            int n = 0;
+            var units = team.Units;
+            if (units != null)
+                for (int i = 0; i < units.Count; i++)
+                    if (units[i] != null && units[i].ObjectInfo == info) n++;
+            var structures = team.Structures;
+            if (structures != null)
+                for (int i = 0; i < structures.Count; i++)
+                {
+                    var q = structures[i]?.ProductionQueue;
+                    if (q == null) continue;
+                    for (int j = 0; j < q.Count; j++)
+                        if (q[j] != null && q[j].ObjectInfo == info) n++;
+                }
+            var sites = ConstructionSite.ConstructionSites;
+            if (sites != null)
+                for (int i = 0; i < sites.Count; i++)
+                {
+                    var cs = sites[i];
+                    if (cs != null && cs.Team == team && cs.ObjectInfo == info && cs.gameObject.activeSelf) n++;
+                }
+            return n;
+        }
+
+        private static class Patch_CountCap
+        {
+            public static bool Prefix(Structure __instance, ConstructionData constructionData, bool isClientRequest, ref ProductionActionResult __result)
+            {
+                try
+                {
+                    if (__instance == null || constructionData == null || constructionData.ObjectInfo == null) return true;
+                    var team = __instance.Team;
+                    if (team == null) return true;
+                    int cap = CountCapFor(constructionData.ObjectInfo, out string label);
+                    if (cap < 0) return true;
+
+                    int have = CountTeamUnitsOf(team, constructionData.ObjectInfo);
+                    if (have < cap) return true;
+
+                    __result = ProductionActionResult.UnitCap;
+                    LogDebug($"[COUNTCAP] {team.TeamShortName}: {label} {have}/{cap} — refused {constructionData.ObjectInfo.DisplayName}{(isClientRequest ? " (client request)" : "")}");
+
+                    // Warn the commander (throttled per team+cap).
+                    string key = team.TeamShortName + "|" + label;
+                    float now = UnityEngine.Time.realtimeSinceStartup;
+                    if (!_countCapLastWarn.TryGetValue(key, out float last) || now - last > 3f)
+                    {
+                        _countCapLastWarn[key] = now;
+                        var gm = GameMode.CurrentGameMode as GameModeExt;
+                        var commander = gm?.GetCommanderForTeam(team);
+                        if (commander != null)
+                            SendChatToPlayer(commander, _chatPrefix + "<color=#FF5555>" + label + " cap reached</color> " + _dimColor + "(" + have + "/" + cap + ") — no more can be built.</color>");
+                    }
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[CountCap] prefix error: {ex.Message}");
+                    return true;
+                }
+            }
+        }
+
+        // =============================================
+        // Alien nest reach (config "alien_nest_reach_radius", metres; -1 = vanilla)
+        //
+        // Nest-centric expansion: a Nest reaches out to resources via Nodes / Bio Caches, but only
+        // within its reach radius — anything further needs a new Nest first. Same server gate as the
+        // count caps (Structure.Construct carries the requested world position for placeable
+        // structures). Distance is 2D (XZ) from the placement point to the nearest friendly Nest,
+        // built or under construction (vanilla lets you build around construction sites too), like
+        // the game's own anchor check. The client's placement preview can't know about the rule, so
+        // the commander gets a chat line + a sound (AdminMod AudioHelper) instead of a red ghost.
+        // =============================================
+
+        private const string NEST_REACH_SOUND = "sounds/access_denied.wav"; // relative to UserData/
+        private static readonly Dictionary<string, float> _nestReachLastWarn = new Dictionary<string, float>();
+        private static bool? _nestReachSoundAvailable; // lazily: file exists + AdminMod AudioHelper found
+
+        private static string FmtNestReach(float v) => v < 0f ? "vanilla" : v.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m";
+
+        private static bool IsNestReachLimited(ObjectInfo info, out string label)
+        {
+            label = null;
+            if (info == null) return false;
+            string n = info.name ?? "";
+            if (n.Equals("ObjectInfo_Alien_Node", StringComparison.OrdinalIgnoreCase)) { label = "Node"; return true; }
+            if (n.Equals("ObjectInfo_Alien_BioCache", StringComparison.OrdinalIgnoreCase)) { label = "Bio Cache"; return true; }
+            return false;
+        }
+
+        private static bool IsNestInfo(ObjectInfo info, Team team)
+        {
+            if (info == null) return false;
+            if (team != null && team.BaseStructure != null && info == team.BaseStructure) return true;
+            return string.Equals(info.name, "ObjectInfo_Alien_Nest", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Nearest friendly Nest (alive structure or active construction site), 2D distance; +inf if none.
+        private static float NearestNestDistance2D(Team team, Vector3 position, out int nests)
+        {
+            float best = float.MaxValue;
+            nests = 0;
+            var structures = team.Structures;
+            if (structures != null)
+                for (int i = 0; i < structures.Count; i++)
+                {
+                    var st = structures[i];
+                    if (st == null || st.IsDestroyed || !IsNestInfo(st.ObjectInfo, team)) continue;
+                    nests++;
+                    float d = GameMath.Distance2D(st.transform.position, position);
+                    if (d < best) best = d;
+                }
+            var sites = ConstructionSite.ConstructionSites;
+            if (sites != null)
+                for (int i = 0; i < sites.Count; i++)
+                {
+                    var cs = sites[i];
+                    if (cs == null || cs.Team != team || cs.IsDestroyed || !cs.gameObject.activeSelf || !IsNestInfo(cs.ObjectInfo, team)) continue;
+                    nests++;
+                    float d = GameMath.Distance2D(cs.transform.position, position);
+                    if (d < best) best = d;
+                }
+            return best;
+        }
+
+        private static void PlaySoundToPlayer(object player, string relPath)
+        {
+            if (player == null || _playSoundFileMethod == null) return;
+            if (_nestReachSoundAvailable == null)
+            {
+                string full = Path.Combine(MelonLoader.Utils.MelonEnvironment.UserDataDirectory, relPath);
+                _nestReachSoundAvailable = File.Exists(full);
+                if (!_nestReachSoundAvailable.Value)
+                    MelonLogger.Warning($"[NestReach] sound file missing: {full} — chat warning only");
+            }
+            if (!_nestReachSoundAvailable.Value) return;
+            try
+            {
+                // async Task — fire and forget; AudioHelper streams the WAV over the voice channel
+                _playSoundFileMethod.Invoke(null, new object[] { relPath, player });
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"[NestReach] PlaySoundFile failed: {ex.Message}");
+            }
+        }
+
+        private static class Patch_NestReach
+        {
+            public static bool Prefix(Structure __instance, ConstructionData constructionData, Vector3 worldPosition, bool isClientRequest, ref ProductionActionResult __result)
+            {
+                try
+                {
+                    if (_alienNestReachRadius < 0f) return true;
+                    if (__instance == null || constructionData == null || !constructionData.Placeable) return true;
+                    if (!IsNestReachLimited(constructionData.ObjectInfo, out string label)) return true;
+                    var team = __instance.Team;
+                    if (team == null) return true;
+
+                    float dist = NearestNestDistance2D(team, worldPosition, out int nests);
+                    if (dist <= _alienNestReachRadius) return true;
+
+                    __result = ProductionActionResult.AreaObstructed;
+                    string distStr = nests > 0 ? dist.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m" : "no Nest";
+                    LogDebug($"[NESTREACH] {team.TeamShortName}: {label} refused at {worldPosition} — nearest Nest {distStr} > {_alienNestReachRadius:F0} m{(isClientRequest ? " (client request)" : "")}");
+
+                    // Warn the commander (throttled per team) + play the denied sound.
+                    string key = team.TeamShortName;
+                    float now = UnityEngine.Time.realtimeSinceStartup;
+                    if (!_nestReachLastWarn.TryGetValue(key, out float last) || now - last > 3f)
+                    {
+                        _nestReachLastWarn[key] = now;
+                        var gm = GameMode.CurrentGameMode as GameModeExt;
+                        var commander = gm?.GetCommanderForTeam(team);
+                        if (commander != null)
+                        {
+                            SendChatToPlayer(commander, _chatPrefix + "<color=#FF5555>" + label + " out of Nest reach</color> " + _dimColor + "(nearest Nest " + distStr + ", limit " + _alienNestReachRadius.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m) — build closer to a Nest. A Nest is required for further expansion.</color>");
+                            PlaySoundToPlayer(commander, NEST_REACH_SOUND);
+                        }
+                    }
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[NestReach] prefix error: {ex.Message}");
+                    return true;
+                }
+            }
+        }
+
+        // =============================================
+        // Alien nest finished-anchor only (config "alien_nest_finished_anchor_only", bool)
+        //
+        // Vanilla's placement test (ConstructionPreview.GetWithinBaseStructuresDistanceAndFogOfWar)
+        // accepts construction SITES as anchors, so aliens can chain Nest -> Nest -> Nest outward
+        // while the previous Nest is still growing. With this on, a Nest placement must be within
+        // MaximumBaseStructureDistance of a FINISHED friendly anchor (Structure.Structures with
+        // IsConstructionAnchor — i.e. a built Nest, or with nest-only build off also a linked cyst/
+        // node); construction sites are ignored. Parallel Nests off a finished Nest stay allowed.
+        // Same bounds-to-bounds 2D distance as the game, same server gate + commander feedback as
+        // the nest reach rule.
+        // =============================================
+
+        private static readonly Dictionary<string, float> _nestAnchorLastWarn = new Dictionary<string, float>();
+
+        // Nearest FINISHED friendly construction anchor for placing `data` at position/rotation,
+        // measured like the game does (closest points of the two physical bounds, 2D). +inf if none.
+        private static float NearestFinishedAnchorDistance2D(Team team, ConstructionData data, Vector3 position, Quaternion rotation, out Structure anchor)
+        {
+            anchor = null;
+            float best = float.MaxValue;
+            Bounds placed = GameFuncs.TransformBounds(data.ObjectInfo.PhysicalBounds, position, rotation);
+            bool useRadius = data.MaximumDistanceUseRadius;
+            var structures = Structure.Structures;
+            if (structures == null) return best;
+            for (int i = 0; i < structures.Count; i++)
+            {
+                var st = structures[i];
+                if (st == null || st.Team != team || st.IsDestroyed || !st.IsConstructionAnchor) continue;
+                Bounds sb = GameFuncs.TransformBounds(st.PhysicalBounds, st.transform, true);
+                Vector3 a = placed.ClosestPoint(st.transform.position);
+                Vector3 b = sb.ClosestPoint(a);
+                float d = useRadius
+                    ? GameMath.Distance2D(st.transform.position, position - a + position)
+                    : GameMath.Distance2D(a, b);
+                if (d < best) { best = d; anchor = st; }
+            }
+            return best;
+        }
+
+        // First active friendly Nest construction site (for the warning text), or null.
+        private static ConstructionSite FindNestUnderConstruction(Team team)
+        {
+            var sites = ConstructionSite.ConstructionSites;
+            if (sites == null) return null;
+            for (int i = 0; i < sites.Count; i++)
+            {
+                var cs = sites[i];
+                if (cs == null || cs.Team != team || cs.IsDestroyed || !cs.gameObject.activeSelf || cs.IsDeconstructing) continue;
+                if (IsNestInfo(cs.ObjectInfo, team)) return cs;
+            }
+            return null;
+        }
+
+        // =============================================
+        // Alien Queen logistics per Nest (config "alien_queen_logistics_per_nest", bool)
+        //
+        // Vanilla: Structure.Construct and StrategyMode.StartStructurePlacement refuse with
+        // MissingLogistics when Team.GetNeedConstructionLogistics() is true — a TEAM-WIDE check over
+        // every IsConstructionLogistics compartment (only the Nest's "QueenDock" AlienQueenCompartment
+        // has the flag, verified in sharedassets0). Building is allowed as long as ANY Nest on the
+        // team has a docked Queen, so the starter Queen leaving blocks the whole team only when no
+        // other Queen is docked, and an expansion Queen leaving never blocks anything.
+        // With this on, every alien structure belongs to its NEAREST finished Nest (2D distance —
+        // the same "reach" notion as alien_nest_reach_radius; a Nest belongs to itself) and may only
+        // build / produce while THAT Nest's Queen is docked. The alien link graph is deliberately not
+        // used: with chained nodes/cysts the whole base is one connected graph, which would collapse
+        // back into the vanilla team-wide rule. Needs alien_queens_max 0/N so expansion Nests have a Queen.
+        // =============================================
+
+        private static readonly Dictionary<string, float> _queenLogLastWarn = new Dictionary<string, float>();
+
+        // True if a logistics compartment (Nest Queen dock) on this structure has a docked unit.
+        private static bool HasDockedLogisticsUnit(Structure st)
+        {
+            var comps = st.UnitCompartments;
+            if (comps == null) return false;
+            for (int i = 0; i < comps.Count; i++)
+            {
+                var c = comps[i];
+                if (c != null && c.IsConstructionLogistics && c.DriverUnit != null) return true;
+            }
+            return false;
+        }
+
+        // Nearest finished friendly Nest to `origin` (2D). Null if the team has no built Nest.
+        private static Structure NearestNest(Team team, Vector3 position, out float dist)
+        {
+            Structure best = null;
+            dist = float.MaxValue;
+            var structures = team.Structures;
+            if (structures == null) return null;
+            for (int i = 0; i < structures.Count; i++)
+            {
+                var st = structures[i];
+                if (st == null || st.IsDestroyed || !IsNestInfo(st.ObjectInfo, team)) continue;
+                float d = GameMath.Distance2D(st.transform.position, position);
+                if (d < dist) { dist = d; best = st; }
+            }
+            return best;
+        }
+
+        private static class Patch_QueenLogisticsPerNest
+        {
+            public static bool Prefix(Structure __instance, ConstructionData constructionData, bool isClientRequest, ref ProductionActionResult __result)
+            {
+                try
+                {
+                    if (!_alienQueenLogisticsPerNest) return true;
+                    if (ConstructionSite.LimitationsDisabled) return true;
+                    var alien = __instance as AlienStructure;
+                    if (alien == null || constructionData == null) return true;
+                    var team = alien.Team;
+                    if (team == null) return true;
+
+                    var nest = NearestNest(team, alien.transform.position, out float dist);
+                    if (nest == null) return true;              // no built Nest → vanilla rules decide
+                    if (HasDockedLogisticsUnit(nest)) return true;
+
+                    __result = ProductionActionResult.MissingLogistics;
+                    string what = constructionData.ObjectInfo != null ? constructionData.ObjectInfo.DisplayName : "build";
+                    string from = alien.ObjectInfo != null ? alien.ObjectInfo.DisplayName : "structure";
+                    bool isSelf = nest == __instance;
+                    string distStr = isSelf ? "itself" : dist.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m away";
+                    LogDebug($"[QUEENLOG] {team.TeamShortName}: {what} from {from} refused — nearest Nest ({distStr}) has no docked Queen{(isClientRequest ? " (client request)" : "")}");
+
+                    // Warn the commander (throttled per team) + play the denied sound.
+                    string key = team.TeamShortName;
+                    float now = UnityEngine.Time.realtimeSinceStartup;
+                    if (!_queenLogLastWarn.TryGetValue(key, out float last) || now - last > 3f)
+                    {
+                        _queenLogLastWarn[key] = now;
+                        var gm = GameMode.CurrentGameMode as GameModeExt;
+                        var commander = gm?.GetCommanderForTeam(team);
+                        if (commander != null)
+                        {
+                            string where = isSelf ? "this Nest has no docked Queen" : "its Nest (nearest, " + distStr + ") has no docked Queen";
+                            SendChatToPlayer(commander, _chatPrefix + "<color=#FF5555>Queen away — " + from + " can't build</color> " + _dimColor + "(" + where + ") — return the Queen to that Nest.</color>");
+                            PlaySoundToPlayer(commander, NEST_REACH_SOUND);
+                        }
+                    }
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[QueenLog] prefix error: {ex.Message}");
+                    return true;
+                }
+            }
+        }
+
+        private static class Patch_NestFinishedAnchor
+        {
+            public static bool Prefix(Structure __instance, ConstructionData constructionData, Vector3 worldPosition, Quaternion worldRotation, bool isClientRequest, ref ProductionActionResult __result)
+            {
+                try
+                {
+                    if (!_alienNestFinishedAnchorOnly) return true;
+                    if (ConstructionSite.LimitationsDisabled) return true;
+                    if (__instance == null || constructionData == null || !constructionData.Placeable || constructionData.ObjectInfo == null) return true;
+                    var team = __instance.Team;
+                    if (team == null || !IsNestInfo(constructionData.ObjectInfo, team)) return true;
+
+                    float maxDist = constructionData.MaximumBaseStructureDistance;
+                    float dist = NearestFinishedAnchorDistance2D(team, constructionData, worldPosition, worldRotation, out Structure anchor);
+                    if (dist <= maxDist) return true; // a finished anchor is in range — vanilla rule already applies
+
+                    __result = ProductionActionResult.AreaObstructed;
+                    var pending = FindNestUnderConstruction(team);
+                    string pct = pending != null ? Mathf.RoundToInt(Mathf.Clamp01(pending.ProgressTime01) * 100f).ToString(System.Globalization.CultureInfo.InvariantCulture) + "%" : null;
+                    string distStr = anchor != null ? dist.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m" : "none";
+                    LogDebug($"[NESTANCHOR] {team.TeamShortName}: Nest refused at {worldPosition} — nearest finished anchor {distStr} > {maxDist:F0} m{(pct != null ? $", Nest under construction {pct}" : "")}{(isClientRequest ? " (client request)" : "")}");
+
+                    // Warn the commander (throttled per team) + play the denied sound.
+                    string key = team.TeamShortName;
+                    float now = UnityEngine.Time.realtimeSinceStartup;
+                    if (!_nestAnchorLastWarn.TryGetValue(key, out float last) || now - last > 3f)
+                    {
+                        _nestAnchorLastWarn[key] = now;
+                        var gm = GameMode.CurrentGameMode as GameModeExt;
+                        var commander = gm?.GetCommanderForTeam(team);
+                        if (commander != null)
+                        {
+                            string hint = pct != null
+                                ? "the Nest under construction (" + pct + ") can't anchor it yet — wait for it to finish or build next to a finished Nest."
+                                : "build within " + maxDist.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m of a finished Nest.";
+                            SendChatToPlayer(commander, _chatPrefix + "<color=#FF5555>Nest needs a finished anchor</color> " + _dimColor + "(nearest finished anchor " + distStr + ") — " + hint + "</color>");
+                            PlaySoundToPlayer(commander, NEST_REACH_SOUND);
+                        }
+                    }
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[NestAnchor] prefix error: {ex.Message}");
+                    return true;
+                }
+            }
+        }
+
+        // =============================================
+        // Unit cap multiplier per match type (config "unit_cap_mult": two_way / three_way)
+        //
+        // Vanilla: MP_Strategy.Restart -> UpdateInitialStrategySettings ->
+        // GameModeExt.UpdateUnitCapMultFromSetting derives UnitCapMultiplier from the server's
+        // "capmult" param (0/1/2 -> x1/x2/x3, default x2; 0 = unlimited). That runs while
+        // TeamsVersus is still NONE — the versus vote resolves later and calls SetTeamVersusMode,
+        // which never touches the multiplier. UnitCapEntry.Max reads the multiplier live
+        // (CapBase * GetUnitCapMultiplier()) and the setter RPC-syncs any change to clients, so
+        // re-deriving it in a SetTeamVersusMode postfix is enough: no cap entry has to be rewritten.
+        //
+        // 2-way = HUMANS_VS_HUMANS, HUMANS_VS_ALIENS. 3-way = HUMANS_VS_HUMANS_VS_ALIENS and
+        // HUMANS2_VS_ALIENS (two allied human teams vs aliens — still three teams' worth of units
+        // on the map). -1 leaves the vanilla/server value alone (Si_MatchSettings, if loaded, has
+        // already written its own value by then and is respected in that case).
+        // =============================================
+
+        private static bool _inVanillaCapMultRefresh; // re-entrancy guard for the UpdateUnitCapMultFromSetting postfix
+
+        private static string FmtCapMult(int m) => m < 0 ? "vanilla" : (m == 0 ? "unlimited" : "x" + m);
+
+        private static bool IsThreeWay(GameModeExt.ETeamsVersus mode) =>
+            mode == GameModeExt.ETeamsVersus.HUMANS_VS_HUMANS_VS_ALIENS ||
+            mode == GameModeExt.ETeamsVersus.HUMANS2_VS_ALIENS;
+
+        /// <summary>Configured multiplier for the given versus mode; -1 = leave vanilla.</summary>
+        private static int GetConfiguredCapMult(GameModeExt.ETeamsVersus mode)
+        {
+            if (mode == GameModeExt.ETeamsVersus.NONE) return -1;
+            return IsThreeWay(mode) ? _unitCapMult3Way : _unitCapMult2Way;
+        }
+
+        /// <summary>
+        /// Push the configured multiplier for the current versus mode onto the running game mode.
+        /// Safe to call any time (versus undecided / no game mode / not configured = no-op).
+        /// </summary>
+        private static void ApplyUnitCapMultiplier(string reason)
+        {
+            try
+            {
+                var gm = GameMode.CurrentGameMode as GameModeExt;
+                if (gm == null || Game.GetIsClient()) return;
+                var mode = gm.TeamsVersus;
+                int wanted = GetConfiguredCapMult(mode);
+                if (wanted < 0)
+                {
+                    // Not configured for this mode: make sure a value we set earlier (e.g. before
+                    // the admin reverted the config to -1 and ran !rebalance) doesn't linger.
+                    if (mode != GameModeExt.ETeamsVersus.NONE && !_inVanillaCapMultRefresh)
+                    {
+                        _inVanillaCapMultRefresh = true;
+                        try { gm.UpdateUnitCapMultFromSetting(); }
+                        finally { _inVanillaCapMultRefresh = false; }
+                        LogDebug($"[UNITCAPMULT] {mode}: not configured, vanilla value {gm.UnitCapMultiplier} kept ({reason})");
+                    }
+                    return;
+                }
+                int before = gm.UnitCapMultiplier;
+                if (before != wanted)
+                    gm.SetUnitCapMultiplier(wanted); // setter RPC-syncs to clients
+                MelonLogger.Msg($"[UNITCAPMULT] {mode} ({(IsThreeWay(mode) ? "3-way" : "2-way")}): cap multiplier {FmtCapMult(before)} -> {FmtCapMult(wanted)} ({reason})");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[UNITCAPMULT] apply error: {ex.Message}");
+            }
+        }
+
+        private static class Patch_UnitCapMultVersus
+        {
+            public static void Postfix(MP_Strategy __instance)
+            {
+                if (!_enabled || __instance == null) return;
+                ApplyUnitCapMultiplier("versus mode set");
+            }
+        }
+
+        // The game (or Si_MatchSettings) recomputed the multiplier from the capmult setting.
+        // If the versus mode is already known, our per-mode value wins; if it is still NONE
+        // (round restart), the SetTeamVersusMode postfix will handle it.
+        private static class Patch_UnitCapMultSetting
+        {
+            public static void Postfix(GameModeExt __instance)
+            {
+                if (!_enabled || __instance == null || _inVanillaCapMultRefresh) return;
+                if (__instance.TeamsVersus == GameModeExt.ETeamsVersus.NONE) return;
+                ApplyUnitCapMultiplier("capmult refresh");
+            }
+        }
+
+        // =============================================
         // Chat command: !rebalance — hot-reload config during a running game
         // =============================================
 
@@ -288,6 +834,9 @@ namespace Si_UnitBalance
                     // Sync the revert to all connected players and stop — vanilla is restored
                     if (_omInitialized)
                         MelonCoroutines.Start(SyncOverridesToAllPlayers(0.5f));
+                    _unitCapMult2Way = -1;
+                    _unitCapMult3Way = -1;
+                    ApplyUnitCapMultiplier("rebalance default");
                     MelonLogger.Msg("[Rebalance] Vanilla defaults restored. Use !rebalance to reload config.");
                     return;
                 }
@@ -338,12 +887,18 @@ namespace Si_UnitBalance
                     if (_shrimpDisableAim)
                         ApplyShrimpAimDisable();
 
+                    ApplyAlienNestOnlyBuild(omReady);
+                    ApplyAlienQueensMax();
+
+                    ApplyUnitCapMultiplier("rebalance");
+
                     // 4.5 Propagate overrides to already-spawned units in the scene
                     // (OM only modifies prefab data — live instances have independent component copies)
                     try { PropagateToLiveInstances(); }
                     catch (Exception pex) { MelonLogger.Warning($"[Rebalance] Live propagation error: {pex.Message}"); }
 
                     _overridesApplied = true;
+                    FlushPrefabPool("after rebalance");
                     MelonLogger.Msg("[Rebalance] All overrides re-applied");
 
                     // 5. Sync to all connected players
@@ -414,6 +969,47 @@ namespace Si_UnitBalance
                         ok = WriteTechTierToJson(state.PendingTechTierKey, state.PendingValue);
                     else if (state.PendingParamKey.StartsWith("prox_"))
                         ok = WriteProximityToJson(unitName, state.PendingParamKey.Substring(5), state.PendingValue);
+                    else if (state.PendingParamKey.StartsWith("unitcapmult_"))
+                    {
+                        string capKey = state.PendingParamKey.Substring(12); // "two_way" / "three_way"
+                        int capVal = (int)Math.Round(state.PendingValue);
+                        ok = WriteUnitCapMultToJson(capKey, capVal);
+                        if (ok)
+                        {
+                            if (capKey == "two_way") _unitCapMult2Way = capVal; else _unitCapMult3Way = capVal;
+                            // Takes effect immediately for the running match; no OM re-apply needed.
+                            ApplyUnitCapMultiplier("menu edit");
+                        }
+                    }
+                    else if (state.PendingParamKey.StartsWith("countcap_"))
+                    {
+                        string ccKey = state.PendingParamKey.Substring(9); // "shrimp" / "harvester"
+                        int ccVal = (int)Math.Round(state.PendingValue);
+                        ok = WriteCountCapToJson(ccKey, ccVal);
+                        if (ok)
+                        {
+                            if (ccKey == "shrimp") _countCapShrimp = ccVal; else _countCapHarvester = ccVal;
+                            // Enforced live by the Construct prefix — nothing to re-apply.
+                        }
+                    }
+                    else if (state.PendingParamKey == "queensmax")
+                    {
+                        int qv = (int)Math.Round(state.PendingValue);
+                        ok = WriteNumberToJson("alien_queens_max", qv);
+                        if (ok)
+                        {
+                            _alienQueensMax = qv < 0 ? -1 : qv;
+                            ApplyAlienQueensMax();                 // direct prefab mutation — immediate
+                            FlushPrefabPool("alien_queens_max edit"); // drop clones made before the change
+                        }
+                    }
+                    else if (state.PendingParamKey == "nestreach")
+                    {
+                        ok = WriteNumberToJson("alien_nest_reach_radius", state.PendingValue);
+                        if (ok)
+                            _alienNestReachRadius = state.PendingValue < 1f ? -1f : state.PendingValue;
+                        // Enforced live by the Construct prefix — nothing to re-apply.
+                    }
                     else if (state.PendingParamKey.StartsWith("decay_"))
                     {
                         // "decay_human_delay" → factionKey="human", paramKey="delay"
@@ -610,10 +1206,18 @@ namespace Si_UnitBalance
                     state.Level = MenuLevel.HTPTier;
                 else if (state.Level == MenuLevel.HTPTeleport)
                     state.Level = MenuLevel.HTPMenu;
+                else if (state.Level == MenuLevel.CapDecayMenu || state.Level == MenuLevel.StrategyMenu)
+                    state.Level = MenuLevel.Root;
                 else if (state.Level == MenuLevel.HTPDecay)
-                    state.Level = MenuLevel.HTPMenu;
+                    state.Level = MenuLevel.CapDecayMenu;
                 else if (state.Level == MenuLevel.HTPDecayFaction)
                     state.Level = MenuLevel.HTPDecay;
+                else if (state.Level == MenuLevel.HTPUnitCap)
+                    state.Level = MenuLevel.CapDecayMenu;
+                else if (state.Level == MenuLevel.CountCap)
+                    state.Level = MenuLevel.CapDecayMenu;
+                else if (state.Level == MenuLevel.NestReach || state.Level == MenuLevel.QueensMax)
+                    state.Level = MenuLevel.StrategyMenu;
                 else
                     state.Level = (MenuLevel)((int)state.Level - 1);
                 ShowCurrentMenu(player, state);
@@ -669,6 +1273,34 @@ namespace Si_UnitBalance
                 return;
             }
 
+            // Cap&Decay Unit Cap Mult edit: "/1 3" sets the page's mode (2-way or 3-way) to x3
+            if (state.Level == MenuLevel.HTPUnitCap && !string.IsNullOrEmpty(arg2))
+            {
+                HandleHTPUnitCapEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // Cap&Decay count cap edit: "/1 12" caps the page's unit (Shrimp / Harvester) at 12
+            if (state.Level == MenuLevel.CountCap && !string.IsNullOrEmpty(arg2))
+            {
+                HandleCountCapEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // Cap&Decay nest reach edit: "/1 250" limits Node/Bio Cache placement to 250 m around a Nest
+            if (state.Level == MenuLevel.NestReach && !string.IsNullOrEmpty(arg2))
+            {
+                HandleNestReachEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // Cap&Decay queens edit: "/1 0" = every Nest gets a Queen, "/1 3" = at most 3, "/1 -1" = vanilla
+            if (state.Level == MenuLevel.QueensMax && !string.IsNullOrEmpty(arg2))
+            {
+                HandleQueensMaxEdit(player, state, selection, arg2);
+                return;
+            }
+
             // Navigate deeper
             switch (state.Level)
             {
@@ -683,7 +1315,17 @@ namespace Si_UnitBalance
                         state.Level = MenuLevel.HTPMenu;
                         break;
                     }
-                    if (selection < 1 || selection > 5) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-5.</color>"); return; }
+                    if (selection == 6)
+                    {
+                        state.Level = MenuLevel.CapDecayMenu;
+                        break;
+                    }
+                    if (selection == 7)
+                    {
+                        state.Level = MenuLevel.StrategyMenu;
+                        break;
+                    }
+                    if (selection < 1 || selection > 7) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-7.</color>"); return; }
                     state.FactionIdx = selection - 1;
                     state.Level = MenuLevel.Faction;
                     break;
@@ -761,7 +1403,7 @@ namespace Si_UnitBalance
 
                 // ── HTP Menu ──────────────────────────────────────────
                 case MenuLevel.HTPMenu:
-                    if (selection < 1 || selection > 9) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-9.</color>"); return; }
+                    if (selection < 1 || selection > 7) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-7.</color>"); return; }
                     if (selection == 1) state.Level = MenuLevel.HTPHoverbike;
                     else if (selection == 2) state.Level = MenuLevel.HTPTier;
                     else if (selection == 3) state.Level = MenuLevel.HTPTeleport;
@@ -802,23 +1444,105 @@ namespace Si_UnitBalance
                         WriteAuditLog(playerName3, steamId3, "htp", "watchdog_enabled", (!_watchdogEnabled).ToString(), _watchdogEnabled.ToString());
                         MelonLogger.Msg($"[BAL] {playerName3} ({steamId3}): watchdog_enabled -> {_watchdogEnabled}");
                     }
-                    else if (selection == 8)
+                    break;
+
+                // ── Cap&Decay Menu ────────────────────────────────────
+                case MenuLevel.CapDecayMenu:
+                    if (selection < 1 || selection > 6) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-6.</color>"); return; }
+                    if (selection == 1)
                     {
                         state.Level = MenuLevel.HTPDecay;
                     }
-                    else if (selection == 9)
+                    else if (selection == 2)
                     {
                         // Toggle player-controlled infantry cap exemption
                         _playerInfantryIgnoreCap = !_playerInfantryIgnoreCap;
                         WriteBoolToJson("player_infantry_ignore_cap", _playerInfantryIgnoreCap);
                         string capStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                         SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + capStatus + " " + _dimColor + "(applies immediately)</color>");
-                        string pn9 = GetPlayerName(player);
-                        string sid9 = GetPlayerSteamId(player);
-                        WriteAuditLog(pn9, sid9, "htp", "player_infantry_ignore_cap", (!_playerInfantryIgnoreCap).ToString(), _playerInfantryIgnoreCap.ToString());
-                        MelonLogger.Msg($"[BAL] {pn9} ({sid9}): player_infantry_ignore_cap -> {_playerInfantryIgnoreCap}");
+                        string pn2 = GetPlayerName(player);
+                        string sid2 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn2, sid2, "capdecay", "player_infantry_ignore_cap", (!_playerInfantryIgnoreCap).ToString(), _playerInfantryIgnoreCap.ToString());
+                        MelonLogger.Msg($"[BAL] {pn2} ({sid2}): player_infantry_ignore_cap -> {_playerInfantryIgnoreCap}");
+                    }
+                    else if (selection == 3 || selection == 4)
+                    {
+                        state.HTPUnitCapModeIdx = selection - 3; // 0 = 2-way, 1 = 3-way
+                        state.Level = MenuLevel.HTPUnitCap;
+                    }
+                    else if (selection == 5 || selection == 6)
+                    {
+                        state.CountCapIdx = selection - 5; // 0 = Shrimp, 1 = Harvester
+                        state.Level = MenuLevel.CountCap;
                     }
                     break;
+
+                // ── Strategystyle Menu (alien nest-centric build rules) ──
+                case MenuLevel.StrategyMenu:
+                    if (selection < 1 || selection > 5) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-5.</color>"); return; }
+                    if (selection == 1)
+                    {
+                        // Toggle nest-only alien building (anchor flag off for every alien structure but the Nest)
+                        _alienNestOnlyBuild = !_alienNestOnlyBuild;
+                        WriteBoolToJson("alien_nest_only_build", _alienNestOnlyBuild);
+                        string nestStatus = _alienNestOnlyBuild ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Alien Nest-Only Build: " + nestStatus + " " + _dimColor + "(use !rebalance to apply)</color>");
+                        string pn1 = GetPlayerName(player);
+                        string sid1 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn1, sid1, "strategy", "alien_nest_only_build", (!_alienNestOnlyBuild).ToString(), _alienNestOnlyBuild.ToString());
+                        MelonLogger.Msg($"[BAL] {pn1} ({sid1}): alien_nest_only_build -> {_alienNestOnlyBuild}");
+                    }
+                    else if (selection == 2)
+                    {
+                        state.Level = MenuLevel.NestReach;
+                    }
+                    else if (selection == 3)
+                    {
+                        state.Level = MenuLevel.QueensMax;
+                    }
+                    else if (selection == 4)
+                    {
+                        // Toggle finished-anchor-only Nest placement (checked live on every Nest placement — no !rebalance needed)
+                        _alienNestFinishedAnchorOnly = !_alienNestFinishedAnchorOnly;
+                        WriteBoolToJson("alien_nest_finished_anchor_only", _alienNestFinishedAnchorOnly);
+                        string nestAnchorStatus = _alienNestFinishedAnchorOnly ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Alien Nest Finished-Anchor Only: " + nestAnchorStatus + " " + _dimColor + "(applies immediately)</color>");
+                        string pn4 = GetPlayerName(player);
+                        string sid4 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn4, sid4, "strategy", "alien_nest_finished_anchor_only", (!_alienNestFinishedAnchorOnly).ToString(), _alienNestFinishedAnchorOnly.ToString());
+                        MelonLogger.Msg($"[BAL] {pn4} ({sid4}): alien_nest_finished_anchor_only -> {_alienNestFinishedAnchorOnly}");
+                    }
+                    else if (selection == 5)
+                    {
+                        // Toggle per-Nest Queen logistics (checked live on every build request — no !rebalance needed)
+                        _alienQueenLogisticsPerNest = !_alienQueenLogisticsPerNest;
+                        WriteBoolToJson("alien_queen_logistics_per_nest", _alienQueenLogisticsPerNest);
+                        string qlStatus = _alienQueenLogisticsPerNest ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Queen Logistics per Nest: " + qlStatus + " " + _dimColor + "(applies immediately)</color>");
+                        if (_alienQueenLogisticsPerNest && _alienQueensMax == -1)
+                            SendChatToPlayer(player, _chatPrefix + "<color=#FFAA00>Note:</color> " + _dimColor + "Alien Queens is vanilla (-1) — expansion Nests get no Queen and could never build. Set 3. Alien Queens to 0.</color>");
+                        string pn5 = GetPlayerName(player);
+                        string sid5 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn5, sid5, "strategy", "alien_queen_logistics_per_nest", (!_alienQueenLogisticsPerNest).ToString(), _alienQueenLogisticsPerNest.ToString());
+                        MelonLogger.Msg($"[BAL] {pn5} ({sid5}): alien_queen_logistics_per_nest -> {_alienQueenLogisticsPerNest}");
+                    }
+                    break;
+
+                case MenuLevel.HTPUnitCap:
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <mult> (e.g. .1 3 = x3, .1 -1 = server, .1 0 = unlimited)</color>");
+                    return;
+
+                case MenuLevel.CountCap:
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <max> (e.g. .1 12 = at most 12, .1 -1 = unlimited)</color>");
+                    return;
+
+                case MenuLevel.NestReach:
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <metres> (e.g. .1 250 = 250 m around a Nest, .1 -1 = vanilla)</color>");
+                    return;
+
+                case MenuLevel.QueensMax:
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <n> (.1 0 = every Nest gets a Queen, .1 3 = at most 3, .1 -1 = vanilla)</color>");
+                    return;
 
                 case MenuLevel.HTPDecay:
                 {

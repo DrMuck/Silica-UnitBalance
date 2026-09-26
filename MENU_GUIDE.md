@@ -41,17 +41,28 @@ Root
 ├── 2. Centauri    │   →  Categories  →  Units  →  Param Groups  →  edit
 ├── 3. Alien       ┘
 ├── 4. JSON        →  reset blank · save current as named file · load saved
-└── 5. HTP         →  global / cross-faction settings
-    ├── 1. Hoverbike     (per-tier param groups for the Hover Bike)
-    ├── 2. Tier          →  1. Time   (research seconds per tier 1–8)
-    │                       2. Cost   (research resources per tier 1–8;  -1 = vanilla)
-    ├── 3. Teleportation (cooldown / duration)
-    ├── 4. Shrimp Aim    [ON/OFF toggle]
-    ├── 5. Additional Spawn [ON/OFF]
-    ├── 6. Discord        (auto-post + webhook URL)
-    ├── 7. Watchdog [ON/OFF]    (round-transition stall recovery)
-    ├── 8. Decay         →  1. Human · 2. Alien   →  enable, keep_production, delay, tick, amount_pct, randomize_pct
-    └── 9. Player Cap Exempt [ON/OFF]  (player-controlled infantry don't fill the unit cap)
+├── 5. HTP         →  Hoverbike · Tier · Teleportation · misc toggles
+│   ├── 1. Hoverbike     (per-tier param groups for the Hover Bike)
+│   ├── 2. Tier          →  1. Time   (research seconds per tier 1–8)
+│   │                       2. Cost   (research resources per tier 1–8;  -1 = vanilla)
+│   ├── 3. Teleportation (cooldown / duration)
+│   ├── 4. Shrimp Aim    [ON/OFF toggle]
+│   ├── 5. Additional Spawn [ON/OFF]
+│   ├── 6. Discord        (auto-post + webhook URL)
+│   └── 7. Watchdog [ON/OFF]    (round-transition stall recovery)
+├── 6. Cap&Decay   →  unit cap · structure decay · count caps
+│   ├── 1. Decay         →  1. Human · 2. Alien   →  enable, keep_production, delay, tick, amount_pct, randomize_pct
+│   ├── 2. Player Cap Exempt [ON/OFF]  (player-controlled infantry don't fill the unit cap)
+│   ├── 3. Unit Cap Mult 2-way = <mult>   (HvH, HvA;   .1 <mult>;  -1 = server capmult, 0 = unlimited)
+│   ├── 4. Unit Cap Mult 3-way = <mult>   (HvHvA, H2vA; same edit flow)
+│   ├── 5. Shrimp Cap = <max>     (per-team max alive+queued Shrimps;   .1 <max>; -1 = unlimited; immediate)
+│   └── 6. Harvester Cap = <max>  (per-team max Sol/Cent harvesters;    .1 <max>; -1 = unlimited; immediate)
+└── 7. Strategystyle   →  alien nest-centric build rules
+    ├── 1. Alien Nest-Only Build [ON/OFF]  (only Nests anchor new alien buildings; !rebalance to apply)
+    ├── 2. Alien Nest Reach Radius = <m>  (Nodes/Bio Caches only within <m> of a Nest; .1 <m>; -1 = vanilla; immediate)
+    ├── 3. Alien Queens = <n>     (Queens per team — new Nests spawn one until reached; .1 <n>; 0 = every Nest; -1 = vanilla; immediate)
+    ├── 4. Alien Nest Finished-Anchor Only [ON/OFF]  (a new Nest can't anchor to a Nest still under construction — needs a finished anchor in range; immediate)
+    └── 5. Queen Logistics per Nest [ON/OFF]  (alien structures build only while their nearest Nest has its Queen docked — vanilla is team-wide; needs 3. Alien Queens = 0; immediate)
 ```
 
 Inside any **Unit > Param Group** you'll see lines like:
@@ -119,8 +130,14 @@ The mod has a `PropagateToLiveInstances` pass on game start (and during `!rebala
 | **Move/walk/run/sprint/jump/strafe/fly speed** | ✅ live propagated | ✅ | ✅ |
 | **FOW / target distance** | ✅ live propagated | ✅ | ✅ |
 | **Tech research time / cost** | n/a | ✅ — affects future tech-ups starting next research |
-| **Decay (HTP > Decay)** | mostly live (keep_production toggle is immediate) | ✅ | ✅ |
-| **Player Cap Exempt toggle (HTP /9)** | ✅ immediate (cap recompute each tick) | ✅ | ✅ |
+| **Decay (Cap&Decay > Decay)** | mostly live (keep_production toggle is immediate) | ✅ | ✅ |
+| **Player Cap Exempt toggle (Cap&Decay /2)** | ✅ immediate (cap recompute each tick) | ✅ | ✅ |
+| **Shrimp / Harvester Cap (Cap&Decay /5, /6)** | ✅ immediate (checked on every build request; commander gets a chat warning) | ✅ | ✅ |
+| **Alien Nest-Only Build (Strategystyle /1)** | placed structures keep the links they made at spawn | ✅ after `!rebalance` (new placements only) | ✅ |
+| **Alien Nest Reach Radius (Strategystyle /2)** | ✅ immediate (checked on every Node / Bio Cache placement; commander gets chat warning + sound) | ✅ | ✅ |
+| **Alien Queens (Strategystyle /3)** | existing Nests unchanged; Nests built after the save spawn a Queen | ✅ | ✅ |
+| **Queen Logistics per Nest (Strategystyle /5)** | ✅ immediate (checked on every build / production request; commander gets chat warning + sound) | ✅ | ✅ |
+| **Alien Nest Finished-Anchor Only (Strategystyle /4)** | ✅ immediate (checked on every Nest placement; commander gets chat warning + sound) | ✅ | ✅ |
 
 **Rule of thumb:** if you want guaranteed-fresh values, **start a new round** after `!rebalance`. That's the cleanest "everything is the new version" state.
 
