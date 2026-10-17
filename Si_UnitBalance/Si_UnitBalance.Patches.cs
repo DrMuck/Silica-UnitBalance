@@ -1739,6 +1739,15 @@ namespace Si_UnitBalance
                     {
                         MelonLogger.Msg("[BASESPAWN] overrides not applied yet at the base spawn — applying now");
                         ApplyOverridesLogic();
+                        // ApplyOverridesLogic reverted with notify=true: the clients got the "r"
+                        // packet immediately and are vanilla right now, while our re-applied
+                        // values sit in OM's queue until the next frame. The base structures are
+                        // spawned by the very method we are prefixing, so drain the queue and
+                        // push the full set to the clients before that happens. Otherwise the
+                        // client builds its HQ from vanilla prefabs and the delayed coroutine
+                        // sync (0.5 s later) never reaches that instance.
+                        OMDrainQueue();
+                        SyncOverridesNow("base spawn");
                     }
                 }
                 catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] prefix threw: " + ex.Message); }

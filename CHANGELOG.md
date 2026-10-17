@@ -4,6 +4,23 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-10-17 — Client starter HQ kept vanilla FoW (v7.8.1)
+
+Measured on Release 1.0.1 with the pool fix in place: the server's HQ read 700 but the client still
+rendered the vanilla 600. Cause was our own base-spawn bracket, not the pool. `Patch_BaseSpawn.Prefix`
+re-applies the overrides (the restart postfix clears `_overridesApplied` every round) and
+`ApplyOverridesLogic` starts with `OMRevertAll(notify=true)`: the clients receive the "r" packet at
+once and revert everything, while the re-applied values are only queued (`OMSet*` use `enqueue=true`)
+and the clients were re-synced by a coroutine 0.5 s later. The HQ spawn packet landed in that gap,
+so the client instantiated its HQ from vanilla prefabs; a later override sync only touches prefabs.
+
+- New `OMDrainQueue()` (reflection on `OverrideManager.Update(float)`) applies the queued sets
+  immediately, and `SyncOverridesNow(reason)` sends the full set to every connected player
+  synchronously through the chunked `SendPlayerOverrides` prefix.
+- `Patch_BaseSpawn.Prefix` calls both right after `ApplyOverridesLogic()`, before the game spawns
+  the base structures in the same call. Log line: `[OverrideSync] base spawn: synced N connected
+  player(s) immediately`. The delayed postfix sync stays as a safety net.
+
 ## 2026-10-17 — Game 1.0.1 compatibility (v7.8.0)
 
 The Steam test branch moved the server from Beta 0.9.47 to Release 1.0.1 (new `SilicaCore.dll`).

@@ -195,6 +195,14 @@ namespace Si_UnitBalance
                     return false;
                 }
 
+                // Update(float delta): applies the queued Set/Revert calls (OMSet* enqueue) and
+                // runs the game's own pool drops. Optional: only used to force the queue through
+                // before a spawn that happens in the same call stack.
+                _omUpdateMethod = _overrideManagerType.GetMethod("Update",
+                    BindingFlags.Public | BindingFlags.Static, null, new Type[] { typeof(float) }, null);
+                if (_omUpdateMethod == null)
+                    MelonLogger.Warning("[OverrideManager] Update(float) not found - queued overrides apply on the next frame only");
+
                 MelonLogger.Msg("[OverrideManager] Reflection wrapper initialized successfully");
                 return true;
             }
@@ -383,6 +391,49 @@ namespace Si_UnitBalance
                 LogDebug("[OverrideManager] RevertAll BLOCKED (game scene transition)");
                 return false; // block — OM overrides persist through map changes
             }
+        }
+
+        /// <summary>
+        /// OMSet* enqueue their values and OverrideManager.Update applies them on the next
+        /// frame. Call this when the prefabs must carry the values NOW (before a spawn that
+        /// happens in the same call stack) and before a synchronous client sync, which only
+        /// ships members that are already Enabled.
+        /// </summary>
+        private static void OMDrainQueue()
+        {
+            if (_omUpdateMethod == null) return;
+            try { _omUpdateMethod.Invoke(null, new object[] { 0f }); }
+            catch (Exception ex) { MelonLogger.Warning($"[OverrideManager] Update error: {ex.InnerException?.Message ?? ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Synchronous full override sync to every connected player (the chunked
+        /// SendPlayerOverrides prefix does the splitting). Needed right after a revert+apply
+        /// that runs in the same call stack as a spawn: OMRevertAll's "r" packet reaches the
+        /// clients at once, the re-applied values would only follow with the delayed coroutine,
+        /// and everything the clients instantiated in between (the starter HQ) kept a vanilla
+        /// Sensor for the whole round, because FoW is rendered from the client's own copy.
+        /// </summary>
+        private static int SyncOverridesNow(string reason)
+        {
+            int synced = 0;
+            try
+            {
+                if (_sendPlayerOverridesMethod == null) return 0;
+                var players = Player.Players;
+                var server = NetworkGameServer.GetServerPlayer();
+                if (players == null) return 0;
+                for (int i = 0; i < players.Count; i++)
+                {
+                    var p = players[i];
+                    if (p == null || p == server) continue;
+                    try { _sendPlayerOverridesMethod.Invoke(null, new object[] { p }); synced++; }
+                    catch (Exception ex) { MelonLogger.Warning($"[OverrideSync] {reason}: sync to {p.PlayerName} failed: {ex.InnerException?.Message ?? ex.Message}"); }
+                }
+                MelonLogger.Msg($"[OverrideSync] {reason}: synced {synced} connected player(s) immediately");
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[OverrideSync] {reason}: {ex.Message}"); }
+            return synced;
         }
 
         private static void OMRevertAll()
