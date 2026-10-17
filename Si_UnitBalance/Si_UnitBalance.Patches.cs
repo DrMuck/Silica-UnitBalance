@@ -999,8 +999,9 @@ namespace Si_UnitBalance
                         if (ok)
                         {
                             _alienQueensMax = qv < 0 ? -1 : qv;
-                            ApplyAlienQueensMax();                 // direct prefab mutation — immediate
-                            FlushPrefabPool("alien_queens_max edit"); // drop clones made before the change
+                            var nest = ApplyAlienQueensMax();      // direct prefab mutation — immediate
+                            if (nest != null)                      // drop only the Nest's clones made before the change
+                                FlushPrefabPool("alien_queens_max edit", new[] { nest });
                         }
                     }
                     else if (state.PendingParamKey == "nestreach")

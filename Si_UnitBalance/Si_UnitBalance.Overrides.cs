@@ -1560,7 +1560,82 @@ namespace Si_UnitBalance
         // per apply and buys correctness for every component-level override, not
         // just fog of war.
         // =============================================
+        // 1.0.1 made PrefabPool.Drop(prefab) and PrefabPool.ClearAll() public, and OverrideManager
+        // now drops the pool entry of every prefab it reaches through an asset's Prefab fallback
+        // itself (MarkPoolDirty / FlushPoolDrops at the end of OverrideManager.Update). That covers
+        // OM-set members. It does NOT cover what this mod writes onto prefabs directly — networked
+        // twin Sensor values, the Nest SpawnOnInit.MaxPerTeam for alien_queens_max, ... — so the
+        // flush stays, but goes through the public API when the build has it:
+        //   Drop(prefab)  bumps the prefab's pool generation, so clones that are still being
+        //                 instantiated asynchronously are discarded on arrival instead of being
+        //                 pushed into the pool, and it refills from the mutated prefab right away.
+        //   ClearAll()    the blanket variant for "we touched many prefabs": also resets InFlight
+        //                 and the poolable cache.
+        // The reflection sweep over the private Pools dictionary is kept only for builds without
+        // that API (it cannot discard in-flight refills, which is why it was never fully reliable).
+        private static MethodInfo _poolDropMethod, _poolClearAllMethod;
+        private static bool _poolApiResolved;
+
+        private static void ResolvePoolApi()
+        {
+            if (_poolApiResolved) return;
+            _poolApiResolved = true;
+            try
+            {
+                var poolType = typeof(PrefabPool);
+                _poolDropMethod = poolType.GetMethod("Drop", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(GameObject) }, null);
+                _poolClearAllMethod = poolType.GetMethod("ClearAll", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+                if (_poolDropMethod != null && _poolDropMethod.ReturnType != typeof(int)) _poolDropMethod = null;
+                if (_poolClearAllMethod != null && _poolClearAllMethod.ReturnType != typeof(int)) _poolClearAllMethod = null;
+            }
+            catch (Exception ex) { MelonLogger.Warning("[POOL] API lookup threw: " + ex.Message); }
+        }
+
+        /// <summary>Blanket flush: drop every pooled clone (after a full override apply / rebalance).</summary>
         internal static void FlushPrefabPool(string reason)
+        {
+            ResolvePoolApi();
+            if (_poolClearAllMethod != null)
+            {
+                try
+                {
+                    int clones = (int)_poolClearAllMethod.Invoke(null, null);
+                    MelonLogger.Msg($"[POOL] {reason}: dropped {clones} pre-override clone(s) via PrefabPool.ClearAll() — the pool refills from the overridden prefabs");
+                    return;
+                }
+                catch (Exception ex) { MelonLogger.Warning("[POOL] ClearAll threw, falling back to reflection: " + ex.Message); }
+            }
+            FlushPrefabPoolReflection(reason);
+        }
+
+        /// <summary>
+        /// Targeted flush for prefabs this mod mutated directly (outside OverrideManager). Falls back
+        /// to the blanket flush when the public Drop API is missing.
+        /// </summary>
+        internal static void FlushPrefabPool(string reason, IEnumerable<GameObject> prefabs)
+        {
+            ResolvePoolApi();
+            if (_poolDropMethod == null || prefabs == null) { FlushPrefabPool(reason); return; }
+            try
+            {
+                int clones = 0, count = 0;
+                var seen = new HashSet<GameObject>();
+                foreach (var prefab in prefabs)
+                {
+                    if (prefab == null || !seen.Add(prefab)) continue;
+                    count++;
+                    clones += (int)_poolDropMethod.Invoke(null, new object[] { prefab });
+                }
+                MelonLogger.Msg($"[POOL] {reason}: dropped {clones} pre-override clone(s) across {count} prefab(s) via PrefabPool.Drop — in-flight refills discarded, the pool refills from the overridden prefabs");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning("[POOL] Drop threw, falling back to blanket flush: " + ex.Message);
+                FlushPrefabPool(reason);
+            }
+        }
+
+        private static void FlushPrefabPoolReflection(string reason)
         {
             try
             {
@@ -1593,7 +1668,15 @@ namespace Si_UnitBalance
                     }
                 }
                 pools.Clear();
-                MelonLogger.Msg($"[POOL] {reason}: dropped {clones} pre-override clone(s) across {prefabs} prefab(s) — the pool refills from the overridden prefabs");
+                // Refills that are still in flight will land in the pool as pre-override clones;
+                // nothing to do about that without the 1.0.1 generation counter.
+                try
+                {
+                    var inFlight = poolType.GetField("InFlight", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null) as System.Collections.IDictionary;
+                    inFlight?.Clear();
+                }
+                catch { }
+                MelonLogger.Msg($"[POOL] {reason}: dropped {clones} pre-override clone(s) across {prefabs} prefab(s) (reflection) — the pool refills from the overridden prefabs");
             }
             catch (Exception ex) { MelonLogger.Warning("[POOL] flush threw: " + ex.Message); }
         }
@@ -3122,11 +3205,13 @@ namespace Si_UnitBalance
 
         private static string FmtQueensMax(int v) => v < 0 ? "vanilla" : v == 0 ? "every Nest" : v.ToString();
 
-        private static void ApplyAlienQueensMax()
+        /// <summary>Returns the Nest prefab whose SpawnOnInit value changed (null when nothing changed).</summary>
+        private static GameObject ApplyAlienQueensMax()
         {
             try
             {
                 SpawnOnInit target = null;
+                GameObject nestPrefab = null;
                 foreach (var info in Resources.FindObjectsOfTypeAll<ObjectInfo>())
                 {
                     if (info == null || info.Prefab == null) continue;
@@ -3136,6 +3221,7 @@ namespace Si_UnitBalance
                         if (soi == null || soi.SpawnObject == null) continue;
                         if (soi.SpawnObject.name.IndexOf("Queen", StringComparison.OrdinalIgnoreCase) < 0) continue;
                         target = soi;
+                        nestPrefab = info.Prefab;
                         break;
                     }
                     if (target != null) break;
@@ -3144,7 +3230,7 @@ namespace Si_UnitBalance
                 {
                     if (_alienQueensMax >= 0)
                         MelonLogger.Warning("[QUEENS] Nest prefab has no SpawnOnInit for the Queen — alien_queens_max inactive");
-                    return;
+                    return null;
                 }
 
                 if (_originalQueenMaxPerTeam == null) _originalQueenMaxPerTeam = target.MaxPerTeam;
@@ -3153,10 +3239,12 @@ namespace Si_UnitBalance
                 target.MaxPerTeam = wanted;
                 if (before != wanted || _alienQueensMax >= 0)
                     MelonLogger.Msg($"[QUEENS] Nest SpawnOnInit.MaxPerTeam {before} -> {wanted} (vanilla {_originalQueenMaxPerTeam.Value}; config {FmtQueensMax(_alienQueensMax)})");
+                return before != wanted ? nestPrefab : null;
             }
             catch (Exception ex)
             {
                 MelonLogger.Warning($"[QUEENS] Failed: {ex.Message}");
+                return null;
             }
         }
 

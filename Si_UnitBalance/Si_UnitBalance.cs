@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.7.1", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.8.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -380,13 +380,33 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
-            MelonLogger.Msg($"Unit Balance v7.7.0 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.8.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
         // =============================================
         // Manual Harmony patching — only when SilicaCore is available (server)
         // =============================================
+
+        /// <summary>
+        /// Structure.Construct declared on Structure itself (HumanStructure / AlienStructure override it
+        /// and call base, so patching the base catches every production request). Matched by the first
+        /// parameter only — the game appends optional parameters between versions (0.9.47: 4 params,
+        /// 1.0.1: + Player requester).
+        /// </summary>
+        private static MethodInfo FindConstructMethod()
+        {
+            MethodInfo best = null;
+            foreach (var m in typeof(Structure).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                if (m.Name != "Construct") continue;
+                var ps = m.GetParameters();
+                if (ps.Length == 0 || ps[0].ParameterType != typeof(ConstructionData)) continue;
+                // Prefer the longest overload — that is the one the shorter ones forward to.
+                if (best == null || ps.Length > best.GetParameters().Length) best = m;
+            }
+            return best;
+        }
 
         private void TryApplyHarmonyPatches()
         {
@@ -545,15 +565,19 @@ namespace Si_UnitBalance
                 // AI commander, alien cyst pop — funnels through Structure.Construct on the server.
                 try
                 {
-                    var construct = AccessTools.Method(typeof(Structure), "Construct",
-                        new[] { typeof(ConstructionData), typeof(Vector3), typeof(Quaternion), typeof(bool) });
+                    // 1.0.1 appended a trailing `Player requester = null` parameter, so do not pin the
+                    // full signature: take the Construct declared on Structure whose first parameter is
+                    // ConstructionData, whatever optional parameters follow. The prefixes bind their
+                    // arguments by name (constructionData / worldPosition / worldRotation /
+                    // isClientRequest), which both the 0.9.47 and the 1.0.1 signature provide.
+                    var construct = FindConstructMethod();
                     if (construct != null)
                     {
                         harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_CountCap), "Prefix"));
                         harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_NestReach), "Prefix"));
                         harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_NestFinishedAnchor), "Prefix"));
                         harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_QueenLogisticsPerNest), "Prefix"));
-                        MelonLogger.Msg("Patched Structure.Construct for Shrimp/Harvester count caps + alien nest reach + nest finished-anchor + queen logistics per nest");
+                        MelonLogger.Msg($"Patched Structure.Construct ({construct.GetParameters().Length} params) for Shrimp/Harvester count caps + alien nest reach + nest finished-anchor + queen logistics per nest");
                     }
                     else MelonLogger.Warning("[CountCap] Structure.Construct not found — count caps / nest reach / nest finished-anchor / queen logistics inactive");
                 }

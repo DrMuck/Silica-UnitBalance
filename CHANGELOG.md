@@ -4,6 +4,47 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-10-17 — Game 1.0.1 compatibility (v7.8.0)
+
+The Steam test branch moved the server from Beta 0.9.47 to Release 1.0.1 (new `SilicaCore.dll`).
+Branch `1.0.1` of this repo builds against that assembly (`include/netstandard2.1/SilicaCore.dll`
+replaced; target stays netstandard2.1).
+
+- **`Structure.Construct` patch restored.** 1.0.1 appended `Player requester = null` to the
+  signature, so the pinned 4-parameter `AccessTools.Method` lookup failed and the server logged
+  `[CountCap] Structure.Construct not found — count caps / nest reach / nest finished-anchor /
+  queen logistics inactive`. The lookup now takes the `Construct` declared on `Structure` whose
+  first parameter is `ConstructionData`, whatever optional parameters follow (new
+  `FindConstructMethod()`). The four prefixes bind by name (`constructionData`, `worldPosition`,
+  `worldRotation`, `isClientRequest`) and those names are unchanged in 1.0.1, so they are untouched.
+  The vanilla method body changed only in the `requester`/GameMaster check and a new scenario
+  construction-permission gate for client requests, neither of which affects the prefixes.
+- **PrefabPool flush uses the public 1.0.1 API.** `PrefabPool.Drop(GameObject)` and
+  `PrefabPool.ClearAll()` are public now, and `OverrideManager` drops the pool entry of every
+  prefab it resolves through an asset's `Prefab` fallback on its own (`MarkPoolDirty` /
+  `FlushPoolDrops`). Our flush is still needed for prefabs this mod mutates directly (networked-twin
+  Sensor values, the Nest `SpawnOnInit.MaxPerTeam` for `alien_queens_max`). `FlushPrefabPool(reason)`
+  now calls `ClearAll()` (blanket, after a full apply / rebalance); the new
+  `FlushPrefabPool(reason, prefabs)` calls `Drop()` per prefab, which also bumps the pool
+  generation so refills still in flight are discarded instead of landing as pre-override clones —
+  the `alien_queens_max` menu edit uses it for just the Nest prefab (`ApplyAlienQueensMax()` now
+  returns the prefab it changed). The reflection sweep over the private `Pools` dictionary remains
+  as a fallback for builds without the API (it now also clears `InFlight`). `[POOL]` log line kept.
+- **Reflection audit against the 1.0.1 decompile.** Every string-named member the mod looks up
+  (116 names: `AccessTools.*`, `GetMethod`/`GetField`/`GetProperty`/`GetNestedType`, the
+  `OverrideManager` internals `AssetSourceRegistry` / `_sources` / `BuildSources` / `_overrides` /
+  `MemberOverride.Enabled` / `Set` / `RevertAll`, `NetworkLayer.SendPlayerOverrides`,
+  `GameLevelLoader.OnFinishLoadingLevel`, `MP_Strategy.SpawnStructuresAndStartingResources` /
+  `SpawnBaseStructures` / `SetTeamVersusMode`, `GameModeExt.UpdateUnitCapMultFromSetting`,
+  `VehicleDispenser.RequestVehicle`, `ConstructionSite.SpawnObject`, `UpdateHealDecay`,
+  `Team.UpdateUnitCapValues`, `GameDatabase.GetSpawnablePrefabIndex`) still exists in 1.0.1; the
+  `NetworkLayer.SendPlayerOverrides` body (whose packet layout the chunked-sync prefix
+  re-implements) is byte-identical. No other change was needed; the mod also compiles directly
+  against the 1.0.1 assembly.
+- Version bumped to **7.8.0** in `MelonInfo` and the init line (7.7.1 had still printed "v7.7.0").
+
+---
+
 ## 2026-09-26 — Watchdog waits for map loads (v7.7.1)
 
 The round-transition watchdog forced `EndRound()` while the next map was already loading. On the
