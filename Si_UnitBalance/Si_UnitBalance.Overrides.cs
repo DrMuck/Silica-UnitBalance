@@ -1681,8 +1681,12 @@ namespace Si_UnitBalance
             catch (Exception ex) { MelonLogger.Warning("[POOL] flush threw: " + ex.Message); }
         }
 
+        // Diagnostics only: dumps every FoW prefab/twin and every live Sensor. The 0.9.47
+        // PrefabPool clone bug they were built for is fixed in Release 1.0.1 (vanilla
+        // PrefabPool.Drop after override packets), so they run only with debug logging on.
         internal static void ProbeLiveFoW(string tag)
         {
+            if (!_debugLogging) return;
             try
             {
                 ProbeFoWPrefabs(tag);
@@ -1864,13 +1868,13 @@ namespace Si_UnitBalance
                     // instance, so the override has to reach this asset by name as well or
                     // the commander keeps seeing the vanilla radius around the starter HQ.
                     if (useOM) OMSetFloat($"A:{bs.name}.asset", "FogOfWarViewDistance", fowDist);
-                    MelonLogger.Msg($"[FOW/BASE] {team.name} BaseStructure {name}: prefab#{prefabId} sensor {orig} -> {fowDist} (covered by sweep: {covered}, om: {useOM})");
+                    LogDebug($"[FOW/BASE] {team.name} BaseStructure {name}: prefab#{prefabId} sensor {orig} -> {fowDist} (covered by sweep: {covered}, om: {useOM})");
 
                     var twin = NetworkedTwin(bs.Prefab);
                     if (twin != null)
                     {
                         float twinOrig = SetSensorFloat(twin, "FogOfWarViewDistance", fowDist);
-                        MelonLogger.Msg($"[FOW/BASE] {team.name} BaseStructure {name}: networked twin#{twin.GetInstanceID()} sensor {twinOrig} -> {fowDist}");
+                        LogDebug($"[FOW/BASE] {team.name} BaseStructure {name}: networked twin#{twin.GetInstanceID()} sensor {twinOrig} -> {fowDist}");
                     }
                 }
             }

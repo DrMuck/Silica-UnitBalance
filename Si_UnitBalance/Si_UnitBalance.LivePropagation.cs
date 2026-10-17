@@ -160,7 +160,7 @@ namespace Si_UnitBalance
                         float curFow = fowField != null ? (float)fowField.GetValue(liveComp) : -1f;
                         int result = LiveSetAbsolute(liveComp, "FogOfWarViewDistance", fowDist);
                         float afterFow = fowField != null ? (float)fowField.GetValue(liveComp) : -1f;
-                        MelonLogger.Msg($"[LIVE-FOW] {name}: {curFow} -> {afterFow} (target={fowDist}, ok={result})");
+                        LogDebug($"[LIVE-FOW] {name}: {curFow} -> {afterFow} (target={fowDist}, ok={result})");
                         fieldsSet += result;
                     }
                 }
