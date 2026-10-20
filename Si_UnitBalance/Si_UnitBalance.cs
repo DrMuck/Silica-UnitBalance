@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.8.1", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.9.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -336,9 +336,33 @@ namespace Si_UnitBalance
             return displayName;
         }
 
+        /// <summary>UserData/cfg/UnitBalance — the server's cfg/ folder (next to gametype/
+        /// and maps/). A pre-7.9 UserData/UnitBalance_cfg/ folder is moved there once,
+        /// with everything in it (config, default, dumps, Saved_Configs).</summary>
+        private static string ResolveConfigDir()
+        {
+            string userData = MelonEnvironment.UserDataDirectory;
+            string dir = Path.Combine(userData, "cfg", "UnitBalance");
+            string legacy = Path.Combine(userData, "UnitBalance_cfg");
+            try
+            {
+                if (!Directory.Exists(dir) && Directory.Exists(legacy))
+                {
+                    Directory.CreateDirectory(Path.Combine(userData, "cfg"));
+                    Directory.Move(legacy, dir);
+                    MelonLogger.Msg($"Moved config folder {legacy} -> {dir}");
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"Could not move {legacy} -> {dir}: {ex.Message}");
+            }
+            return dir;
+        }
+
         public override void OnInitializeMelon()
         {
-            var cfgDir = Path.Combine(MelonEnvironment.UserDataDirectory, "UnitBalance_cfg");
+            var cfgDir = ResolveConfigDir();
             if (!Directory.Exists(cfgDir))
                 Directory.CreateDirectory(cfgDir);
             _configPath = Path.Combine(cfgDir, "Si_UnitBalance_Config.json");
@@ -381,7 +405,7 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
-            MelonLogger.Msg($"Unit Balance v7.8.1 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.9.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 

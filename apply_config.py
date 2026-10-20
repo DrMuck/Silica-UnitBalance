@@ -1,6 +1,6 @@
 import json
 
-CFG_PATH = r"E:\Steam\steamapps\common\Silica Dedicated Server\UserData\UnitBalance_cfg\Si_UnitBalance_Config.json"
+CFG_PATH = r"E:\Steam\steamapps\common\Silica Dedicated Server\UserData\cfg\UnitBalance\Si_UnitBalance_Config.json"
 
 with open(CFG_PATH, "r") as f:
     cfg = json.load(f)

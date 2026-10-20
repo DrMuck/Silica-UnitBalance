@@ -104,7 +104,7 @@ After saving you'll see `Saved: <unit> <param> <old> -> <new>` and the change is
 This is the part people get wrong. Three layers of behaviour:
 
 ### a) Until you run `!rebalance` (or the next round/map starts) — **nothing changes in-game**
-`.1 1.25` only writes the new value into `UnitBalance_cfg/Si_UnitBalance_Config.json`.
+`.1 1.25` only writes the new value into `cfg/UnitBalance/Si_UnitBalance_Config.json`.
 The mod re-reads the config and re-applies overrides when:
 - `!rebalance` is typed by an admin, **or**
 - a new round starts (`OnGameStartedLogic`), **or**
@@ -166,8 +166,8 @@ The mod has a `PropagateToLiveInstances` pass on game start (and during `!rebala
 
 ## 8. Where things live
 
-- **Active config:** `UserData\UnitBalance_cfg\Si_UnitBalance_Config.json`
-- **Default (vanilla baseline):** `UserData\UnitBalance_cfg\Si_UnitBalance_Config_Default.json`
-- **Saved presets:** `UserData\UnitBalance_cfg\saves\*.json` (created via the JSON menu)
+- **Active config:** `UserData\cfg\UnitBalance\Si_UnitBalance_Config.json`
+- **Default (vanilla baseline):** `UserData\cfg\UnitBalance\Si_UnitBalance_Config_Default.json`
+- **Saved presets:** `UserData\cfg\UnitBalance\saves\*.json` (created via the JSON menu)
 - **Audit log:** every `!b` write is logged with player name + Steam ID for accountability.
 - **Server log lines to watch:** `[Unit Balance]`, `[BAL]`, `[TECH]`, `[TECH-COST]`, `[HEALTH]`, `[DMG]`, `[RANGE]`, `[MOVESPEED]`, etc.

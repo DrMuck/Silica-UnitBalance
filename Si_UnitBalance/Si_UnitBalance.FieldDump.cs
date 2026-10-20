@@ -226,7 +226,7 @@ namespace Si_UnitBalance
 
         // Focused projectile dump: one clean CSV row per ProjectileData asset with the
         // fields that govern damage drop-off and AI aim. Written unconditionally (no
-        // debug flag) to UserData/UnitBalance_cfg/ProjectileData_Dump.csv, from the
+        // debug flag) to UserData/cfg/UnitBalance/ProjectileData_Dump.csv, from the
         // same load-time point as the unit JSON dump — i.e. BEFORE OverrideManager
         // applies, so the values are vanilla.
         //
@@ -314,7 +314,7 @@ namespace Si_UnitBalance
         // PLAYER-controlled turret gets ballistic aim compensation at all: None = no
         // player compensation (the ai_lead_* factors then only affect AI units);
         // Primary/Secondary_VerticalOnly = gravity drop only; Primary/Secondary_Full =
-        // full drag+gravity+velocity. Written to UserData/UnitBalance_cfg/TurretAimComp_Dump.csv.
+        // full drag+gravity+velocity. Written to UserData/cfg/UnitBalance/TurretAimComp_Dump.csv.
         internal static void DumpTurretAimCompCsv()
         {
             try

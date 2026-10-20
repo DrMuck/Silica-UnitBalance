@@ -4,6 +4,21 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-10-20 — Config folder moved to UserData/cfg/UnitBalance (v7.9.0)
+
+All of our server mods now keep their JSON configs under the server's own `UserData/cfg/` folder
+(next to the vanilla `gametype/` and `maps/`), one subfolder per mod, instead of loose `*_cfg`
+folders in `UserData/`.
+
+- Config dir is `UserData/cfg/UnitBalance/` (config, default, dumps, `Saved_Configs`, audit log).
+- On the first start after the update an existing `UserData/UnitBalance_cfg/` folder is moved
+  there in one go (`Directory.Move`, logged as `Moved config folder ... -> ...`). If the move
+  fails the mod logs a warning and starts with an empty folder (vanilla defaults), so check
+  the log once after deploying.
+- `apply_config.py`, `update_base_annotations.py` and MENU_GUIDE.md point at the new path.
+- Readers in other mods (Si_Buy, Si_KingOfTheHill, Si_RTS_AI) look in `cfg/UnitBalance/` first
+  and fall back to the old folder, so load order does not matter.
+
 ## 2026-10-17 — Client starter HQ kept vanilla FoW (v7.8.1)
 
 Measured on Release 1.0.1 with the pool fix in place: the server's HQ read 700 but the client still
