@@ -4,6 +4,23 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-10-20 — Balance browser for Si_ModUI (v7.10.0)
+
+`Si_UnitBalance.ModUI.cs` adds `public static string ModUIData()`, which the Si_ModUI server
+mod finds by reflection and embeds in every player's HUD frame. The document is the whole balance as
+a browsable tree: the config's sections (`Sol — Barracks`, ..., `Alien — Structures`) > units > the
+same stat groups `/stats` shows (Health & Production, weapons, ballistics, movement, vision), every row
+with the current value and, where it differs, the vanilla value and the multiplier. A leading `Global`
+section carries tech research times, teleport, caps, decay and the alien rules. HUD users browse it
+with a CHANGES ONLY filter instead of walking `/stats` through chat; `/stats` stays for everyone else.
+
+- Built from the vanilla snapshot (`_vanillaBaseCache`) plus the config file, so it is only available
+  after the first override apply of a map; before that ModUI entry has no data.
+- Cached until the config file changes (`!b` edits, `!rebalance`, hand edits); the periodic HUD calls
+  return the cached string. One build walks every unit prefab, like `CacheVanillaBaseValues`.
+- Negative values of optional absolute keys (`min_tier`, `unit_cap_value`, radii, distances) are shown
+  as "no override" (vanilla value) instead of `-1 (vanilla 0)` as the chat view does.
+
 ## 2026-10-20 — Config folder moved to UserData/cfg/UnitBalance (v7.9.0)
 
 All of our server mods now keep their JSON configs under the server's own `UserData/cfg/` folder

@@ -99,6 +99,14 @@ Alien nest-centric build rules. Not for the RTS-AI server (its alien planner exp
 | **Save Current** | Saves current config to `Mods/Si_UnitBalance_Configs/` with timestamp |
 | **Load Saved** | Lists saved configs, pick one to load (confirm required) |
 
+## Si_ModUI balance browser
+
+With the Si_ModUI mods installed (server companion + client), every player finds the whole balance
+under Unit Balance in ModUI menu: config section > unit > stat groups, vanilla value and multiplier
+next to every changed stat, a CHANGES ONLY filter and the global settings (tech times, teleport, caps,
+decay, alien rules). The document comes from `ModUIData()` (`Si_UnitBalance.ModUI.cs`) and is
+rebuilt whenever the config file changes. Players without ModUI keep the `/stats` chat inspector.
+
 ## Hot-Reload
 
 Type `!rebalance` in chat (admin only) to:
