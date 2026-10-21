@@ -103,7 +103,16 @@ namespace Si_UnitBalance
                     ["title"] = _enabled ? "Unit balance" : "Unit balance (mod disabled: vanilla values)",
                     ["sections"] = sections
                 };
-                return JsonConvert.SerializeObject(new JObject { ["browse"] = browse }, Formatting.None);
+                // Top-level commands: decorate the registry entries and add the "default" form the registry cannot see.
+                // The !b editing menu stays a proxied chat menu by decision (2026-10-20).
+                var commands = new JArray
+                {
+                    new JObject { ["t"] = "/stats", ["l"] = "Stats of my unit", ["d"] = "Health, speed and weapon values of the unit you control, with the vanilla value next to every change.", ["a"] = false },
+                    new JObject { ["t"] = "!rebalance", ["l"] = "Reapply balance", ["d"] = "Re-reads the config and applies all overrides to the running match.", ["a"] = true },
+                    new JObject { ["t"] = "!rebalance default", ["l"] = "Revert to vanilla", ["d"] = "Removes every override and restores vanilla values for the running match.", ["a"] = true },
+                    new JObject { ["t"] = "!b", ["l"] = "Balance editor (chat menu)", ["d"] = "The numbered chat menu that edits the config live.", ["a"] = true }
+                };
+                return JsonConvert.SerializeObject(new JObject { ["enabled"] = _enabled, ["browse"] = browse, ["commands"] = commands }, Formatting.None);
             }
             finally { if (releaseInfos) _sharedAllInfos = null; }
         }
@@ -131,6 +140,14 @@ namespace Si_UnitBalance
             {
                 GetUnitParamGroups(unitName, out string[] groupNames, out string[][] groupKeys);
                 if (groupNames == null || groupNames.Length == 0) return null;
+                // pri_/sec_range_mult are read by the loader for every unit but are not in the chat menu's key lists.
+                for (int g = 0; g < groupNames.Length; g++)
+                {
+                    if (groupNames[g].StartsWith("Primary Weapon", StringComparison.Ordinal) && !groupKeys[g].Contains("pri_range_mult"))
+                        groupKeys[g] = groupKeys[g].Concat(new[] { "pri_range_mult" }).ToArray();
+                    else if (groupNames[g].StartsWith("Secondary Weapon", StringComparison.Ordinal) && !groupKeys[g].Contains("sec_range_mult"))
+                        groupKeys[g] = groupKeys[g].Concat(new[] { "sec_range_mult" }).ToArray();
+                }
                 var allKeys = groupKeys.SelectMany(k => k).ToArray();
                 var baseVals = GetBaseValues(unitName, allKeys);
                 // keys the vanilla snapshot lacks: live prefab read (prefabs keep vanilla values, OM stores overrides apart)
@@ -155,6 +172,22 @@ namespace Si_UnitBalance
                     }
                     if (rows.Count > 0) groups.Add(new JObject { ["n"] = groupNames[g], ["r"] = rows });
                 }
+                // Per-projectile absolute overrides (projectiles.<name>.<Field>); no vanilla value is known for them.
+                if (unitConfig?["projectiles"] is JObject projs)
+                {
+                    foreach (var pp in projs.Properties())
+                    {
+                        if (!(pp.Value is JObject fields)) continue;
+                        var rows = new JArray();
+                        foreach (var fp in fields.Properties())
+                        {
+                            if (fp.Name.Equals("proximity", StringComparison.OrdinalIgnoreCase) || fp.Value.Type == JTokenType.Null) continue;
+                            rows.Add(new JArray(fp.Name, fp.Value.ToString(), "n/a", "absolute"));
+                            changes++;
+                        }
+                        if (rows.Count > 0) groups.Add(new JObject { ["n"] = "Projectile " + pp.Name + " (absolute)", ["r"] = rows });
+                    }
+                }
                 if (groups.Count == 0) return null;
                 return new JObject { ["n"] = unitName, ["c"] = changes, ["g"] = groups };
             }
@@ -172,7 +205,7 @@ namespace Si_UnitBalance
             string label = PrettyStatKey(key);
             string baseStr = null;
             bool hasBase = baseVals != null && baseVals.TryGetValue(key, out baseStr);
-            var cfgToken = unitConfig?[key];
+            var cfgToken = CfgToken(unitConfig, key);
             bool hasCfg = cfgToken != null && cfgToken.Type != JTokenType.Null;
 
             if (isMult)
@@ -198,6 +231,20 @@ namespace Si_UnitBalance
                 return new JArray(label, Tier(key, absVal));
             }
             return hasBase ? new JArray(label, Tier(key, baseStr)) : null;
+        }
+
+        // "prox_<Field>" rows are stored as projectiles.<name>.proximity.<Field> in the config (any projectile of the unit).
+        private static JToken CfgToken(JObject unitConfig, string key)
+        {
+            if (unitConfig == null) return null;
+            if (!key.StartsWith("prox_", StringComparison.OrdinalIgnoreCase)) return unitConfig[key];
+            string field = key.Substring(5);
+            if (!(unitConfig["projectiles"] is JObject projs)) return null;
+            foreach (var pp in projs.Properties())
+                if (pp.Value is JObject fields && fields["proximity"] is JObject prox)
+                    foreach (var fp in prox.Properties())
+                        if (fp.Name.Equals(field, StringComparison.OrdinalIgnoreCase)) return fp.Value;
+            return null;
         }
 
         // The prefab reports no tier requirement as -1; the game treats that as tier 0.
@@ -248,6 +295,22 @@ namespace Si_UnitBalance
                     }
                     Group("Tech research time", rows);
                 }
+                if (root["tech_cost"] is JObject techCost)
+                {
+                    var rows = new JArray();
+                    for (int tier = 1; tier <= 8; tier++)
+                    {
+                        var t = techCost["tier_" + tier]; if (t == null || Num(t) == "-1") continue;
+                        rows.Add(Row("Tier " + tier + " research cost", Num(t)));
+                    }
+                    Group("Tech research cost", rows);
+                }
+                if (root["health_mult_enabled"] != null)
+                {
+                    var rows = new JArray();
+                    rows.Add(Row("Health multipliers active", Num(root["health_mult_enabled"]), "on"));
+                    Group("Health", rows);
+                }
                 if (root["units"]?["_teleport"] is JObject tp)
                 {
                     var rows = new JArray();
@@ -282,6 +345,7 @@ namespace Si_UnitBalance
                         if (d["delay"] != null && Num(d["delay"]) != "-1") rows.Add(Row(label + " decay delay (s)", Num(d["delay"]), "10"));
                         if (d["tick"] != null && Num(d["tick"]) != "-1") rows.Add(Row(label + " decay tick (s)", Num(d["tick"]), "5"));
                         if (d["amount_pct"] != null && Num(d["amount_pct"]) != "-1") rows.Add(Row(label + " decay per tick", Num(d["amount_pct"]), "0.01"));
+                        if (d["randomize_pct"] != null && Num(d["randomize_pct"]) != "-1") rows.Add(Row(label + " decay randomisation", Num(d["randomize_pct"]), "0"));
                         if (d["keep_production"] != null) rows.Add(Row(label + " unlinked structures produce", Num(d["keep_production"]), "off"));
                     }
                     Group("Structure decay", rows);

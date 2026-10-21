@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.10.1", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.10.3", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
