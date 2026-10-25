@@ -10,7 +10,7 @@
  - cost_mult: Scales resource cost (via OverrideManager → synced to clients)
  - build_time_mult: Scales build time (via OverrideManager → synced to clients)
  - min_tier: Override MinimumTeamTier (via OverrideManager → synced to clients)
- - tech_time: Per-tier build time for tech-up research (absolute seconds)
+ - tech_time: Per-tier TOTAL tech-up research time in seconds (build-up + clean-up, as shown in game; vanilla 60)
  - range_mult: Scales projectile range/lifetime and sensor/aim distances
  - proj_speed_mult: Scales projectile base speed (separate from range)
  - reload_time_mult: Scales VehicleTurret reload time
@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.10.3", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.10.4", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -1240,7 +1240,7 @@ namespace Si_UnitBalance
     ""alien_queen_logistics_per_nest"": false,
     ""alien_queens_max"": -1,
     ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
-    ""tech_time"": { ""tier_1"": 30, ""tier_2"": 30, ""tier_3"": 30, ""tier_4"": 30, ""tier_5"": 30, ""tier_6"": 30, ""tier_7"": 30, ""tier_8"": 30 },
+    ""tech_time"": { ""tier_1"": 60, ""tier_2"": 60, ""tier_3"": 60, ""tier_4"": 60, ""tier_5"": 60, ""tier_6"": 60, ""tier_7"": 60, ""tier_8"": 60 },
     ""tech_cost"": { ""tier_1"": -1, ""tier_2"": -1, ""tier_3"": -1, ""tier_4"": -1, ""tier_5"": -1, ""tier_6"": -1, ""tier_7"": -1, ""tier_8"": -1 },
     ""decay"": { ""human"": { ""enabled"": true, ""keep_production"": false }, ""alien"": { ""enabled"": true, ""keep_production"": false } },
     ""unit_cap_mult"": { ""two_way"": -1, ""three_way"": -1 },

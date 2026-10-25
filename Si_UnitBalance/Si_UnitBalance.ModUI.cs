@@ -28,6 +28,49 @@ namespace Si_UnitBalance
     public partial class UnitBalance
     {
         private static string _hudDoc;
+
+        // Vanilla tech research time per tier, read from the extractor's Si_UnitBalance_Dump.json, which is
+        // written in vanilla state before any override runs. Total = build_time + finished_wait_time +
+        // clean_up_time: that is the number the game shows on the research card (vanilla 30 + 0 + 30 = 60).
+        // Cached by the dump file's mtime; null when the dump is missing so callers show no guess.
+        private static Dictionary<int, float> _vanillaTechTotals;
+        private static string _vanillaTechKey;
+        internal static float? VanillaTechTotal(int tier)
+        {
+            try
+            {
+                string dumpPath = Path.Combine(Path.GetDirectoryName(_configPath), "Si_UnitBalance_Dump.json");
+                if (!File.Exists(dumpPath)) return null;
+                string key = File.GetLastWriteTimeUtc(dumpPath).Ticks.ToString(CultureInfo.InvariantCulture);
+                if (_vanillaTechTotals == null || _vanillaTechKey != key)
+                {
+                    var totals = new Dictionary<int, float>();
+                    var dump = JObject.Parse(File.ReadAllText(dumpPath));
+                    if (dump["units"] is JArray units)
+                    {
+                        foreach (var u in units.OfType<JObject>())
+                        {
+                            string intern = u["internal"]?.ToString() ?? "";
+                            int idx = intern.IndexOf("_TechTier_", StringComparison.OrdinalIgnoreCase);
+                            if (idx < 0) continue;
+                            if (!int.TryParse(intern.Substring(idx + 10), NumberStyles.Integer, CultureInfo.InvariantCulture, out int t)) continue;
+                            float total = Jf(u, "build_time") + Jf(u, "finished_wait_time") + Jf(u, "clean_up_time");
+                            if (total > 0 && !totals.ContainsKey(t)) totals[t] = total;
+                        }
+                    }
+                    _vanillaTechTotals = totals;
+                    _vanillaTechKey = key;
+                }
+                return _vanillaTechTotals.TryGetValue(tier, out float v) ? v : (float?)null;
+            }
+            catch { return null; }
+        }
+
+        internal static string VanillaTechLabel(int tier)
+        {
+            var v = VanillaTechTotal(tier);
+            return v.HasValue ? v.Value.ToString("0.##", CultureInfo.InvariantCulture) : null;
+        }
         private static string _hudDocKey = "";
 
         public static string ModUIData()
@@ -291,7 +334,7 @@ namespace Si_UnitBalance
                     for (int tier = 1; tier <= 8; tier++)
                     {
                         var t = tech["tier_" + tier]; if (t == null) continue;
-                        rows.Add(Row("Tier " + tier + " research (s)", Num(t), "30"));
+                        rows.Add(Row("Tier " + tier + " research (s)", Num(t), VanillaTechLabel(tier)));
                     }
                     Group("Tech research time", rows);
                 }

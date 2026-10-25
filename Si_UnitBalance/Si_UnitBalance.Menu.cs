@@ -2063,7 +2063,7 @@ namespace Si_UnitBalance
                             float? t = techTime[$"tier_{tier}"]?.Value<float>();
                             if (t.HasValue) val = t.Value.ToString("F0") + "s";
                         }
-                        SendChatToPlayer(player, _chatPrefix + _itemColor + tier + ".</color> Tier " + tier + " = " + _valueColor + val + "</color>" + " " + _dimColor + "(default: 30s)</color>");
+                        SendChatToPlayer(player, _chatPrefix + _itemColor + tier + ".</color> Tier " + tier + " = " + _valueColor + val + "</color>" + " " + _dimColor + "(vanilla: " + (VanillaTechLabel(tier) ?? "?") + "s)</color>");
                     }
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .N <seconds>  ·  /back to picker  ·  /0 close</color>");
                     break;
