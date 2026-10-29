@@ -77,7 +77,7 @@ To set a value: `.1 1.5` (sets parameter #1 to 1.5), then confirm with `.1` (sav
 | **3. Unit Cap Mult 2-way** | CapBase × mult for HvH / HvA matches. `.1 <mult>`; `-1` = server capmult, `0` = unlimited. Applies to the running match on save |
 | **4. Unit Cap Mult 3-way** | Same for HvHvA / H2vA matches |
 | **5. Shrimp Cap** | Absolute per-team max of alien Shrimps (alive + queued + in production). `.1 <max>`; `-1` = unlimited. Builds beyond the cap are refused and the commander gets a chat warning. Immediate |
-| **6. Harvester Cap** | Same for Sol/Centauri harvesters |
+| **6. Harvester Cap** | Same for Sol/Centauri harvesters; the free harvester a finished Refinery spawns counts and is blocked at the cap too |
 
 ### Strategystyle Menu
 

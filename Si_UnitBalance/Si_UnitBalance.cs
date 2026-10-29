@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.10.4", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.10.5", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -57,7 +57,8 @@ namespace Si_UnitBalance
         // stops counting as a construction anchor, so aliens can only build around Nests.
         private static bool _alienNestOnlyBuild = false;
         // Absolute per-team unit count caps ("count_caps" config section): -1 = unlimited.
-        // Enforced in a Structure.Construct prefix; the team's commander gets a chat warning.
+        // Enforced in a Structure.Construct prefix and a SpawnOnInit.Start prefix (refinery-spawned
+        // harvesters); the team's commander gets a chat warning, the server log a throttled line.
         private static int _countCapShrimp = -1;
         private static int _countCapHarvester = -1;
         // Alien nest reach ("alien_nest_reach_radius", metres): Nodes and Bio Caches may only be placed
@@ -405,7 +406,7 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
-            MelonLogger.Msg($"Unit Balance v7.10.1 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.10.5 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -609,6 +610,23 @@ namespace Si_UnitBalance
                 catch (Exception ex)
                 {
                     MelonLogger.Warning($"[CountCap] Failed to patch Structure.Construct: {ex.Message}");
+                }
+
+                // Count caps, second gate: SpawnOnInit.Start spawns a refinery's free harvester via
+                // Game.SpawnPrefab and never passes through Structure.Construct.
+                try
+                {
+                    var spawnOnInitStart = AccessTools.Method(typeof(SpawnOnInit), "Start");
+                    if (spawnOnInitStart != null)
+                    {
+                        harmony.Patch(spawnOnInitStart, prefix: new HarmonyMethod(typeof(Patch_CountCapSpawnOnInit), "Prefix"));
+                        MelonLogger.Msg("Patched SpawnOnInit.Start for Shrimp/Harvester count caps (refinery-spawned harvesters)");
+                    }
+                    else MelonLogger.Warning("[CountCap] SpawnOnInit.Start not found — refinery-spawned harvesters bypass the count caps");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[CountCap] Failed to patch SpawnOnInit.Start: {ex.Message}");
                 }
 
                 // Unit cap multiplier per match type: the game derives UnitCapMultiplier from the

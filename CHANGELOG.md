@@ -4,6 +4,17 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-10-29 — Count caps also gate refinery-spawned harvesters (v7.10.5)
+
+`count_caps.harvester` only gated `Structure.Construct`, but every Refinery prefab carries a
+`SpawnOnInit` that spawns a free harvester via `Game.SpawnPrefab` when the refinery finishes. The
+vanilla AI builds refineries as harvester sources, so an AI team ended far above the cap.
+
+- New Harmony prefix on `SpawnOnInit.Start`: same `CountCapFor` / `CountTeamUnitsOf` gate; at the cap
+  the component is marked spawned and the spawn is skipped. Queen spawns on Nests are unaffected.
+- Refusals are now always visible: one `[COUNTCAP] <team>: <cap> have/cap — refused ...` console line
+  per team+cap every 30 s (client request / AI request / refinery spawn), besides the 3 s chat warning.
+
 ## 2026-10-20 — Balance browser for Si_ModUI (v7.10.0)
 
 `Si_UnitBalance.ModUI.cs` adds `public static string ModUIData()`, which the Si_ModUI server

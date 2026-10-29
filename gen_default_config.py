@@ -589,7 +589,7 @@ config = {
     "alien_queen_logistics_per_nest": False,
     "alien_queens_max": -1,
     "count_caps": {
-        "_note": "Absolute per-team unit count caps (alive + queued + in production). -1 = unlimited. shrimp = alien Shrimps; harvester = Sol + Centauri harvesters. Enforced server-side; the commander gets a chat warning when a build is refused.",
+        "_note": "Absolute per-team unit count caps (alive + queued + in production). -1 = unlimited. shrimp = alien Shrimps; harvester = Sol + Centauri harvesters. Enforced server-side on every build request AND on the free harvester a finished Refinery spawns (SpawnOnInit), so refinery harvesters count and are blocked at the cap too; the commander gets a chat warning when a build is refused.",
         "shrimp": -1,
         "harvester": -1,
     },

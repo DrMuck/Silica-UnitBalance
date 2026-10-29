@@ -289,9 +289,39 @@ namespace Si_UnitBalance
         // Team.UpdateUnitCapValues uses — and refuse with ProductionActionResult.UnitCap once the cap
         // is reached. The client's build button stays enabled (its own cap checks pass), so the
         // team's commander gets a chat warning instead; throttled so click-spam doesn't flood chat.
+        //
+        // Second gate: SpawnOnInit.Start. Every Refinery prefab carries a SpawnOnInit whose
+        // SpawnObject is a harvester; it calls Game.SpawnPrefab directly on the server when the
+        // refinery finishes, bypassing Structure.Construct. The vanilla AI builds refineries as
+        // harvester sources, so without this gate each refinery adds a free, uncapped harvester.
         // =============================================
 
         private static readonly Dictionary<string, float> _countCapLastWarn = new Dictionary<string, float>();
+        // Separate throttle for the plain console line (30 s), so the 3 s chat throttle is unchanged.
+        private static readonly Dictionary<string, float> _countCapLastLog = new Dictionary<string, float>();
+
+        // A refusal is always visible in the server log (throttled per team+cap to one line / 30 s),
+        // and the team's commander, if human, gets a chat warning (throttled to one / 3 s).
+        private static void WarnCountCapReached(Team team, string label, int have, int cap, string refusedName, string source)
+        {
+            string key = team.TeamShortName + "|" + label;
+            float now = UnityEngine.Time.realtimeSinceStartup;
+
+            if (!_countCapLastLog.TryGetValue(key, out float lastLog) || now - lastLog > 30f)
+            {
+                _countCapLastLog[key] = now;
+                MelonLogger.Msg($"[COUNTCAP] {team.TeamShortName}: {label} {have}/{cap} — refused {refusedName} ({source})");
+            }
+
+            if (!_countCapLastWarn.TryGetValue(key, out float last) || now - last > 3f)
+            {
+                _countCapLastWarn[key] = now;
+                var gm = GameMode.CurrentGameMode as GameModeExt;
+                var commander = gm?.GetCommanderForTeam(team);
+                if (commander != null)
+                    SendChatToPlayer(commander, _chatPrefix + "<color=#FF5555>" + label + " cap reached</color> " + _dimColor + "(" + have + "/" + cap + ") — no more can be built.</color>");
+            }
+        }
 
         private static string FmtCountCap(int v) => v < 0 ? "unlimited" : v.ToString();
 
@@ -350,23 +380,56 @@ namespace Si_UnitBalance
 
                     __result = ProductionActionResult.UnitCap;
                     LogDebug($"[COUNTCAP] {team.TeamShortName}: {label} {have}/{cap} — refused {constructionData.ObjectInfo.DisplayName}{(isClientRequest ? " (client request)" : "")}");
-
-                    // Warn the commander (throttled per team+cap).
-                    string key = team.TeamShortName + "|" + label;
-                    float now = UnityEngine.Time.realtimeSinceStartup;
-                    if (!_countCapLastWarn.TryGetValue(key, out float last) || now - last > 3f)
-                    {
-                        _countCapLastWarn[key] = now;
-                        var gm = GameMode.CurrentGameMode as GameModeExt;
-                        var commander = gm?.GetCommanderForTeam(team);
-                        if (commander != null)
-                            SendChatToPlayer(commander, _chatPrefix + "<color=#FF5555>" + label + " cap reached</color> " + _dimColor + "(" + have + "/" + cap + ") — no more can be built.</color>");
-                    }
+                    WarnCountCapReached(team, label, have, cap, constructionData.ObjectInfo.DisplayName, isClientRequest ? "client request" : "AI request");
                     return false;
                 }
                 catch (Exception ex)
                 {
                     MelonLogger.Warning($"[CountCap] prefix error: {ex.Message}");
+                    return true;
+                }
+            }
+        }
+
+        // SpawnOnInit.Start (private): the refinery's free harvester (and any other init spawn of a
+        // capped ObjectInfo) is created there via Game.SpawnPrefab, never through Structure.Construct.
+        private static class Patch_CountCapSpawnOnInit
+        {
+            // 1.0.x only (save-load flag); null on 0.9.47, where vanilla has no such early return.
+            private static readonly FieldInfo _createdDuringSaveLoad = AccessTools.Field(typeof(SpawnOnInit), "m_CreatedDuringSaveLoad");
+
+            public static bool Prefix(SpawnOnInit __instance)
+            {
+                try
+                {
+                    // Mirror vanilla's early exits: never block what vanilla would skip anyway.
+                    if (__instance == null || __instance.Spawned || Game.GetIsClient() || __instance.SpawnObject == null) return true;
+                    if (_createdDuringSaveLoad != null && (bool)_createdDuringSaveLoad.GetValue(__instance)) return true;
+
+                    var spawnBgo = __instance.SpawnObject.transform.GetBaseGameObject(createCache: false);
+                    var info = spawnBgo != null ? spawnBgo.ObjectInfo : null;
+                    if (info == null) return true;
+                    int cap = CountCapFor(info, out string label);
+                    if (cap < 0) return true;
+
+                    var ownerBgo = __instance.transform.GetBaseGameObject();
+                    var team = ownerBgo != null ? ownerBgo.Team : null;
+                    if (team == null) return true;
+
+                    int have = CountTeamUnitsOf(team, info);
+                    if (have < cap) return true;
+
+                    __instance.SetSpawned(true); // component is done, like a vanilla MaxPerTeam skip
+                    var ownerInfo = ownerBgo.ObjectInfo;
+                    string src = ownerInfo != null ? ownerInfo.DisplayName : ownerBgo.name;
+                    bool isRefinery = ownerInfo != null && (ownerInfo.name ?? "").IndexOf("Refinery", StringComparison.OrdinalIgnoreCase) >= 0;
+                    LogDebug($"[COUNTCAP] {team.TeamShortName}: {label} {have}/{cap} — refused {info.DisplayName} (init spawn of {src})");
+                    WarnCountCapReached(team, label, have, cap, info.DisplayName, isRefinery ? "refinery spawn" : "init spawn of " + src);
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[CountCap] SpawnOnInit prefix error: {ex.Message}");
                     return true;
                 }
             }
