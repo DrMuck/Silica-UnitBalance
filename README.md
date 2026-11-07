@@ -73,7 +73,7 @@ To set a value: `.1 1.5` (sets parameter #1 to 1.5), then confirm with `.1` (sav
 | Option | Description |
 |---|---|
 | **1. Decay** | Per-faction structure decay when unlinked from HQ/Nest (enable, keep_production, delay, tick, amount_pct, randomize_pct) |
-| **2. Player Cap Exempt** | Toggle: player-controlled infantry don't fill the unit cap (immediate) |
+| **2. Player Cap Exempt** | Toggle: player-controlled soldiers don't fill the unit cap (Sol/Centauri teams only). Works as a per-team window: when the standard cap is reached, the team's player units get cap value 0 (synced to clients through the OverrideManager) until the enhanced cap `standard + player-held` is reached, then the values come back. `player_cap_exempt_buffer` (config, default 3) is the margin kept below the enhanced cap against build bursts. While the window is open the client cap panel and unit cards show the zeroed values |
 | **3. Unit Cap Mult 2-way** | CapBase × mult for HvH / HvA matches. `.1 <mult>`; `-1` = server capmult, `0` = unlimited. Applies to the running match on save |
 | **4. Unit Cap Mult 3-way** | Same for HvHvA / H2vA matches |
 | **5. Shrimp Cap** | Absolute per-team max of alien Shrimps (alive + queued + in production). `.1 <max>`; `-1` = unlimited. Builds beyond the cap are refused and the commander gets a chat warning. Immediate |
@@ -81,7 +81,7 @@ To set a value: `.1 1.5` (sets parameter #1 to 1.5), then confirm with `.1` (sav
 
 ### Strategystyle Menu
 
-Alien nest-centric build rules. Not for the RTS-AI server (its alien planner expands via Node lines).
+Alien nest-centric build rules (1-5; not for the RTS-AI server, its alien planner expands via Node lines), the refinery sell refund (6) and the harvester exit direction (7).
 
 | Option | Description |
 |---|---|
@@ -90,6 +90,8 @@ Alien nest-centric build rules. Not for the RTS-AI server (its alien planner exp
 | **3. Alien Queens** | Max Queens per team. Every newly built Nest spawns its own docked Queen while the team is below max (vanilla `1` = only the starting Nest). `.1 <n>`; `0` = every Nest; `-1` = vanilla. Server-side, immediate for Nests built after saving |
 | **4. Alien Nest Finished-Anchor Only** | Toggle: a new Nest must be within anchor range (`build_radius`) of a *finished* structure — a Nest still under construction can't anchor the next one (vanilla accepts construction sites as anchors, so aliens can chain Nest → Nest → Nest before the previous one exists). Parallel Nests off a finished Nest are fine. Refused placements cost nothing; the commander gets a chat warning + a sound. Immediate |
 | **5. Queen Logistics per Nest** | Toggle: an alien structure can only build / produce while its **nearest finished Nest** (2D distance; a Nest counts as its own) has its Queen docked. Vanilla checks team-wide — one docked Queen anywhere unlocks everything, so only the starter Queen leaving (with no other Queen docked) ever blocks building. With one Nest identical to vanilla; with expansion Nests every structure depends on the Queen of the Nest it sits closest to. Needs **3. Alien Queens** `0` (or N) so expansion Nests have a Queen. Refused requests cost nothing; commander gets a chat warning + a sound. Immediate |
+| **6. No Refinery Sell Refund** | Toggle: selling a Sol / Centauri refinery pays nothing back (vanilla: 50% of the 3000 cost x health, credited during the deconstruction). Vanilla lets a commander build a refinery, keep its free harvester and sell the refinery, i.e. a 1500 harvester anywhere on the map without factory time. Other structures keep the vanilla refund; credits stored in the refinery still come back. Commander gets a chat notice on the sale (the sell UI still shows the vanilla refund). Immediate |
+| **7. Harvester Exit Toward Patch** | Toggle: a Sol / Centauri harvester leaves the refinery through the ramp on the side of its Balterium patch (reversing out if that ramp is behind it) instead of always driving out of the ramp ahead and around the refinery; the free harvester a new refinery spawns is turned to face that ramp. Target = queued commander move, else its current patch, else the nearest patch. On 0.9.47 the undock already picks the patch-side ramp, only the spawn turn is new. Log lines `[HARVEXIT]`. Immediate |
 
 ### JSON Config Management
 
@@ -130,6 +132,7 @@ The JSON config (`Si_UnitBalance_Config.json`) can also be edited manually. The 
 | `cost_mult` | multiplier | Scales construction/spawn cost |
 | `build_time_mult` | multiplier | Scales build/spawn time |
 | `min_tier` | absolute | Override minimum tech tier required |
+| `spawn_cooldown` | absolute | Seconds before the same player can respawn as this unit again (0 = off). Respawn menu units only, server-side |
 | `build_radius` | absolute | Build radius override (alien structures) |
 | `range_mult` | multiplier | Scales weapon range (targeting distance + projectile lifetime/raycast) |
 | `target_distance` | absolute | Sensor.TargetingDistance override |

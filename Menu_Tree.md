@@ -180,17 +180,19 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
 │   └── 7. Watchdog [ON/OFF] .............. watchdog_enabled
 ├── 6. Cap&Decay (unit cap · structure decay · count caps)
 │   ├── 1. Decay .......................... 1. Human · 2. Alien → enable, keep_production, delay, tick, amount_pct, randomize_pct
-│   ├── 2. Player Cap Exempt [ON/OFF] ..... player_infantry_ignore_cap (immediate)
+│   ├── 2. Player Cap Exempt [ON/OFF] ..... player_infantry_ignore_cap (immediate; margin: player_cap_exempt_buffer)
 │   ├── 3. Unit Cap Mult 2-way = <mult> ... unit_cap_mult.two_way   (.1 <mult>; -1 = server, 0 = unlimited)
 │   ├── 4. Unit Cap Mult 3-way = <mult> ... unit_cap_mult.three_way (.1 <mult>)
 │   ├── 5. Shrimp Cap = <max> ............. count_caps.shrimp    (.1 <max>; -1 = unlimited; immediate)
 │   └── 6. Harvester Cap = <max> .......... count_caps.harvester (.1 <max>; -1 = unlimited; immediate)
-└── 7. Strategystyle (alien nest-centric build rules)
+└── 7. Strategystyle (alien nest-centric build rules + refinery sell refund + harvester exit)
     ├── 1. Alien Nest-Only Build [ON/OFF] . alien_nest_only_build (!rebalance)
     ├── 2. Alien Nest Reach Radius = <m> .. alien_nest_reach_radius (.1 <metres>; -1 = vanilla; immediate)
     ├── 3. Alien Queens = <n> ............. alien_queens_max (.1 <n>; 0 = every Nest, -1 = vanilla; immediate)
     ├── 4. Alien Nest Finished-Anchor Only [ON/OFF] alien_nest_finished_anchor_only (a new Nest must anchor to a finished structure, not a Nest under construction; immediate)
-    └── 5. Queen Logistics per Nest [ON/OFF]  alien_queen_logistics_per_nest (structures build only while their nearest Nest has its Queen docked; needs Alien Queens 0/N; immediate)
+    ├── 5. Queen Logistics per Nest [ON/OFF]  alien_queen_logistics_per_nest (structures build only while their nearest Nest has its Queen docked; needs Alien Queens 0/N; immediate)
+    ├── 6. No Refinery Sell Refund [ON/OFF]  no_refinery_sell_refund (selling a refinery pays nothing back; immediate)
+    └── 7. Harvester Exit Toward Patch [ON/OFF]  harvester_exit_toward_patch (harvesters leave the refinery by the ramp facing their patch, refinery spawns face it; immediate)
 
 
 ═══════════════════════════════════════════════════════════════════

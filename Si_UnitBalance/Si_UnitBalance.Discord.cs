@@ -308,6 +308,8 @@ namespace Si_UnitBalance
             CompareBoolSetting("alien_nest_only_build", "Alien Nest-Only Build", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("alien_nest_finished_anchor_only", "Alien Nest Finished-Anchor Only", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("alien_queen_logistics_per_nest", "Queen Logistics per Nest", defaultCfg, activeCfg, lastPushCfg, changes);
+            CompareBoolSetting("no_refinery_sell_refund", "No Refinery Sell Refund", defaultCfg, activeCfg, lastPushCfg, changes);
+            CompareBoolSetting("harvester_exit_toward_patch", "Harvester Exit Toward Patch", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("health_mult_enabled", "Health Mult (server-only)", defaultCfg, activeCfg, lastPushCfg, changes);
         }
 

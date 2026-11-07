@@ -55,6 +55,9 @@ namespace Si_UnitBalance
             string name = ResolveConfigName(info.DisplayName, info.name);
             if (string.IsNullOrEmpty(name)) return;
 
+            // Runs before the "no overrides" early return so a removed multiplier resets live soldiers.
+            PropagateHandsWeapon(liveGO, info, name);
+
             // Gather all overrides for this unit name (weapon params use HasAnyWeaponMult for per-weapon keys)
             bool hasRange = HasAnyWeaponMult(_rangeMultipliers, name);
             bool hasReload = HasAnyWeaponMult(_reloadTimeMultipliers, name);

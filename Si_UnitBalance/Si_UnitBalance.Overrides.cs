@@ -945,6 +945,8 @@ namespace Si_UnitBalance
                 if (!hasRange && !hasSpeed && !hasLifetime && !hasReload && !hasAccuracy && !hasMagazine && !hasFireRate) continue;
 
                 string oiTarget = useOM ? $"A:{info.name}.asset" : null;
+                if (hasReload || hasAccuracy || hasMagazine || hasFireRate)
+                    ApplyHandsWeaponOverrides(info, name, oiTarget, useOM);
                 LogDebug($"[RANGE] Applying weapon overrides to '{name}' (internal: {info.name}){(useOM ? " (OM)" : "")}");
 
                 bool foundProjectileOnComponent = false;
@@ -1335,6 +1337,8 @@ namespace Si_UnitBalance
 
             if (applied > 0)
                 MelonLogger.Msg($"[RANGE] Applied range overrides to {applied} units");
+            if (_handsVanilla.Count > 0)
+                MelonCoroutines.Start(LogHandsResultsAfter(3f));
         }
 
         // =============================================

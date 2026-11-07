@@ -588,6 +588,10 @@ config = {
     "alien_nest_finished_anchor_only": False,
     "alien_queen_logistics_per_nest": False,
     "alien_queens_max": -1,
+    "no_refinery_sell_refund": False,
+    "harvester_exit_toward_patch": False,
+    "player_infantry_ignore_cap": False,  # Sol/Centauri: player-controlled soldiers free the Secondary cap (UnitCapValue window, synced to clients)
+    "player_cap_exempt_buffer": 3,        # cap points kept free below the enhanced cap so a burst of queued builds cannot pass it (min 2)
     "count_caps": {
         "_note": "Absolute per-team unit count caps (alive + queued + in production). -1 = unlimited. shrimp = alien Shrimps; harvester = Sol + Centauri harvesters. Enforced server-side on every build request AND on the free harvester a finished Refinery spawns (SpawnOnInit), so refinery harvesters count and are blocked at the cap too; the commander gets a chat warning when a build is refused.",
         "shrimp": -1,

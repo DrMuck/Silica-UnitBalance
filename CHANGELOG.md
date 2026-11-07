@@ -4,6 +4,140 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-07 — Player Cap Exempt rebuilt as a synced cap-value window (v7.13.1)
+
+Report: the toggle did nothing visible. Diagnosis: the cap is decided on the **client**. `StrategyMode.Construct`
+runs `Structure.Construct` locally (`isClientRequest:false`), which fails `HasCapSpaceForUnit` from the client's
+own `Team.UnitCapEntries` before any RPC is sent, and `UnitCapEntry.Current` is not networked. The old postfix
+only lowered the server's count (and only for `UnitType.Infantry`, so player Crabs/Wasps/Shockers never counted
+as exempt); zero client cap rejections in the server log confirm the clients were refusing on their own.
+
+New mechanism (`Si_UnitBalance.DynamicCap.cs`), per team, driven by the values the client does receive:
+- **Window**: when the standard Secondary cap is reached and players hold cap points, the team's player units
+  (Secondary-cap units the commander can build or a player can spawn as, harvesters excluded) get
+  `UnitCapValue = 0` through `OverrideManager.Set(..., notify:true)`, one packet per member to every client.
+  Client and server then both let soldier builds through. Bookkeeping continues in true cap points; when
+  `true + buffer > standard + player-held` the values are restored and the vanilla rule applies again.
+  Re-opens after a top close only with 2 points of hysteresis, closes again when the team drops well below
+  the standard cap.
+- **`player_cap_exempt_buffer`** (config, default 3, min 2): margin kept below the enhanced cap. Client and
+  server switch a round-trip apart, and the server re-validates every request with its own switched values,
+  so a burst can overshoot by at most buffer + 2.
+- Evaluated after every `Team.UpdateUnitCapValues` (unit add/remove, queue changes) and on every
+  `Unit.ControlledBy` change (vanilla never recounts on a control change; a spawn sets the team before the
+  player, so the old code also lagged one event).
+- Restored on round end, round start, `!rebalance` and toggle off, so the OverrideManager holds the normal
+  values whenever overrides are (re)applied. Without a working OverrideManager it falls back to server-only
+  (AI commander and server check), with one warning.
+- **Sol and Centauri teams only.** Alien teams never open a window (base structure prefab without a
+  `HumanStructure` component).
+- Known cosmetics while open: the client's cap panel and unit cards show the zeroed values; the AI commander
+  sees free cap and builds until the window closes. Assumes each faction appears once per match.
+- Log: `[DYNCAP] <team>: OPEN (...)` / `CLOSED (...)`; `!b` Cap&Decay shows open/closed per team.
+- Not run in a game yet.
+
+---
+
+## 2026-11-05 — Per-player respawn cooldown (v7.13.0)
+
+Respawning is free, and the respawn menu offers the team's tech-gated player units, so an alien player
+could take a Dragonfly on every death once the team had the tech.
+
+- New per-unit config value **`spawn_cooldown`** (seconds, default off). After a player spawns as that
+  unit, the same player cannot spawn as it again until the time is up, counted from the spawn. Other
+  units stay available. Timers are per player and unit, follow the SteamID across reconnects and team
+  changes, and reset at round start.
+- Applies to units in `BaseTeamSetup.PlayerSpawnExt`. In 1.0.15 aliens have Shocker, Horned Crab, Wasp and
+  Dragonfly (default Crab). The `!b` menu shows the row only for those units.
+- **Server-only**: a vanilla client builds the menu itself, so the unit stays listed. The server refuses
+  the request (`GameMode.TrySpawnPlayerAtSpawnPoint` prefix), the player stays in the menu and gets a chat
+  message with the time left.
+- Spawns without a menu pick take the highest unlocked unit (`MP_Strategy.GetUnitPrefabForPlayer`), which
+  is how a mod moves a player between teams. A postfix steps down to the next unit not on cooldown.
+- Commander-built units and `/buy` purchases do not pass through here and are not limited.
+- Settable in `!b` (unit > Health & Production) and in ModUI's Balance editor page, which draws that menu
+  with a text box per row. Saving takes effect at once, no `!rebalance` needed. `!rebalance default`
+  turns all cooldowns off until the next `!rebalance`.
+- Log: `[SPAWNCD] Blocked <player>: <unit>, <n>s left`.
+- Fixed the stale "v7.11.0 initialized" log text.
+
+---
+
+## 2026-11-05 — Full infantry weapon tuning (v7.12.0)
+
+Infantry guns live on `HumanHandsAnimator`, which neither the menu nor the overrides looked at. The menu
+fell back to one generic `damage_mult` row, and fire rate, magazine, reload and accuracy did nothing on
+infantry even when set in the JSON.
+
+- **New for infantry**: `pri_fire_rate_mult` (divides `FireDelay`, min 0.01 s), `pri_magazine_mult`
+  (min 1, infinite-ammo weapons stay infinite), `pri_reload_time_mult` (min 0.1 s), `pri_accuracy_mult`
+  (scales `MuzzleSpreadMin` and `MuzzleSpreadMax`, lower = tighter). Per prefab, so units sharing a
+  ProjectileData can differ. Sent through OverrideManager, so vanilla clients receive them, which is
+  needed because a player's soldier fires on the player's machine.
+- **Menu / ModUI**: infantry Primary Weapon now lists the real damage fields (impact, penetrating,
+  ricochet) and the four params above, labelled with the weapon name, plus a Ballistics group without
+  the turret-only rows.
+- **`pri_damage_mult` on infantry is no longer shown.** It was the row that looked broken: a
+  `pri_impact_damage_mult` other than 1 outranks it, so on Commando (1.05) it did nothing. Use
+  `impact_damage_mult`. An old `pri_damage_mult` in a config still applies to fields with no specific
+  multiplier set.
+- `ricochet_damage_mult` is hidden for projectiles with `m_bRicochet` off on all units; it had no effect.
+- Vanilla values are snapshotted once per process (`_handsVanilla`) because OM writes onto the prefab, so
+  `LiveScaleField`'s "prefab x mult" would compound here. Live soldiers are set from the snapshot, and
+  back to vanilla when a multiplier is removed. Lowering a magazine clamps `NumFiredRounds`, otherwise
+  `ShotsRemaining` goes negative and the soldier can never reload.
+- Log: `[HANDS] <unit>: fire delay ... (prefab ...)`. Target and prefab differing means OM did not reach
+  the component.
+- Mid-round `!rebalance` changes AI soldiers at once. Soldiers a player already controls keep their
+  values until they respawn, since the client only updates the prefab.
+- Fire rate is quantised to frames: a soldier fires on the first frame after `FireDelay` runs out.
+
+---
+
+## 2026-11-02 — Harvesters leave the refinery toward their patch (v7.11.0)
+
+A refinery bay has two colinear ramps. Vanilla 1.0.x undocks through the active ramp **ahead** of the
+harvester (`ResourceDepositPoint.GetApproachPointAhead`), so a harvester that docked nose-first leaves on
+the far side of the refinery and drives around it to get back to its Balterium patch. A freshly spawned
+refinery harvester faces whatever way the spawn marker points.
+
+- New top-level config bool **`harvester_exit_toward_patch`** (default `false` = vanilla).
+- **Undock (1.0.x only)**: Harmony prefix on `ResourceDepositPoint.GetApproachPointAhead` (only
+  `AIHarvesterAgent` calls it). The docked harvester is resolved from `OccupiedByUnit` (verified:
+  `Unit.AIAgent` is an `AIHarvesterAgent` on this bay at `worldPos`), falling back to a scan of the
+  team's units. Target = queued commander move, else `CurrentHarvestArea` (if not depleted), else the
+  team's nearest patch of the bay's resource type (`ResourceArea.GetNearestResourceArea`). The active ramp
+  closest to the target is used; if it is behind, the prefix returns it with vanilla's own overshoot
+  (`- forward x PhysicalBounds.max.z`) and the vehicle driver reverses out. Teleport-onto-bay probes
+  (`worldPos` == bay position) are left alone. Runs once per undock, no per-frame cost. Log:
+  `[HARVEXIT] <team> <unit>: exit via rear ramp toward <area> (<m> m)` (5 s throttle per unit).
+- **Spawn (both branches)**: in the existing `SpawnOnInit.Start` prefix, after the count cap lets a
+  harvester through, the spawn marker is turned 180° about world up when the ramp closest to the team's
+  nearest patch is behind it (`EnableAboveGround.Evaluate()` first so the ramp flags are valid; ramp flags
+  read from the private `m_AIEntryPointsActive`, present in both branches). The new harvester drives out
+  forward. Log: `[HARVEXIT] <team>: spawn rotated toward <area> (<m> m)`.
+- 0.9.47 has no `GetApproachPointAhead`; its undock already heads for the ramp closest to the patch, so
+  only the spawn rotation is new there (load log warns that the undock part is not patched).
+- **In-game**: `!b` → Strategystyle → `7. Harvester Exit Toward Patch [ON/OFF]`, immediate. Discord
+  report, ModUI balance browser (Global › Other).
+
+## 2026-10-30 — No refund for selling refineries (v7.10.6)
+
+Vanilla selling (`StructureSellComponent`, `RefundPct` 0.5 in every scene) pays back 50% of the cost
+x the structure's health, credited over a deconstruction as long as the build time. A refinery costs
+3000 and spawns a free harvester (1500) that survives the sale, so build + sell = a 1500 harvester placed
+anywhere on the map, with no factory time and several at once.
+
+- New top-level config bool **`no_refinery_sell_refund`** (default `false` = vanilla). When on, a
+  `StructureSellComponent.TickDeconstruct` prefix holds the deconstruct site's
+  `DeconstructRefundAccrued` far below zero for Sol / Cent refineries, so vanilla pays out nothing while
+  the deconstruction itself runs unchanged. Other structures keep the vanilla 50%. Credits stored in the
+  refinery (1.0.x pays them out at the sale) still come back — that is the team's own money.
+- A `BeginSell` prefix tells the commander in chat (3 s throttle per team) and logs one `[SELL]` line,
+  since the sell UI is computed client-side and still shows the vanilla refund.
+- **In-game**: `!b` → Strategystyle → `6. No Refinery Sell Refund [ON/OFF]`, immediate. Discord report,
+  ModUI balance browser (Global › Other). Same code on 0.9.47 and 1.0.x.
+
 ## 2026-10-29 — Count caps also gate refinery-spawned harvesters (v7.10.5)
 
 `count_caps.harvester` only gated `Structure.Construct`, but every Refinery prefab carries a

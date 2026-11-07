@@ -83,6 +83,7 @@ namespace Si_UnitBalance
             public static void Postfix()
             {
                 _gameStartedRan = true;
+                _lastPlayerSpawn.Clear();
                 _watchdogGeneration++; // redundant safety — already cancelled in Init
                 _watchdogFired = false;
 
@@ -622,6 +623,9 @@ namespace Si_UnitBalance
             {
                 if (!_enabled || !_configLoaded) return;
 
+                DynCapCloseAll("round start");
+                _dynCap.Clear();
+
                 // (Re)install GameEvents hooks — GameEvents.* is cleared on scene transitions.
                 // /stats is now a player command (registered at init), no chat-event subscription needed.
                 EnsureHQDecayWarningHook();
@@ -894,6 +898,7 @@ namespace Si_UnitBalance
             public static void Postfix()
             {
                 MelonLogger.Msg("[UnitBalance] Game ended");
+                DynCapCloseAll("round end"); // OM keeps overrides between rounds, so the window must not stay open
 
                 // Clear direct-mutation caches (objects are destroyed on map change)
                 _originalCreatureAttackAimDist.Clear();

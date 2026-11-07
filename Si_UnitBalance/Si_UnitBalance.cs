@@ -13,9 +13,9 @@
  - tech_time: Per-tier TOTAL tech-up research time in seconds (build-up + clean-up, as shown in game; vanilla 60)
  - range_mult: Scales projectile range/lifetime and sensor/aim distances
  - proj_speed_mult: Scales projectile base speed (separate from range)
- - reload_time_mult: Scales VehicleTurret reload time
- - magazine_mult: Scales VehicleTurret magazine size
- - fire_rate_mult: Scales fire rate (divides PrimaryFireInterval)
+ - reload_time_mult: Scales VehicleTurret / infantry reload time
+ - magazine_mult: Scales VehicleTurret / infantry magazine size
+ - fire_rate_mult: Scales fire rate (divides PrimaryFireInterval / infantry FireDelay)
  - move_speed_mult: Scales unit movement speed
  - turn_radius_mult: Scales VehicleWheeled TurningCircleRadius (lower = tighter turns)
  - accuracy_mult: Scales VehicleTurret muzzle spread
@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.10.5", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.13.1", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -52,7 +52,7 @@ namespace Si_UnitBalance
         private static bool _dumpFields = true;
         private static bool _shrimpDisableAim = false;
         private static bool _additionalSpawn = false;
-        private static bool _playerInfantryIgnoreCap = false; // exclude player-controlled infantry from unit cap (HTP toggle)
+        private static bool _playerInfantryIgnoreCap = false; // player cap exemption via UnitCapValue window (DynamicCap.cs)
         // Nest-only alien building ("alien_nest_only_build"): every alien structure except the Nest
         // stops counting as a construction anchor, so aliens can only build around Nests.
         private static bool _alienNestOnlyBuild = false;
@@ -72,6 +72,14 @@ namespace Si_UnitBalance
         // build / produce while its NEAREST finished Nest (2D; a Nest = itself) has its Queen docked.
         // Vanilla's Team.GetNeedConstructionLogistics is team-wide — one docked Queen anywhere unlocks everything.
         private static bool _alienQueenLogisticsPerNest = false;
+        // No refinery sell refund ("no_refinery_sell_refund"): selling a Sol/Cent refinery pays nothing back.
+        // Vanilla refunds 50% of the 3000 cost while the refinery's free harvester (1500) survives the sale,
+        // so build + sell = a harvester anywhere on the map, without factory time.
+        private static bool _noRefinerySellRefund = false;
+        // Harvester exit toward patch ("harvester_exit_toward_patch"): a Sol/Cent harvester leaves the
+        // refinery through the ramp on the side of its Balterium patch (reversing if needed) instead of
+        // always driving out of the ramp ahead; refinery-spawned harvesters are turned to face that ramp.
+        private static bool _harvesterExitTowardPatch = false;
         // Alien queens ("alien_queens_max"): how many Queens a team may have. The Nest prefab's SpawnOnInit
         // spawns a Queen into every Nest's compartment, capped by MaxPerTeam (vanilla 1 → only the
         // starting Nest gets one). -1 = vanilla, 0 = every Nest gets a Queen, N = at most N per team.
@@ -406,7 +414,7 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
-            MelonLogger.Msg($"Unit Balance v7.10.5 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.13.1 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -470,6 +478,8 @@ namespace Si_UnitBalance
                         prefix: new HarmonyMethod(typeof(Patch_VehicleDispenser), "Prefix"));
                     MelonLogger.Msg("Patched VehicleDispenser.RequestVehicle for min_tier enforcement");
                 }
+
+                PatchSpawnCooldown(harmony);
 
                 // Patch SendPlayerOverrides to chunk overrides into multiple packets
                 // (the original packs ALL overrides into one packet, exceeding Steam's 2400-byte limit)
@@ -562,14 +572,23 @@ namespace Si_UnitBalance
                     MelonLogger.Warning($"[keep_production] Failed to apply patches: {ex.Message}");
                 }
 
-                // Patch Team.UpdateUnitCapValues to optionally exempt player-controlled infantry from the unit cap.
+                // Player Cap Exempt (DynamicCap.cs): evaluate the per-team cap window after every vanilla
+                // recount and on every control change.
                 var updateUnitCap = AccessTools.Method(typeof(Team), "UpdateUnitCapValues");
                 if (updateUnitCap != null)
                 {
                     harmony.Patch(updateUnitCap,
                         postfix: new HarmonyMethod(typeof(Patch_UnitCapPlayerInfantry), "Postfix"));
-                    MelonLogger.Msg("Patched Team.UpdateUnitCapValues for player-infantry cap exemption");
+                    MelonLogger.Msg("Patched Team.UpdateUnitCapValues for the player cap exemption");
                 }
+                var controlledBySetter = AccessTools.PropertySetter(typeof(Unit), "ControlledBy");
+                if (controlledBySetter != null)
+                {
+                    harmony.Patch(controlledBySetter,
+                        postfix: new HarmonyMethod(typeof(Patch_UnitControlledBy_CapRefresh), "Postfix"));
+                    MelonLogger.Msg("Patched Unit.ControlledBy setter for the player cap exemption");
+                }
+                else MelonLogger.Warning("[DYNCAP] Unit.ControlledBy setter not found; exemption evaluates only on unit add/remove");
 
                 // 0.9.47: null entries in GameDatabase.AllNetworkedPrefabs make the vanilla by-name
                 // prefab lookup throw for every mod that spawns by name. Replace it with a null-safe copy.
@@ -627,6 +646,44 @@ namespace Si_UnitBalance
                 catch (Exception ex)
                 {
                     MelonLogger.Warning($"[CountCap] Failed to patch SpawnOnInit.Start: {ex.Message}");
+                }
+
+                // No refinery sell refund: zero the deconstruct payout of sold refineries + commander notice.
+                try
+                {
+                    var tickDeconstruct = AccessTools.Method(typeof(StructureSellComponent), "TickDeconstruct");
+                    var beginSell = AccessTools.Method(typeof(StructureSellComponent), "BeginSell");
+                    if (tickDeconstruct != null)
+                    {
+                        harmony.Patch(tickDeconstruct, prefix: new HarmonyMethod(typeof(Patch_RefinerySellTick), "Prefix"));
+                        if (beginSell != null)
+                            harmony.Patch(beginSell, prefix: new HarmonyMethod(typeof(Patch_RefinerySellBegin), "Prefix"));
+                        MelonLogger.Msg("Patched StructureSellComponent.TickDeconstruct/BeginSell for no_refinery_sell_refund");
+                    }
+                    else MelonLogger.Warning("[SellRefund] StructureSellComponent.TickDeconstruct not found — no_refinery_sell_refund inactive");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[SellRefund] Failed to patch StructureSellComponent: {ex.Message}");
+                }
+
+                // Harvester exit toward patch, undock part (1.0.x only): ResourceDepositPoint.GetApproachPointAhead
+                // is called only by AIHarvesterAgent (undock + teleport-onto-bay). 0.9.47 has no such method;
+                // its undock already heads for the ramp closest to the harvester's patch. The spawn-rotation
+                // part rides on the SpawnOnInit.Start prefix above (both branches).
+                try
+                {
+                    var approachAhead = Patch_HarvesterExitApproach.TargetMethod();
+                    if (approachAhead != null)
+                    {
+                        harmony.Patch(approachAhead, prefix: new HarmonyMethod(typeof(Patch_HarvesterExitApproach), "Prefix"));
+                        MelonLogger.Msg("Patched ResourceDepositPoint.GetApproachPointAhead for harvester_exit_toward_patch (undock via the patch-side ramp)");
+                    }
+                    else MelonLogger.Warning("[HarvExit] ResourceDepositPoint.GetApproachPointAhead not found (0.9.47) — undock part not patched; vanilla already exits toward the patch there, only the spawn rotation applies");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[HarvExit] Failed to patch ResourceDepositPoint.GetApproachPointAhead: {ex.Message}");
                 }
 
                 // Unit cap multiplier per match type: the game derives UnitCapMultiplier from the
@@ -801,6 +858,11 @@ namespace Si_UnitBalance
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
                 _playerInfantryIgnoreCap = config["player_infantry_ignore_cap"]?.Value<bool>() ?? false;
+                _playerCapExemptBuffer = config["player_cap_exempt_buffer"]?.Value<int>() ?? 3;
+                if (_playerCapExemptBuffer < 2) _playerCapExemptBuffer = 2;
+                if (_playerCapExemptBuffer > 50) _playerCapExemptBuffer = 50;
+                if (_playerInfantryIgnoreCap)
+                    MelonLogger.Msg($"[CONFIG] Player cap exempt ON (buffer {_playerCapExemptBuffer} cap points)");
                 _alienNestOnlyBuild = config["alien_nest_only_build"]?.Value<bool>() ?? false;
                 _alienNestReachRadius = config["alien_nest_reach_radius"]?.Value<float>() ?? -1f;
                 if (_alienNestReachRadius < 1f) _alienNestReachRadius = -1f;
@@ -812,6 +874,12 @@ namespace Si_UnitBalance
                 _alienQueenLogisticsPerNest = config["alien_queen_logistics_per_nest"]?.Value<bool>() ?? false;
                 if (_alienQueenLogisticsPerNest)
                     MelonLogger.Msg("[CONFIG] Alien Queen logistics per Nest: structures build only while their own Nest's Queen is docked");
+                _noRefinerySellRefund = config["no_refinery_sell_refund"]?.Value<bool>() ?? false;
+                if (_noRefinerySellRefund)
+                    MelonLogger.Msg("[CONFIG] No refinery sell refund: selling a refinery pays nothing back");
+                _harvesterExitTowardPatch = config["harvester_exit_toward_patch"]?.Value<bool>() ?? false;
+                if (_harvesterExitTowardPatch)
+                    MelonLogger.Msg("[CONFIG] Harvester exit toward patch: harvesters leave the refinery through the ramp facing their Balterium patch");
                 _alienQueensMax = config["alien_queens_max"]?.Value<int>() ?? -1;
                 if (_alienQueensMax < -1) _alienQueensMax = -1;
                 if (_alienQueensMax >= 0)
@@ -838,6 +906,7 @@ namespace Si_UnitBalance
                 _costMultipliers.Clear();
                 _buildTimeMultipliers.Clear();
                 _minTierOverrides.Clear();
+                _spawnCooldowns.Clear();
                 _unitCapOverrides.Clear();
                 _rangeMultipliers.Clear();
                 _speedMultipliers.Clear();
@@ -986,6 +1055,7 @@ namespace Si_UnitBalance
                         float sprintSpeedMult = overrides["sprint_speed_mult"]?.Value<float>() ?? 1.0f;
                         float dispenseTimeout = overrides["dispense_timeout"]?.Value<float>() ?? -1f;
                         int unitCapValue = overrides["unit_cap_value"]?.Value<int>() ?? -1;
+                        float spawnCooldown = overrides["spawn_cooldown"]?.Value<float>() ?? 0f;
 
                         // Per-damage-subtype multipliers (4 sub-types × 3 scopes)
                         float impactDmgMult = overrides["impact_damage_mult"]?.Value<float>() ?? 1.0f;
@@ -1066,6 +1136,7 @@ namespace Si_UnitBalance
                             _extractionRadiusOverrides[unitName] = extractionRadius;
                         if (minTier >= 0)
                             _minTierOverrides[unitName] = minTier;
+                        SetSpawnCooldown(unitName, spawnCooldown);
                         if (Math.Abs(jumpSpeedMult - 1.0f) > 0.001f)
                             _jumpSpeedMultipliers[unitName] = jumpSpeedMult;
                         if (fowDistance >= 0)
@@ -1257,6 +1328,8 @@ namespace Si_UnitBalance
     ""alien_nest_finished_anchor_only"": false,
     ""alien_queen_logistics_per_nest"": false,
     ""alien_queens_max"": -1,
+    ""no_refinery_sell_refund"": false,
+    ""harvester_exit_toward_patch"": false,
     ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
     ""tech_time"": { ""tier_1"": 60, ""tier_2"": 60, ""tier_3"": 60, ""tier_4"": 60, ""tier_5"": 60, ""tier_6"": 60, ""tier_7"": 60, ""tier_8"": 60 },
     ""tech_cost"": { ""tier_1"": -1, ""tier_2"": -1, ""tier_3"": -1, ""tier_4"": -1, ""tier_5"": -1, ""tier_6"": -1, ""tier_7"": -1, ""tier_8"": -1 },

@@ -12,43 +12,7 @@ namespace Si_UnitBalance
 {
     public partial class UnitBalance
     {
-        // =============================================
-        // Unit-cap exemption for player-controlled infantry (HTP toggle: player_infantry_ignore_cap)
-        // Team.UpdateUnitCapValues recomputes each cap entry's Current from scratch every call,
-        // adding every unit's ObjectInfo.UnitCapValue with no ControlledBy check. When the toggle is on,
-        // we subtract back the contribution of player-controlled infantry so actively-played soldiers
-        // don't occupy cap slots. Recompute-from-scratch means no compounding across calls.
-        // =============================================
-
-        private static class Patch_UnitCapPlayerInfantry
-        {
-            public static void Postfix(Team __instance)
-            {
-                if (!_playerInfantryIgnoreCap || __instance == null) return;
-                try
-                {
-                    var units = __instance.Units;
-                    if (units == null) return;
-                    for (int i = 0; i < units.Count; i++)
-                    {
-                        var u = units[i];
-                        if (u == null || u.ObjectInfo == null) continue;
-                        if (u.ControlledBy == null) continue;                       // only players actively controlling a soldier
-                        if (u.ObjectInfo.UnitType != UnitType.Infantry) continue;   // soldiers only (creatures are Cavalry/Special/etc.)
-                        var entry = __instance.GetUnitTypeCapEntryForUnit(u.ObjectInfo);
-                        if (entry != null)
-                        {
-                            entry.Current -= u.ObjectInfo.UnitCapValue;
-                            if (entry.Current < 0) entry.Current = 0;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MelonLogger.Warning($"[UnitCap] player-infantry exemption error: {ex.Message}");
-                }
-            }
-        }
+        // Player Cap Exempt (player_infantry_ignore_cap): see Si_UnitBalance.DynamicCap.cs
 
         // =============================================
         // VehicleDispenser patch — enforce min_tier on dispensed vehicles (e.g., Hoverbike)
@@ -410,14 +374,21 @@ namespace Si_UnitBalance
                     var info = spawnBgo != null ? spawnBgo.ObjectInfo : null;
                     if (info == null) return true;
                     int cap = CountCapFor(info, out string label);
-                    if (cap < 0) return true;
+                    bool isHarvester = label == "Harvester";
+                    if (cap < 0 && !(isHarvester && _harvesterExitTowardPatch)) return true;
 
                     var ownerBgo = __instance.transform.GetBaseGameObject();
                     var team = ownerBgo != null ? ownerBgo.Team : null;
                     if (team == null) return true;
 
-                    int have = CountTeamUnitsOf(team, info);
-                    if (have < cap) return true;
+                    int have = cap >= 0 ? CountTeamUnitsOf(team, info) : 0;
+                    if (cap < 0 || have < cap)
+                    {
+                        // Cap passed: vanilla spawns. Turn a refinery harvester toward its patch first.
+                        if (isHarvester && _harvesterExitTowardPatch)
+                            TurnHarvesterSpawnTowardPatch(__instance, ownerBgo, team);
+                        return true;
+                    }
 
                     __instance.SetSpawned(true); // component is done, like a vanilla MaxPerTeam skip
                     var ownerInfo = ownerBgo.ObjectInfo;
@@ -431,6 +402,288 @@ namespace Si_UnitBalance
                 {
                     MelonLogger.Warning($"[CountCap] SpawnOnInit prefix error: {ex.Message}");
                     return true;
+                }
+            }
+        }
+
+        // =============================================
+        // Harvester exit toward patch (config "harvester_exit_toward_patch", bool)
+        //
+        // A refinery bay has two colinear ramps (ResourceDepositPoint.AIEntryPoints). Vanilla 1.0.x
+        // undocks through the active ramp AHEAD of the harvester (GetApproachPointAhead), so a harvester
+        // that docked nose-first leaves on the far side of the refinery and drives around it to get back
+        // to its patch. Two hooks, both server-side, neither runs per frame:
+        //  A) GetApproachPointAhead prefix (1.0.x only, the method is missing on 0.9.47): at undock, pick
+        //     the active ramp closest to the harvester's target (queued move / current patch / nearest
+        //     patch); if it is behind, hand back that ramp + the same overshoot vanilla's own fallback
+        //     uses. The vehicle driver reverses on its own for a force-move point > ReverseAngle behind.
+        //  B) SpawnOnInit.Start prefix (both branches): turn a refinery-spawned harvester's spawn marker
+        //     180 deg when the patch-side ramp is behind it, so the new harvester drives out forward.
+        // =============================================
+        private static readonly FieldInfo _depositEntryActiveField = AccessTools.Field(typeof(ResourceDepositPoint), "m_AIEntryPointsActive");
+        private static readonly FieldInfo _harvQueueMoveField = AccessTools.Field(typeof(AIHarvesterAgent), "m_QueueMoveToPosition");
+        private static readonly Dictionary<int, float> _harvExitLastLog = new Dictionary<int, float>();
+
+        // Private flag list in both branches (1.0.x also has public GetIsEntryPointActive, absent on 0.9.47).
+        private static bool IsDepositEntryActive(ResourceDepositPoint dp, int index)
+        {
+            try
+            {
+                if (_depositEntryActiveField != null && _depositEntryActiveField.GetValue(dp) is List<bool> active && index < active.Count)
+                    return active[index];
+            }
+            catch { }
+            return true;
+        }
+
+        // Active ramp of the bay closest (2D) to target; null if none.
+        private static Transform? FindEntryClosestTo(ResourceDepositPoint dp, Vector3 target)
+        {
+            var entries = dp.AIEntryPoints;
+            if (entries == null) return null;
+            Transform? best = null;
+            float bestSq = float.MaxValue;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var t = entries[i];
+                if (t == null || !IsDepositEntryActive(dp, i)) continue;
+                Vector3 d = t.position - target;
+                d.y = 0f;
+                float sq = d.sqrMagnitude;
+                if (sq < bestSq) { bestSq = sq; best = t; }
+            }
+            return best;
+        }
+
+        // Vanilla's own "is it ahead" test (GetApproachPointAhead): flat offset dotted with forward.
+        private static bool IsAhead(Vector3 point, Vector3 from, Vector3 forward)
+        {
+            Vector3 d = point - from;
+            d.y = 0f;
+            return Vector3.Dot(d, forward) > 0f;
+        }
+
+        private static ResourceArea? FindNearestPatch(Team? team, Resource? type, Vector3 position)
+        {
+            if (team == null || type == null) return null;
+            ResourceArea.GetNearestResourceArea(team, type, position, out ResourceArea area);
+            return area;
+        }
+
+        private static AIHarvesterAgent? MatchDockedHarvester(Unit? unit, ResourceDepositPoint dp, Vector3 worldPos)
+        {
+            if (unit == null || unit.IsDestroyed) return null;
+            var agent = unit.AIAgent as AIHarvesterAgent;
+            if (agent == null || agent.CurrentDepositPoint != dp) return null;
+            if ((unit.transform.position - worldPos).sqrMagnitude > 0.01f) return null;
+            return agent;
+        }
+
+        // The undock call passes Vehicle.transform.position as worldPos. OccupiedByUnit is set (server)
+        // when a ResourceHolder unit enters the bay zone, i.e. normally the docked harvester; verify it
+        // and fall back to the team's units if it is someone else.
+        private static AIHarvesterAgent? FindDockedHarvester(ResourceDepositPoint dp, Vector3 worldPos)
+        {
+            var agent = MatchDockedHarvester(dp.OccupiedByUnit, dp, worldPos);
+            if (agent != null) return agent;
+            var team = dp.Structure != null ? dp.Structure.Team : null;
+            var units = team != null ? team.Units : Unit.Units;
+            if (units == null) return null;
+            for (int i = 0; i < units.Count; i++)
+            {
+                agent = MatchDockedHarvester(units[i], dp, worldPos);
+                if (agent != null) return agent;
+            }
+            return null;
+        }
+
+        private static string AreaLabel(ResourceArea? area, Vector3 from)
+        {
+            if (area == null) return "?";
+            Vector3 d = area.transform.position - from;
+            d.y = 0f;
+            return $"{area.name} ({d.magnitude:F0} m)";
+        }
+
+        internal static class Patch_HarvesterExitApproach
+        {
+            // Resolved by reflection so the 0.9.47 build (no such method) compiles and loads unchanged.
+            public static MethodBase? TargetMethod() =>
+                AccessTools.Method(typeof(ResourceDepositPoint), "GetApproachPointAhead",
+                    new[] { typeof(Vector3), typeof(Vector3), typeof(Vector3).MakeByRefType() });
+
+            public static bool Prefix(ResourceDepositPoint __instance, Vector3 worldPos, Vector3 forward, ref Vector3 point, ref bool __result)
+            {
+                try
+                {
+                    if (!_harvesterExitTowardPatch || __instance == null || Game.GetIsClient()) return true;
+                    // TeleportOntoDepositPoint probes with the bay's own position: leave those alone.
+                    if ((worldPos - __instance.transform.position).sqrMagnitude < 0.01f) return true;
+
+                    var agent = FindDockedHarvester(__instance, worldPos);
+                    if (agent == null) return true;
+                    var unit = agent.Unit;
+                    var team = unit != null ? unit.Team : null;
+                    if (unit == null || team == null) return true;
+
+                    // Where it goes next: a queued commander order, else its patch (vanilla drops a depleted
+                    // one right after undock), else the patch vanilla will pick (nearest for the team).
+                    Vector3 target;
+                    string targetLabel;
+                    Vector3 queued = Vector3.zero;
+                    if (_harvQueueMoveField != null) queued = (Vector3)_harvQueueMoveField.GetValue(agent);
+                    if (queued != Vector3.zero)
+                    {
+                        target = queued;
+                        targetLabel = "ordered move";
+                    }
+                    else
+                    {
+                        var area = agent.CurrentHarvestArea;
+                        if (area == null || area.ResourceAmountCurrent <= 0)
+                        {
+                            var type = __instance.ResourceType;
+                            if (type == null && agent.ResourceHolder != null) type = agent.ResourceHolder.ResourceType;
+                            area = FindNearestPatch(team, type, worldPos);
+                        }
+                        if (area == null) return true;
+                        target = area.transform.position;
+                        targetLabel = AreaLabel(area, worldPos);
+                    }
+
+                    var entry = FindEntryClosestTo(__instance, target);
+                    if (entry == null) return true;
+                    Vector3 entryPos = entry.position;
+                    if (IsAhead(entryPos, worldPos, forward)) return true; // vanilla picks this same ramp
+
+                    var vehicle = unit as Vehicle;
+                    float overshoot = vehicle != null ? vehicle.PhysicalBounds.max.z : 0f;
+                    point = entryPos - forward * overshoot;
+                    __result = true;
+
+                    int id = unit.GetInstanceID();
+                    float now = UnityEngine.Time.realtimeSinceStartup;
+                    if (!_harvExitLastLog.TryGetValue(id, out float last) || now - last >= 5f)
+                    {
+                        _harvExitLastLog[id] = now;
+                        string unitName = unit.ObjectInfo != null ? unit.ObjectInfo.DisplayName : unit.name;
+                        MelonLogger.Msg($"[HARVEXIT] {team.TeamShortName} {unitName}: exit via rear ramp toward {targetLabel}");
+                    }
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[HarvExit] GetApproachPointAhead prefix error: {ex.Message}");
+                    return true;
+                }
+            }
+        }
+
+        // Patch B: called from the SpawnOnInit.Start prefix once the count cap let the harvester through.
+        private static void TurnHarvesterSpawnTowardPatch(SpawnOnInit spawn, BaseGameObject owner, Team team)
+        {
+            try
+            {
+                var spawnT = spawn.transform;
+                Vector3 spawnPos = spawnT.position;
+                var dp = spawn.GetComponentInParent<ResourceDepositPoint>();
+                if (dp == null && owner != null)
+                {
+                    // Spawn marker may be a sibling of the bay: take the owner's bay closest to the marker.
+                    float bestSq = float.MaxValue;
+                    foreach (var cand in owner.GetComponentsInChildren<ResourceDepositPoint>(true))
+                    {
+                        float sq = (cand.transform.position - spawnPos).sqrMagnitude;
+                        if (sq < bestSq) { bestSq = sq; dp = cand; }
+                    }
+                }
+                if (dp == null) return;
+
+                // Ramp active flags come from EnableAboveGround.Start, whose order vs SpawnOnInit.Start is
+                // undefined; Evaluate() is public and idempotent, so make the flags valid now.
+                var above = spawn.GetComponentInParent<EnableAboveGround>();
+                if (above == null && owner != null) above = owner.GetComponentInChildren<EnableAboveGround>(true);
+                if (above != null)
+                {
+                    try { above.Evaluate(); }
+                    catch (Exception ex) { LogDebug($"[HARVEXIT] EnableAboveGround.Evaluate failed: {ex.Message}"); }
+                }
+
+                var area = FindNearestPatch(team, dp.ResourceType, spawnPos);
+                if (area == null) return;
+                var entry = FindEntryClosestTo(dp, area.transform.position);
+                if (entry == null) return;
+                if (IsAhead(entry.position, spawnPos, spawnT.forward)) return; // already faces the patch-side ramp
+
+                spawnT.rotation = Quaternion.AngleAxis(180f, Vector3.up) * spawnT.rotation;
+                MelonLogger.Msg($"[HARVEXIT] {team.TeamShortName}: spawn rotated toward {AreaLabel(area, spawnPos)}");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[HarvExit] spawn rotation error: {ex.Message}");
+            }
+        }
+
+        // =============================================
+        // No refinery sell refund (config "no_refinery_sell_refund", bool)
+        //
+        // Vanilla StructureSellComponent.BeginSell destroys the structure and leaves a deconstruct
+        // ConstructionSite; TickDeconstruct (server, every TickTime) drains its health and pays
+        // RefundPct (0.5) x ResourceCost x drained fraction into site.DeconstructRefundAccrued, paying
+        // out whole credits. Holding the accumulator far below zero keeps every payout at 0 while the
+        // vanilla drain / completion logic runs untouched. Credits stored in the refinery itself (1.0.x
+        // pays them out in BeginSell) are the team's own money and still come back.
+        // =============================================
+        private static readonly Dictionary<string, float> _refinerySellLastWarn = new Dictionary<string, float>();
+
+        private static bool IsRefineryConstruction(ConstructionData cd)
+        {
+            var info = cd != null ? cd.ObjectInfo : null;
+            return info != null && (info.name ?? "").IndexOf("Refinery", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static class Patch_RefinerySellTick
+        {
+            public static void Prefix(ConstructionSite site)
+            {
+                try
+                {
+                    if (!_noRefinerySellRefund || site == null) return;
+                    if (IsRefineryConstruction(site.ConstructionData))
+                        site.DeconstructRefundAccrued = -1e9f;
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[SellRefund] TickDeconstruct prefix error: {ex.Message}");
+                }
+            }
+        }
+
+        // Tells the commander why the refund shown in the sell UI (computed client-side) never arrives.
+        private static class Patch_RefinerySellBegin
+        {
+            public static void Prefix(StructureSellComponent __instance, Structure structure)
+            {
+                try
+                {
+                    if (!_noRefinerySellRefund || Game.GetIsClient() || structure == null || __instance == null) return;
+                    var info = structure.ObjectInfo;
+                    if (info == null || !IsRefineryConstruction(info.ConstructionData) || !__instance.GetCanSell(structure)) return;
+                    var team = structure.Team;
+                    if (team == null) return;
+
+                    MelonLogger.Msg($"[SELL] {team.TeamShortName}: {info.DisplayName} sold — no refund (no_refinery_sell_refund)");
+                    float now = UnityEngine.Time.realtimeSinceStartup;
+                    if (_refinerySellLastWarn.TryGetValue(team.TeamShortName, out float last) && now - last < 3f) return;
+                    _refinerySellLastWarn[team.TeamShortName] = now;
+                    var gm = GameMode.CurrentGameMode as GameModeExt;
+                    var commander = gm?.GetCommanderForTeam(team);
+                    if (commander != null)
+                        SendChatToPlayer(commander, _chatPrefix + "<color=#FFAA00>Refinery sold — no refund</color> " + _dimColor + "(refineries pay nothing back on this server; the harvester stays).</color>");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[SellRefund] BeginSell prefix error: {ex.Message}");
                 }
             }
         }
@@ -871,6 +1124,7 @@ namespace Si_UnitBalance
             try
             {
                 // 1. Revert all current OM overrides (restores originals, notifies clients)
+                DynCapCloseAll("rebalance");
                 if (_omInitialized && _overrideManagerType != null)
                 {
                     OMRevertAll();
@@ -900,6 +1154,7 @@ namespace Si_UnitBalance
                     _unitCapMult2Way = -1;
                     _unitCapMult3Way = -1;
                     ApplyUnitCapMultiplier("rebalance default");
+                    _spawnCooldowns.Clear();
                     MelonLogger.Msg("[Rebalance] Vanilla defaults restored. Use !rebalance to reload config.");
                     return;
                 }
@@ -1097,6 +1352,9 @@ namespace Si_UnitBalance
                     }
                     else
                         ok = WriteParamToJson(unitName, state.PendingParamKey, state.PendingValue);
+                    // Read at each spawn, so it needs no override re-apply.
+                    bool appliedLive = ok && state.PendingParamKey == "spawn_cooldown";
+                    if (appliedLive) SetSpawnCooldown(unitName, state.PendingValue);
                     // Capture before clearing — display label depends on these flags.
                     bool wasTechTier = state.PendingTechTierKey != null;
                     bool wasTechCost = state.PendingIsTechCost;
@@ -1123,7 +1381,7 @@ namespace Si_UnitBalance
                             OnRebalanceCommand(player, "rebalance");
                         }
                         else
-                            SendChatToPlayer(player, _chatPrefix + _dimColor + "Use !rebalance to apply.</color>");
+                            SendChatToPlayer(player, _chatPrefix + _dimColor + (appliedLive ? "Active now.</color>" : "Use !rebalance to apply.</color>"));
                     }
                     else
                         SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Failed to write config.</color>");
@@ -1519,11 +1777,13 @@ namespace Si_UnitBalance
                     }
                     else if (selection == 2)
                     {
-                        // Toggle player-controlled infantry cap exemption
+                        // Toggle the player cap exemption (DynamicCap.cs)
                         _playerInfantryIgnoreCap = !_playerInfantryIgnoreCap;
                         WriteBoolToJson("player_infantry_ignore_cap", _playerInfantryIgnoreCap);
+                        if (!_playerInfantryIgnoreCap) DynCapCloseAll("toggle off");
+                        else foreach (var t in Team.Teams) if (t != null) DynCapEvaluate(t);
                         string capStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + capStatus + " " + _dimColor + "(applies immediately)</color>");
+                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + capStatus + " " + _dimColor + "(player soldiers free the cap, Sol/Cent only; buffer " + _playerCapExemptBuffer + ", cfg player_cap_exempt_buffer)</color>");
                         string pn2 = GetPlayerName(player);
                         string sid2 = GetPlayerSteamId(player);
                         WriteAuditLog(pn2, sid2, "capdecay", "player_infantry_ignore_cap", (!_playerInfantryIgnoreCap).ToString(), _playerInfantryIgnoreCap.ToString());
@@ -1541,9 +1801,9 @@ namespace Si_UnitBalance
                     }
                     break;
 
-                // ── Strategystyle Menu (alien nest-centric build rules) ──
+                // ── Strategystyle Menu (alien nest-centric build rules + refinery sell refund + harvester exit) ──
                 case MenuLevel.StrategyMenu:
-                    if (selection < 1 || selection > 5) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-5.</color>"); return; }
+                    if (selection < 1 || selection > 7) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-7.</color>"); return; }
                     if (selection == 1)
                     {
                         // Toggle nest-only alien building (anchor flag off for every alien structure but the Nest)
@@ -1589,6 +1849,30 @@ namespace Si_UnitBalance
                         string sid5 = GetPlayerSteamId(player);
                         WriteAuditLog(pn5, sid5, "strategy", "alien_queen_logistics_per_nest", (!_alienQueenLogisticsPerNest).ToString(), _alienQueenLogisticsPerNest.ToString());
                         MelonLogger.Msg($"[BAL] {pn5} ({sid5}): alien_queen_logistics_per_nest -> {_alienQueenLogisticsPerNest}");
+                    }
+                    else if (selection == 6)
+                    {
+                        // Toggle refinery sell refund (checked on every deconstruct tick — no !rebalance needed)
+                        _noRefinerySellRefund = !_noRefinerySellRefund;
+                        WriteBoolToJson("no_refinery_sell_refund", _noRefinerySellRefund);
+                        string nrStatus = _noRefinerySellRefund ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "No Refinery Sell Refund: " + nrStatus + " " + _dimColor + "(applies immediately)</color>");
+                        string pn6 = GetPlayerName(player);
+                        string sid6 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn6, sid6, "strategy", "no_refinery_sell_refund", (!_noRefinerySellRefund).ToString(), _noRefinerySellRefund.ToString());
+                        MelonLogger.Msg($"[BAL] {pn6} ({sid6}): no_refinery_sell_refund -> {_noRefinerySellRefund}");
+                    }
+                    else if (selection == 7)
+                    {
+                        // Toggle harvester exit toward patch (checked at every undock / refinery spawn — no !rebalance needed)
+                        _harvesterExitTowardPatch = !_harvesterExitTowardPatch;
+                        WriteBoolToJson("harvester_exit_toward_patch", _harvesterExitTowardPatch);
+                        string heStatus = _harvesterExitTowardPatch ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Harvester Exit Toward Patch: " + heStatus + " " + _dimColor + "(applies immediately)</color>");
+                        string pn7 = GetPlayerName(player);
+                        string sid7 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn7, sid7, "strategy", "harvester_exit_toward_patch", (!_harvesterExitTowardPatch).ToString(), _harvesterExitTowardPatch.ToString());
+                        MelonLogger.Msg($"[BAL] {pn7} ({sid7}): harvester_exit_toward_patch -> {_harvesterExitTowardPatch}");
                     }
                     break;
 

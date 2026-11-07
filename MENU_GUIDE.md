@@ -52,17 +52,19 @@ Root
 │   └── 7. Watchdog [ON/OFF]    (round-transition stall recovery)
 ├── 6. Cap&Decay   →  unit cap · structure decay · count caps
 │   ├── 1. Decay         →  1. Human · 2. Alien   →  enable, keep_production, delay, tick, amount_pct, randomize_pct
-│   ├── 2. Player Cap Exempt [ON/OFF]  (player-controlled infantry don't fill the unit cap)
+│   ├── 2. Player Cap Exempt [ON/OFF]  (player-controlled soldiers don't fill the unit cap, Sol/Centauri only; cap-value window synced to clients)
 │   ├── 3. Unit Cap Mult 2-way = <mult>   (HvH, HvA;   .1 <mult>;  -1 = server capmult, 0 = unlimited)
 │   ├── 4. Unit Cap Mult 3-way = <mult>   (HvHvA, H2vA; same edit flow)
 │   ├── 5. Shrimp Cap = <max>     (per-team max alive+queued Shrimps;   .1 <max>; -1 = unlimited; immediate)
 │   └── 6. Harvester Cap = <max>  (per-team max Sol/Cent harvesters;    .1 <max>; -1 = unlimited; immediate)
-└── 7. Strategystyle   →  alien nest-centric build rules
+└── 7. Strategystyle   →  alien nest-centric build rules + refinery sell refund + harvester exit
     ├── 1. Alien Nest-Only Build [ON/OFF]  (only Nests anchor new alien buildings; !rebalance to apply)
     ├── 2. Alien Nest Reach Radius = <m>  (Nodes/Bio Caches only within <m> of a Nest; .1 <m>; -1 = vanilla; immediate)
     ├── 3. Alien Queens = <n>     (Queens per team — new Nests spawn one until reached; .1 <n>; 0 = every Nest; -1 = vanilla; immediate)
     ├── 4. Alien Nest Finished-Anchor Only [ON/OFF]  (a new Nest can't anchor to a Nest still under construction — needs a finished anchor in range; immediate)
-    └── 5. Queen Logistics per Nest [ON/OFF]  (alien structures build only while their nearest Nest has its Queen docked — vanilla is team-wide; needs 3. Alien Queens = 0; immediate)
+    ├── 5. Queen Logistics per Nest [ON/OFF]  (alien structures build only while their nearest Nest has its Queen docked — vanilla is team-wide; needs 3. Alien Queens = 0; immediate)
+    ├── 6. No Refinery Sell Refund [ON/OFF]  (selling a Sol/Cent refinery pays nothing back — stops build + sell for a cheap harvester; immediate)
+    └── 7. Harvester Exit Toward Patch [ON/OFF]  (harvesters leave the refinery by the ramp facing their Balterium patch instead of the ramp ahead; immediate)
 ```
 
 Inside any **Unit > Param Group** you'll see lines like:
@@ -131,13 +133,15 @@ The mod has a `PropagateToLiveInstances` pass on game start (and during `!rebala
 | **FOW / target distance** | ✅ live propagated | ✅ | ✅ |
 | **Tech research time / cost** | n/a | ✅ — affects future tech-ups starting next research |
 | **Decay (Cap&Decay > Decay)** | mostly live (keep_production toggle is immediate) | ✅ | ✅ |
-| **Player Cap Exempt toggle (Cap&Decay /2)** | ✅ immediate (cap recompute each tick) | ✅ | ✅ |
+| **Player Cap Exempt toggle (Cap&Decay /2)** | ✅ immediate (window re-evaluated on every cap recount and control change) | ✅ | ✅ |
 | **Shrimp / Harvester Cap (Cap&Decay /5, /6)** | ✅ immediate (checked on every build request; commander gets a chat warning) | ✅ | ✅ |
 | **Alien Nest-Only Build (Strategystyle /1)** | placed structures keep the links they made at spawn | ✅ after `!rebalance` (new placements only) | ✅ |
 | **Alien Nest Reach Radius (Strategystyle /2)** | ✅ immediate (checked on every Node / Bio Cache placement; commander gets chat warning + sound) | ✅ | ✅ |
 | **Alien Queens (Strategystyle /3)** | existing Nests unchanged; Nests built after the save spawn a Queen | ✅ | ✅ |
 | **Queen Logistics per Nest (Strategystyle /5)** | ✅ immediate (checked on every build / production request; commander gets chat warning + sound) | ✅ | ✅ |
 | **Alien Nest Finished-Anchor Only (Strategystyle /4)** | ✅ immediate (checked on every Nest placement; commander gets chat warning + sound) | ✅ | ✅ |
+| **No Refinery Sell Refund (Strategystyle /6)** | ✅ immediate (checked on every deconstruct tick, also for refineries already being sold; commander gets a chat notice) | ✅ | ✅ |
+| **Harvester Exit Toward Patch (Strategystyle /7)** | ✅ immediate (checked at every undock and every refinery harvester spawn) | ✅ | ✅ |
 
 **Rule of thumb:** if you want guaranteed-fresh values, **start a new round** after `!rebalance`. That's the cleanest "everything is the new version" state.
 

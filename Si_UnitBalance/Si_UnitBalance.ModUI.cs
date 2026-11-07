@@ -374,7 +374,8 @@ namespace Si_UnitBalance
                     }
                     if (root["count_caps"] is JObject caps)
                         foreach (var p in caps.Properties()) if (!p.Name.StartsWith("_")) rows.Add(Row("Max " + p.Name + " per team", Num(p.Value)));
-                    if (root["player_infantry_ignore_cap"] != null) rows.Add(Row("Player infantry ignores cap", Num(root["player_infantry_ignore_cap"]), "off"));
+                    if (root["player_infantry_ignore_cap"] != null) rows.Add(Row("Player units free the cap", Num(root["player_infantry_ignore_cap"]), "off"));
+                    if (root["player_cap_exempt_buffer"] != null) rows.Add(Row("Player cap exempt buffer", Num(root["player_cap_exempt_buffer"]), "3"));
                     Group("Caps", rows);
                 }
                 if (root["decay"] is JObject decay)
@@ -406,6 +407,8 @@ namespace Si_UnitBalance
                 {
                     var rows = new JArray();
                     if (root["additional_spawn"] != null) rows.Add(Row("Extra starting transports", Num(root["additional_spawn"]), "off"));
+                    if (root["no_refinery_sell_refund"] != null) rows.Add(Row("No refund when selling a refinery", Num(root["no_refinery_sell_refund"]), "off"));
+                    if (root["harvester_exit_toward_patch"] != null) rows.Add(Row("Harvesters leave the refinery toward their patch", Num(root["harvester_exit_toward_patch"]), "off"));
                     if (root["game_version"] != null) rows.Add(Row("Config calibrated for", Num(root["game_version"])));
                     Group("Other", rows);
                 }

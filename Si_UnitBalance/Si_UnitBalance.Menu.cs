@@ -134,9 +134,9 @@ namespace Si_UnitBalance
         private static readonly string[] _weaponParamKeys = {
             "damage_mult", "proj_speed_mult", "proj_lifetime_mult", "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult"
         };
-        // Infantry (CharacterAttachment): only 3 functional params (accuracy/magazine/fire_rate/reload not overridable)
+        // Infantry (HumanHandsAnimator): all 7 params, see Si_UnitBalance.HandsWeapon.cs
         private static readonly string[] _weaponParamKeysInfantry = {
-            "damage_mult", "proj_speed_mult", "proj_lifetime_mult"
+            "damage_mult", "proj_speed_mult", "proj_lifetime_mult", "accuracy_mult", "magazine_mult", "fire_rate_mult", "reload_time_mult"
         };
         // Creature ranged (CreatureDecapod ranged): 4 functional params (magazine/fire_rate/reload not applicable)
         private static readonly string[] _weaponParamKeysCreatureRanged = {
@@ -230,7 +230,8 @@ namespace Si_UnitBalance
             if (hasSplash) keys.Add("splash_damage_mult");
             // Only show penetrating damage if m_bPenetrating is enabled (like m_bSplash)
             if (GetBoolMember(pdObj, "m_bPenetrating") && GetFloatMember(pdObj, "m_fPenetratingDamage") > 0) keys.Add("penetrating_damage_mult");
-            if (GetFloatMember(pdObj, "m_fRicochetDamage") > 0) keys.Add("ricochet_damage_mult");
+            // Only with m_bRicochet on: the damage value is unused otherwise (Balterium rifle has 30 but never ricochets)
+            if (GetBoolMember(pdObj, "m_bRicochet") && GetFloatMember(pdObj, "m_fRicochetDamage") > 0) keys.Add("ricochet_damage_mult");
             if (keys.Count == 0) return new[] { "damage_mult" };
             // Add splash radius keys if this projectile has splash damage enabled
             if (hasSplash)
@@ -314,6 +315,11 @@ namespace Si_UnitBalance
                             var pd = f.GetValue(comp);
                             if (pd != null && priPD == null) { priPD = pd; break; }
                         }
+                    }
+                    else if (comp is HumanHandsAnimator hands)
+                    {
+                        // Infantry gun
+                        if (hands.BulletType != null && priPD == null) priPD = hands.BulletType;
                     }
                     else if (typeName == "CreatureDecapod")
                     {
@@ -552,6 +558,8 @@ namespace Si_UnitBalance
                 keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value", "dispense_timeout" });
             else if (hasMiningArms)
                 keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value", "extraction_radius" });
+            else if (IsPlayerSpawnOption(unitName))
+                keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value", "spawn_cooldown" });
             else
                 keys.Add(new[] { "health_mult", "cost_mult", "build_time_mult", "min_tier", "unit_cap_value" });
 
@@ -603,11 +611,15 @@ namespace Si_UnitBalance
             }
             else if (!hasPri && hasSoldier)
             {
-                // Infantry primary weapon: dynamic damage keys + speed/lifetime
-                names.Add("Primary Weapon");
+                // Infantry primary weapon: dynamic damage keys + speed/lifetime + gun params (HumanHandsAnimator)
+                string label = "Primary Weapon";
+                if (priPDObj != null) label += " (" + CleanWeaponName(((UnityEngine.Object)priPDObj).name) + ")";
+                names.Add(label);
                 var wk = new List<string>();
                 foreach (string dk in GetDamageKeysForProjectile(priPDObj)) wk.Add("pri_" + dk);
                 wk.AddRange(new[] { "pri_proj_speed_mult", "pri_proj_lifetime_mult" });
+                if (priPDObj != null)
+                    wk.AddRange(new[] { "pri_accuracy_mult", "pri_magazine_mult", "pri_fire_rate_mult", "pri_reload_time_mult" });
                 keys.Add(wk.ToArray());
             }
 
@@ -655,9 +667,13 @@ namespace Si_UnitBalance
             if (priPDObj != null)
             {
                 names.Add("Ballistics");
-                keys.Add(new[] { "impact_scale_by_speed", "drag_mult",
-                                 "ai_lead_velocity", "ai_lead_gravity", "ai_lead_drag",
-                                 "aim_compensation", "pitch_max_up", "pitch_max_down" });
+                // aim_compensation and pitch limits are VehicleTurret fields
+                keys.Add(hasSoldier
+                    ? new[] { "impact_scale_by_speed", "drag_mult",
+                              "ai_lead_velocity", "ai_lead_gravity", "ai_lead_drag" }
+                    : new[] { "impact_scale_by_speed", "drag_mult",
+                              "ai_lead_velocity", "ai_lead_gravity", "ai_lead_drag",
+                              "aim_compensation", "pitch_max_up", "pitch_max_down" });
             }
 
             // ── Movement (only applicable params per component type) ──
@@ -917,6 +933,7 @@ namespace Si_UnitBalance
                 // Cache component lookups by type
                 Component vtComp = null, sensorComp = null, soldierComp = null;
                 Component wheeledComp = null, decapodComp = null, twComp = null;
+                HumanHandsAnimator handsComp = null;
                 var allVtComps = new List<Component>();
                 foreach (var comp in childComps)
                 {
@@ -928,6 +945,7 @@ namespace Si_UnitBalance
                     else if ((tn == "Soldier" || tn == "PlayerMovement" || tn == "FPSMovement") && soldierComp == null) soldierComp = comp;
                     else if (tn == "VehicleWheeled" && wheeledComp == null) wheeledComp = comp;
                     else if (tn == "CreatureDecapod" && decapodComp == null) decapodComp = comp;
+                    else if (handsComp == null && comp is HumanHandsAnimator foundHands) handsComp = foundHands;
                 }
                 // Build pri/sec weapon → (VehicleTurret, fieldPrefix, ProjectileData) mapping
                 // Mirrors GetUnitWeaponInfo: iterate all VTs, first unique PD = pri, second = sec
@@ -957,6 +975,8 @@ namespace Si_UnitBalance
                         else if (secPD == null) { secPD = pd; secVtComp = vt; secVtPrefix = pfx; }
                     }
                 }
+
+                if (priPD == null && handsComp != null && handsComp.BulletType != null) priPD = handsComp.BulletType;
 
                 // Pre-cache TurretWeapon ProjectileData (for armed structures)
                 object twPD = null;
@@ -1021,6 +1041,9 @@ namespace Si_UnitBalance
                                 break;
                             case "unit_cap_value":
                                 val = matchedInfo.UnitCapValue.ToString();
+                                break;
+                            case "spawn_cooldown":
+                                val = "0";
                                 break;
                             case "build_radius":
                                 if (matchedInfo.ConstructionData != null)
@@ -1783,6 +1806,8 @@ namespace Si_UnitBalance
                                                 }
                                             }
                                         }
+                                        if (val == null && isPri && handsComp != null)
+                                            val = handsComp.MuzzleSpreadMin.ToString("F2") + " min";
                                         break;
                                     case "magazine_mult":
                                         if (weaponVt != null)
@@ -1791,6 +1816,8 @@ namespace Si_UnitBalance
                                             if (f != null && f.FieldType == typeof(int))
                                                 val = ((int)f.GetValue(weaponVt)).ToString();
                                         }
+                                        if (val == null && isPri && handsComp != null)
+                                            val = handsComp.MagazineSize.ToString();
                                         break;
                                     case "fire_rate_mult":
                                         if (weaponVt != null)
@@ -1812,6 +1839,8 @@ namespace Si_UnitBalance
                                                 }
                                             }
                                         }
+                                        if (val == null && isPri && handsComp != null)
+                                            val = handsComp.FireDelay.ToString("F3") + "s";
                                         break;
                                     case "reload_time_mult":
                                         if (weaponVt != null)
@@ -1820,6 +1849,8 @@ namespace Si_UnitBalance
                                             if (f != null && f.FieldType == typeof(float))
                                                 val = ((float)f.GetValue(weaponVt)).ToString("F1") + "s";
                                         }
+                                        if (val == null && isPri && handsComp != null)
+                                            val = handsComp.ReloadTime.ToString("F1") + "s";
                                         break;
                                 }
                                 break;
@@ -1971,17 +2002,17 @@ namespace Si_UnitBalance
                     string alienDecay = _decayAlien.Enabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Decay " + _dimColor + "(Human [</color>" + humanDecay + _dimColor + "] · Alien [</color>" + alienDecay + _dimColor + "])</color>");
                     string capExemptStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Player Cap Exempt [" + capExemptStatus + "] " + _dimColor + "(player soldiers don't fill cap)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Player Cap Exempt [" + capExemptStatus + "] " + _dimColor + "(player soldiers free the cap, Sol/Cent only · " + DynCapStatus() + ")</color>");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "3.</color> Unit Cap Mult 2-way = " + _valueColor + FmtCapMult(_unitCapMult2Way) + "</color> " + _dimColor + "(HvH, HvA)</color>");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "4.</color> Unit Cap Mult 3-way = " + _valueColor + FmtCapMult(_unitCapMult3Way) + "</color> " + _dimColor + "(HvHvA, H2vA)</color>");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Shrimp Cap = " + _valueColor + FmtCountCap(_countCapShrimp) + "</color>  " + _itemColor + "6.</color> Harvester Cap = " + _valueColor + FmtCountCap(_countCapHarvester) + "</color> " + _dimColor + "(max per team)</color>");
                     break;
                 }
 
-                // ── Strategystyle (alien nest-centric build rules) ──
+                // ── Strategystyle (alien nest-centric build rules + refinery sell refund + harvester exit) ──
                 case MenuLevel.StrategyMenu:
                 {
-                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Strategystyle</color> " + _dimColor + "(alien nest-centric build rules)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Strategystyle</color> " + _dimColor + "(build rules: alien nests, refinery selling, harvester exit)</color>");
                     string nestOnlyStatus = _alienNestOnlyBuild ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Alien Nest-Only Build [" + nestOnlyStatus + "] " + _dimColor + "(only Nests anchor new buildings; !rebalance)</color>");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Alien Nest Reach Radius = " + _valueColor + FmtNestReach(_alienNestReachRadius) + "</color> " + _dimColor + "(Nodes/Bio Caches only this close to a Nest)</color>");
@@ -1990,6 +2021,10 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "4.</color> Alien Nest Finished-Anchor Only [" + nestAnchorStatus + "] " + _dimColor + "(a new Nest can't anchor to a Nest still under construction)</color>");
                     string qlStatus = _alienQueenLogisticsPerNest ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Queen Logistics per Nest [" + qlStatus + "] " + _dimColor + "(structures build only while their nearest Nest's Queen is docked; needs 3. = 0)</color>");
+                    string nrStatus = _noRefinerySellRefund ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "6.</color> No Refinery Sell Refund [" + nrStatus + "] " + _dimColor + "(selling a refinery pays nothing back; stops build+sell for a cheap harvester)</color>");
+                    string heStatus = _harvesterExitTowardPatch ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Harvester Exit Toward Patch [" + heStatus + "] " + _dimColor + "(harvesters leave the refinery by the ramp facing their Balterium patch)</color>");
                     break;
                 }
 
@@ -2785,7 +2820,7 @@ namespace Si_UnitBalance
                 string valueStr;
                 if (paramKey == "impact_scale_by_speed")
                     valueStr = (value != 0f) ? "true" : "false";   // per-unit bool: menu enters 1/0
-                else if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "deposit_radius" || paramKey == "extraction_radius" || paramKey == "target_distance" || paramKey == "fow_distance" || paramKey == "unit_cap_value" || paramKey == "aim_compensation")
+                else if (paramKey == "min_tier" || paramKey == "build_radius" || paramKey == "deposit_radius" || paramKey == "extraction_radius" || paramKey == "target_distance" || paramKey == "fow_distance" || paramKey == "unit_cap_value" || paramKey == "aim_compensation" || paramKey == "spawn_cooldown")
                     valueStr = ((int)value).ToString();
                 else
                     valueStr = Math.Round(value, 4).ToString(System.Globalization.CultureInfo.InvariantCulture);
