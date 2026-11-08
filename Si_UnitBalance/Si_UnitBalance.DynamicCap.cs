@@ -358,7 +358,7 @@ namespace Si_UnitBalance
                 if (!_playerInfantryIgnoreCap)
                     state = "<color=#FF5555>OFF</color>";
                 else if (st.Open)
-                    state = "<color=#55FF55>ACTIVE</color> (cap raised to " + E + ", closes at " + Math.Max(0, E - buffer) + " in use)";
+                    state = "<color=#55FF55>ACTIVE</color> (cap raised to " + E + ", closes at " + Math.Max(0, E - buffer + 1) + " in use)";
                 else if (held <= 0)
                     state = "<color=#FFAA00>INACTIVE</color> (no player holds a cap unit)";
                 else if (tc + DynCapMaxUnitValue <= S)
