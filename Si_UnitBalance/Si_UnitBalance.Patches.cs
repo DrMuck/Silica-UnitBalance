@@ -1534,7 +1534,7 @@ namespace Si_UnitBalance
                     state.Level = MenuLevel.CapDecayMenu;
                 else if (state.Level == MenuLevel.HTPDecayFaction)
                     state.Level = MenuLevel.HTPDecay;
-                else if (state.Level == MenuLevel.HTPUnitCap)
+                else if (state.Level == MenuLevel.HTPUnitCap || state.Level == MenuLevel.PlayerCapExempt)
                     state.Level = MenuLevel.CapDecayMenu;
                 else if (state.Level == MenuLevel.CountCap)
                     state.Level = MenuLevel.CapDecayMenu;
@@ -1599,6 +1599,13 @@ namespace Si_UnitBalance
             if (state.Level == MenuLevel.HTPUnitCap && !string.IsNullOrEmpty(arg2))
             {
                 HandleHTPUnitCapEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // Cap&Decay player cap exempt edit: "/2 4" sets the buffer to 4 cap points
+            if (state.Level == MenuLevel.PlayerCapExempt && !string.IsNullOrEmpty(arg2))
+            {
+                HandlePlayerCapExemptEdit(player, state, selection, arg2);
                 return;
             }
 
@@ -1777,17 +1784,7 @@ namespace Si_UnitBalance
                     }
                     else if (selection == 2)
                     {
-                        // Toggle the player cap exemption (DynamicCap.cs)
-                        _playerInfantryIgnoreCap = !_playerInfantryIgnoreCap;
-                        WriteBoolToJson("player_infantry_ignore_cap", _playerInfantryIgnoreCap);
-                        if (!_playerInfantryIgnoreCap) DynCapCloseAll("toggle off");
-                        else foreach (var t in Team.Teams) if (t != null) DynCapEvaluate(t);
-                        string capStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + capStatus + " " + _dimColor + "(player soldiers free the cap, Sol/Cent only; buffer " + _playerCapExemptBuffer + ", cfg player_cap_exempt_buffer)</color>");
-                        string pn2 = GetPlayerName(player);
-                        string sid2 = GetPlayerSteamId(player);
-                        WriteAuditLog(pn2, sid2, "capdecay", "player_infantry_ignore_cap", (!_playerInfantryIgnoreCap).ToString(), _playerInfantryIgnoreCap.ToString());
-                        MelonLogger.Msg($"[BAL] {pn2} ({sid2}): player_infantry_ignore_cap -> {_playerInfantryIgnoreCap}");
+                        state.Level = MenuLevel.PlayerCapExempt;
                     }
                     else if (selection == 3 || selection == 4)
                     {
@@ -1875,6 +1872,31 @@ namespace Si_UnitBalance
                         MelonLogger.Msg($"[BAL] {pn7} ({sid7}): harvester_exit_toward_patch -> {_harvesterExitTowardPatch}");
                     }
                     break;
+
+                // ── Player Cap Exempt page ─────────────────────────────
+                case MenuLevel.PlayerCapExempt:
+                    if (selection == 1)
+                    {
+                        // Toggle the player cap exemption (DynamicCap.cs)
+                        _playerInfantryIgnoreCap = !_playerInfantryIgnoreCap;
+                        WriteBoolToJson("player_infantry_ignore_cap", _playerInfantryIgnoreCap);
+                        if (!_playerInfantryIgnoreCap) DynCapCloseAll("toggle off");
+                        else foreach (var t in Team.Teams) if (t != null) DynCapEvaluate(t);
+                        string capStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + capStatus + " " + _dimColor + "(applies immediately)</color>");
+                        string pn2 = GetPlayerName(player);
+                        string sid2 = GetPlayerSteamId(player);
+                        WriteAuditLog(pn2, sid2, "capdecay", "player_infantry_ignore_cap", (!_playerInfantryIgnoreCap).ToString(), _playerInfantryIgnoreCap.ToString());
+                        MelonLogger.Msg($"[BAL] {pn2} ({sid2}): player_infantry_ignore_cap -> {_playerInfantryIgnoreCap}");
+                        break;
+                    }
+                    if (selection == 2)
+                    {
+                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 <points> (e.g. .2 3 = keep 3 cap points free below the raised cap; 2..10)</color>");
+                        return;
+                    }
+                    SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1 (on/off) or 2 (buffer).</color>");
+                    return;
 
                 case MenuLevel.HTPUnitCap:
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <mult> (e.g. .1 3 = x3, .1 -1 = server, .1 0 = unlimited)</color>");

@@ -4,6 +4,16 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-08 — Player Cap Exempt gets its own page (v7.13.2)
+
+The Cap&Decay toggle line was hard to read: explanation, scope, config key name and live state ("Sol closed")
+all in one dim parenthesis, and the buffer could only be changed in the JSON. Cap&Decay `2` now opens a
+sub-page: `1` Exemption on/off (immediate), `2` Buffer = <points> (`.2 <points>`, 2..10, immediate, written to
+`player_cap_exempt_buffer`), one live line per Sol/Centauri team ("Sol: 47 of 50 cap points in use · players
+hold 12 · INACTIVE (standard cap not reached, activates at 49 in use)" / "ACTIVE (cap raised to 62, closes at
+59 in use)"), and a two-sentence how-it-works. Status wording is now active/inactive instead of open/closed.
+Logic in DynamicCap.cs unchanged; still unverified in a live match (no window has opened in any server log yet).
+
 ## 2026-11-07 — Player Cap Exempt rebuilt as a synced cap-value window (v7.13.1)
 
 Report: the toggle did nothing visible. Diagnosis: the cap is decided on the **client**. `StrategyMode.Construct`

@@ -335,9 +335,43 @@ namespace Si_UnitBalance
                 var team = Team.Teams[kv.Key];
                 if (team == null || !DynCapIsHumanTeam(team)) continue;
                 if (sb.Length > 0) sb.Append(" · ");
-                sb.Append(team.TeamShortName).Append(kv.Value.Open ? " open" : " closed");
+                sb.Append(team.TeamShortName).Append(kv.Value.Open ? " active" : " inactive");
             }
             return sb.Length > 0 ? sb.ToString() : "on";
+        }
+
+        /// <summary>One menu line per Sol/Centauri team with the numbers behind the switch. Null when the team
+        /// has no standard cap (no match running) or is not a human team.</summary>
+        private static string DynCapLiveLine(Team team)
+        {
+            try
+            {
+                if (team == null || !DynCapIsHumanTeam(team)) return null;
+                var entry = team.GetUnitTypeCapEntryForType(UnitCapType.Secondary);
+                int S = entry != null ? entry.Max : 0;
+                if (S <= 0) return null;
+                var st = DynCapState(team);
+                DynCapCount(team, st, out int tc, out int held);
+                int E = S + held;
+                int buffer = Math.Max(DynCapMaxUnitValue, _playerCapExemptBuffer);
+                string state;
+                if (!_playerInfantryIgnoreCap)
+                    state = "<color=#FF5555>OFF</color>";
+                else if (st.Open)
+                    state = "<color=#55FF55>ACTIVE</color> (cap raised to " + E + ", closes at " + Math.Max(0, E - buffer) + " in use)";
+                else if (held <= 0)
+                    state = "<color=#FFAA00>INACTIVE</color> (no player holds a cap unit)";
+                else if (tc + DynCapMaxUnitValue <= S)
+                    state = "<color=#FFAA00>INACTIVE</color> (standard cap not reached, activates at " + Math.Max(0, S - DynCapMaxUnitValue + 1) + " in use)";
+                else
+                    state = "<color=#FFAA00>INACTIVE</color> (raised cap would be " + E + ", too little room for the buffer of " + buffer + ")";
+                return team.TeamShortName + ": " + tc + " of " + S + " cap points in use · players hold " + held + " · " + state;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DYNCAP] live line failed: {ex.Message}");
+                return null;
+            }
         }
 
         // Team.UpdateUnitCapValues postfix: vanilla just recounted with the current values; decide
