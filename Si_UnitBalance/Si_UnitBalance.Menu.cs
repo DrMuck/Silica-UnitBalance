@@ -2206,7 +2206,7 @@ namespace Si_UnitBalance
                     string pceStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _headerColor + "Cap&Decay > Player Cap Exempt</color> " + _dimColor + "(units players are playing don't fill the unit cap · Sol/Centauri teams)</color>");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Exemption [" + pceStatus + "] " + _dimColor + "(applies immediately)</color>");
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Buffer = " + _valueColor + _playerCapExemptBuffer + "</color> " + _dimColor + "(cap points kept free below the raised cap against build bursts; 2..10)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Buffer = " + _valueColor + _playerCapExemptBuffer + "</color> " + _dimColor + "(cap points kept free below the raised cap; 1 = use it fully; 1..10)</color>");
                     int liveLines = 0;
                     try
                     {
@@ -2221,7 +2221,8 @@ namespace Si_UnitBalance
                     catch { }
                     if (liveLines == 0) SendChatToPlayer(player, _chatPrefix + _dimColor + "Live: no Sol/Centauri team with a unit cap right now (no match running)</color>");
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "How it works: once a team reaches its standard cap, its player units count 0 on server and clients, so the commander can keep building. The cap is raised by the points players hold; when that raised cap is reached the units count again.</color>");
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 3 (buffer 3 cap points)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Starts " + _playerCapExemptLead + " points below the standard cap. Unit cards keep their old cap cost until the structure is selected again; cap bar and build buttons follow at once.</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 1 (buffer 1 cap point)</color>");
                     break;
                 }
 
@@ -2504,9 +2505,9 @@ namespace Si_UnitBalance
                 return;
             }
             if (!int.TryParse(valueStr, System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out int newValue) || newValue < 2 || newValue > 10)
+                System.Globalization.CultureInfo.InvariantCulture, out int newValue) || newValue < 1 || newValue > 10)
             {
-                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (integer 2..10 cap points)</color>");
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (integer 1..10 cap points)</color>");
                 return;
             }
             int oldValue = _playerCapExemptBuffer;

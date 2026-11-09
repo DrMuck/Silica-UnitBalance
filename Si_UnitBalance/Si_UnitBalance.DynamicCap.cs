@@ -1,6 +1,7 @@
 using HarmonyLib;
 using MelonLoader;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using Silica;
@@ -32,12 +33,22 @@ namespace Si_UnitBalance
         //   held = true cap points of the team's player-controlled Secondary units
         //   E    = S + held, the enhanced cap
         //   tc   = true cap points in use (alive + queued + in production), what vanilla would show
-        //   CLOSED -> OPEN   when the standard cap is reached (tc + 2 > S) and tc + buffer <= E
-        //   OPEN   -> CLOSED when tc + buffer > E (enhanced cap reached) or tc + 2 + hyst <= S
-        //   re-open after a close at the top only once tc + buffer + hyst <= E (no flapping)
-        // The buffer keeps a burst of queued builds (client and server do not switch in the same
-        // instant) from passing the enhanced cap; the server re-validates every request with its own
-        // already-switched values, so the overshoot is bounded by buffer + 2 at worst.
+        //   CLOSED -> OPEN   when tc >= S - lead (default 5 below the standard cap, so the override is on
+        //                    the commander's client before a button greys out) and tc + buffer <= E
+        //   OPEN   -> CLOSED when tc + buffer > E (enhanced cap reached) or tc < S - lead - hyst
+        //   re-open after a close at the top only once one more point is free (tc + buffer + 1 <= E)
+        // With the default buffer 1 that is "open while S - 5 <= tc < E". The server re-validates every
+        // build request with its own already-switched values and re-evaluates after each enqueue, so the
+        // overshoot past E is at most one cap point (a 2-point unit accepted at E - 1).
+        //
+        // Client side (7.13.3): UnitCapEntry.Current is a local count the client only refreshes on unit
+        // add/remove and on queue RPCs. After a switch it can stay stale (and above Max when players
+        // pushed the team over the cap), which keeps the buttons grey although the values arrived. So
+        // every switch is followed by a harmless Structure CONSTRUCT_DEQUEUE RPC with index 255 (removes
+        // nothing, runs Team.UpdateUnitCapValues on every client), sent at once and again after 0.5 s and
+        // 2 s because the override packet and the RPC travel separately. The unit cards cache their cap
+        // cost label when they are built (Constructable.CapValue), so a card keeps showing the old cost
+        // until the structure is selected again; the cap bar and the button state follow the recount.
         // Evaluated on every Team.UpdateUnitCapValues (unit add/remove, queue changes) and on every
         // Unit.ControlledBy change (player spawns/dies/leaves a unit). Reset at round start/end and
         // before !rebalance, so OM holds the normal values whenever the overrides are (re)applied.
@@ -50,8 +61,10 @@ namespace Si_UnitBalance
         // Human teams (Sol, Centauri) only: alien teams never open a window.
         // =============================================
 
-        private static int _playerCapExemptBuffer = 3;     // config "player_cap_exempt_buffer"
-        private const int DynCapHysteresis = 2;
+        private static int _playerCapExemptBuffer = 1;     // config "player_cap_exempt_buffer": open while tc + buffer <= E
+        private static int _playerCapExemptLead = 5;       // config "player_cap_exempt_lead": open from tc >= S - lead
+        private const int DynCapHysteresis = 2;            // bottom close: tc < S - lead - hyst
+        private const int DynCapTopHysteresis = 1;         // re-open after a close at the top: one extra free point
         private const int DynCapMaxUnitValue = 2;         // largest Secondary player unit value (Heavy, Shocker, ...)
 
         private sealed class DynCapTeamState
@@ -60,6 +73,7 @@ namespace Si_UnitBalance
             public bool ClosedAtTop;                                       // last close was "enhanced cap reached"
             public readonly Dictionary<string, int> Originals = new Dictionary<string, int>(); // ObjectInfo.name -> cap value while OPEN
             public bool WarnedNoOM;
+            public float LastWhyLog = -999f;                               // throttle for the "stays closed" diagnostic
         }
 
         private static readonly Dictionary<int, DynCapTeamState> _dynCap = new Dictionary<int, DynCapTeamState>();
@@ -234,7 +248,65 @@ namespace Si_UnitBalance
             st.Open = true;
             st.ClosedAtTop = false;
             DynCapRecompute(team);
+            DynCapNudgeAll(team);
             MelonLogger.Msg($"[DYNCAP] {team.TeamShortName}: OPEN ({why}) zeroed {st.Originals.Count} unit(s): {sb}");
+        }
+
+        // ---- client recount nudge ----
+        private static System.Reflection.MethodInfo _rpcDequeueMethod;
+        private static bool _rpcDequeueLooked;
+
+        /// <summary>Make every client recount this team's cap entries: CONSTRUCT_DEQUEUE with an index no
+        /// queue has removes nothing and ends in Team.UpdateUnitCapValues on the client.</summary>
+        private static bool DynCapNudgeClients(Team team)
+        {
+            try
+            {
+                if (!_rpcDequeueLooked)
+                {
+                    _rpcDequeueLooked = true;
+                    _rpcDequeueMethod = AccessTools.Method(typeof(Structure), "RPC_Dequeue", new[] { typeof(int), typeof(bool), typeof(bool) });
+                    if (_rpcDequeueMethod == null)
+                        MelonLogger.Warning("[DYNCAP] Structure.RPC_Dequeue not found: clients recount only on their next unit/queue change");
+                }
+                if (_rpcDequeueMethod == null || team == null) return false;
+                var structures = team.Structures;
+                for (int i = 0; i < structures.Count; i++)
+                {
+                    var s = structures[i];
+                    if (s == null || s.IsDestroyed || s.NetworkComponent == null || !s.gameObject.activeInHierarchy) continue;
+                    _rpcDequeueMethod.Invoke(s, new object[] { 255, false, true });
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DYNCAP] client recount nudge failed: {ex.InnerException?.Message ?? ex.Message}");
+            }
+            return false;
+        }
+
+        private static void DynCapNudgeAll(Team team)
+        {
+            if (team == null) return;
+            DynCapNudgeClients(team);
+            try
+            {
+                MelonCoroutines.Start(DynCapNudgeLater(team.Index, 0.5f));
+                MelonCoroutines.Start(DynCapNudgeLater(team.Index, 2f));
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DYNCAP] delayed nudge not scheduled: {ex.Message}");
+            }
+        }
+
+        private static IEnumerator DynCapNudgeLater(int teamIndex, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            Team team = null;
+            try { team = teamIndex >= 0 && teamIndex < Team.Teams.Count ? Team.Teams[teamIndex] : null; } catch { }
+            if (team != null) DynCapNudgeClients(team);
         }
 
         private static void DynCapClose(Team team, DynCapTeamState st, string why, bool atTop)
@@ -251,6 +323,7 @@ namespace Si_UnitBalance
             st.Open = false;
             st.ClosedAtTop = atTop;
             DynCapRecompute(team);
+            DynCapNudgeAll(team);
             MelonLogger.Msg($"[DYNCAP] {team.TeamShortName}: CLOSED ({why}) restored {restored} unit(s)");
         }
 
@@ -282,21 +355,30 @@ namespace Si_UnitBalance
                 }
                 DynCapCount(team, st, out int tc, out int held);
                 int E = S + held;
-                int buffer = Math.Max(DynCapMaxUnitValue, _playerCapExemptBuffer);
+                int buffer = Math.Max(1, _playerCapExemptBuffer);
+                int lead = Math.Max(0, _playerCapExemptLead);
 
                 if (!st.Open)
                 {
-                    bool standardFull = tc + DynCapMaxUnitValue > S;
-                    int reopenGap = buffer + (st.ClosedAtTop ? DynCapHysteresis : 0);
-                    if (standardFull && held > 0 && tc + reopenGap <= E)
-                        DynCapOpen(team, st, $"tc={tc} S={S} held={held} E={E} buffer={buffer}");
+                    bool nearCap = tc + lead >= S;
+                    int reopenGap = buffer + (st.ClosedAtTop ? DynCapTopHysteresis : 0);
+                    if (nearCap && held > 0 && tc + reopenGap <= E)
+                        DynCapOpen(team, st, $"tc={tc} S={S} held={held} E={E} lead={lead} buffer={buffer}");
+                    else if (nearCap && Time.realtimeSinceStartup - st.LastWhyLog > 30f)
+                    {
+                        // Near or over the standard cap but not switching: say why, at most every 30 s per team.
+                        st.LastWhyLog = Time.realtimeSinceStartup;
+                        string why = held <= 0 ? "no player holds a cap unit"
+                            : $"needs tc <= {E - reopenGap} (E - {reopenGap}{(st.ClosedAtTop ? ", closed at the top before" : "")})";
+                        MelonLogger.Msg($"[DYNCAP] {team.TeamShortName}: stays CLOSED tc={tc} S={S} held={held} E={E} lead={lead} buffer={buffer}: {why}");
+                    }
                 }
                 else
                 {
                     if (tc + buffer > E)
                         DynCapClose(team, st, $"enhanced cap reached: tc={tc} S={S} held={held} E={E} buffer={buffer}", true);
-                    else if (tc + DynCapMaxUnitValue + DynCapHysteresis <= S)
-                        DynCapClose(team, st, $"below standard cap: tc={tc} S={S}", false);
+                    else if (tc + lead + DynCapHysteresis < S)
+                        DynCapClose(team, st, $"below standard cap: tc={tc} S={S} lead={lead}", false);
                 }
             }
             catch (Exception ex)
@@ -353,18 +435,20 @@ namespace Si_UnitBalance
                 var st = DynCapState(team);
                 DynCapCount(team, st, out int tc, out int held);
                 int E = S + held;
-                int buffer = Math.Max(DynCapMaxUnitValue, _playerCapExemptBuffer);
+                int buffer = Math.Max(1, _playerCapExemptBuffer);
+                int lead = Math.Max(0, _playerCapExemptLead);
+                int reopenGap = buffer + (st.ClosedAtTop ? DynCapTopHysteresis : 0);
                 string state;
                 if (!_playerInfantryIgnoreCap)
                     state = "<color=#FF5555>OFF</color>";
                 else if (st.Open)
                     state = "<color=#55FF55>ACTIVE</color> (cap raised to " + E + ", closes at " + Math.Max(0, E - buffer + 1) + " in use)";
+                else if (tc + lead < S)
+                    state = "<color=#FFAA00>INACTIVE</color> (activates at " + Math.Max(0, S - lead) + " in use)";
                 else if (held <= 0)
-                    state = "<color=#FFAA00>INACTIVE</color> (no player holds a cap unit)";
-                else if (tc + DynCapMaxUnitValue <= S)
-                    state = "<color=#FFAA00>INACTIVE</color> (standard cap not reached, activates at " + Math.Max(0, S - DynCapMaxUnitValue + 1) + " in use)";
+                    state = "<color=#FFAA00>INACTIVE</color> (no player holds a cap unit, nothing to exempt)";
                 else
-                    state = "<color=#FFAA00>INACTIVE</color> (raised cap would be " + E + ", too little room for the buffer of " + buffer + ")";
+                    state = "<color=#FFAA00>INACTIVE</color> (raised cap " + E + " is used up, reopens at " + Math.Max(0, E - reopenGap) + " or fewer in use)";
                 return team.TeamShortName + ": " + tc + " of " + S + " cap points in use · players hold " + held + " · " + state;
             }
             catch (Exception ex)

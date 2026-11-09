@@ -375,7 +375,7 @@ namespace Si_UnitBalance
                     if (root["count_caps"] is JObject caps)
                         foreach (var p in caps.Properties()) if (!p.Name.StartsWith("_")) rows.Add(Row("Max " + p.Name + " per team", Num(p.Value)));
                     if (root["player_infantry_ignore_cap"] != null) rows.Add(Row("Player units free the cap", Num(root["player_infantry_ignore_cap"]), "off"));
-                    if (root["player_cap_exempt_buffer"] != null) rows.Add(Row("Player cap exempt buffer", Num(root["player_cap_exempt_buffer"]), "3"));
+                    if (root["player_cap_exempt_buffer"] != null) rows.Add(Row("Player cap exempt buffer", Num(root["player_cap_exempt_buffer"]), "1"));
                     Group("Caps", rows);
                 }
                 if (root["decay"] is JObject decay)

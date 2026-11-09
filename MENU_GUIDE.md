@@ -52,7 +52,7 @@ Root
 │   └── 7. Watchdog [ON/OFF]    (round-transition stall recovery)
 ├── 6. Cap&Decay   →  unit cap · structure decay · count caps
 │   ├── 1. Decay         →  1. Human · 2. Alien   →  enable, keep_production, delay, tick, amount_pct, randomize_pct
-│   ├── 2. Player Cap Exempt [ON/OFF]  →  1. Exemption [ON/OFF] · 2. Buffer = <points> (.2 <points>, 2..10) · Live line per Sol/Centauri team (in use / held / ACTIVE or INACTIVE + reason)
+│   ├── 2. Player Cap Exempt [ON/OFF]  →  1. Exemption [ON/OFF] · 2. Buffer = <points> (.2 <points>, 1..10, default 1) · Live line per Sol/Centauri team (in use / held / ACTIVE or INACTIVE + reason)
 │   ├── 3. Unit Cap Mult 2-way = <mult>   (HvH, HvA;   .1 <mult>;  -1 = server capmult, 0 = unlimited)
 │   ├── 4. Unit Cap Mult 3-way = <mult>   (HvHvA, H2vA; same edit flow)
 │   ├── 5. Shrimp Cap = <max>     (per-team max alive+queued Shrimps;   .1 <max>; -1 = unlimited; immediate)

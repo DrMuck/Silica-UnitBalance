@@ -4,6 +4,26 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-09 — Player Cap Exempt: wider window, forced client recount (v7.13.3)
+
+Live report: cap reached, soldier buttons grey, the soldier cap cost on the cards did not go to 0.
+Three causes found in the game code, none visible in a server log I had:
+- **Window too narrow.** It opened only with `tc + buffer(3) <= S + held`, i.e. never while fewer than 3 cap
+  points were player-held (a lone tester, or a team whose AI soldiers already fill S-2). Now: open while
+  `S - lead <= tc` and `tc + buffer <= E`, with `player_cap_exempt_lead` = 5 (new, JSON only) and
+  `player_cap_exempt_buffer` default 1 (was 3, min was 2). That is "S - 5 <= tc < E". Re-open after a close at
+  the top needs one extra free point. Overshoot past E is at most one point (server re-evaluates per enqueue).
+- **Stale client count.** `UnitCapEntry.Current` is a local client count, refreshed only on unit add/remove
+  and queue RPCs. With players above the cap it stays > Max after the switch, so `Current + 0 <= Max` still
+  fails and the buttons stay grey. Every switch is now followed by a `CONSTRUCT_DEQUEUE` RPC with index 255
+  on one of the team's structures (removes nothing, runs `Team.UpdateUnitCapValues` on every client), at once
+  and again after 0.5 s and 2 s.
+- **Cached card label.** `Constructable.CapValue` is written once when the card is built, so the cap cost on a
+  unit card only changes when the structure is selected again. Cosmetic, not fixable server-side; the page
+  says so now.
+New diagnostic: `[DYNCAP] <team>: stays CLOSED tc=.. S=.. held=.. E=..: <reason>` at most every 30 s per team
+while the team is near the cap and the window does not open.
+
 ## 2026-11-08 — Player Cap Exempt gets its own page (v7.13.2)
 
 The Cap&Decay toggle line was hard to read: explanation, scope, config key name and live state ("Sol closed")

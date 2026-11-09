@@ -1892,7 +1892,7 @@ namespace Si_UnitBalance
                     }
                     if (selection == 2)
                     {
-                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 <points> (e.g. .2 3 = keep 3 cap points free below the raised cap; 2..10)</color>");
+                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 <points> (e.g. .2 1 = use the raised cap fully, .2 3 = keep 3 points free; 1..10)</color>");
                         return;
                     }
                     SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1 (on/off) or 2 (buffer).</color>");

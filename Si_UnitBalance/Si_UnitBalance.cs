@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.13.2", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.13.3", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -414,7 +414,7 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
-            MelonLogger.Msg($"Unit Balance v7.13.2 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.13.3 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -858,11 +858,14 @@ namespace Si_UnitBalance
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
                 _playerInfantryIgnoreCap = config["player_infantry_ignore_cap"]?.Value<bool>() ?? false;
-                _playerCapExemptBuffer = config["player_cap_exempt_buffer"]?.Value<int>() ?? 3;
-                if (_playerCapExemptBuffer < 2) _playerCapExemptBuffer = 2;
+                _playerCapExemptBuffer = config["player_cap_exempt_buffer"]?.Value<int>() ?? 1;
+                if (_playerCapExemptBuffer < 1) _playerCapExemptBuffer = 1;
                 if (_playerCapExemptBuffer > 50) _playerCapExemptBuffer = 50;
+                _playerCapExemptLead = config["player_cap_exempt_lead"]?.Value<int>() ?? 5;
+                if (_playerCapExemptLead < 0) _playerCapExemptLead = 0;
+                if (_playerCapExemptLead > 50) _playerCapExemptLead = 50;
                 if (_playerInfantryIgnoreCap)
-                    MelonLogger.Msg($"[CONFIG] Player cap exempt ON (buffer {_playerCapExemptBuffer} cap points)");
+                    MelonLogger.Msg($"[CONFIG] Player cap exempt ON (starts {_playerCapExemptLead} below the standard cap, buffer {_playerCapExemptBuffer})");
                 _alienNestOnlyBuild = config["alien_nest_only_build"]?.Value<bool>() ?? false;
                 _alienNestReachRadius = config["alien_nest_reach_radius"]?.Value<float>() ?? -1f;
                 if (_alienNestReachRadius < 1f) _alienNestReachRadius = -1f;

@@ -180,7 +180,7 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
 │   └── 7. Watchdog [ON/OFF] .............. watchdog_enabled
 ├── 6. Cap&Decay (unit cap · structure decay · count caps)
 │   ├── 1. Decay .......................... 1. Human · 2. Alien → enable, keep_production, delay, tick, amount_pct, randomize_pct
-│   ├── 2. Player Cap Exempt [ON/OFF] ..... 1. Exemption → player_infantry_ignore_cap (immediate) · 2. Buffer = <points> → player_cap_exempt_buffer (.2 <points>, 2..10, immediate) · Live line per Sol/Centauri team
+│   ├── 2. Player Cap Exempt [ON/OFF] ..... 1. Exemption → player_infantry_ignore_cap (immediate) · 2. Buffer = <points> → player_cap_exempt_buffer (.2 <points>, 1..10, default 1, immediate; start margin: player_cap_exempt_lead, JSON only, default 5) · Live line per Sol/Centauri team
 │   ├── 3. Unit Cap Mult 2-way = <mult> ... unit_cap_mult.two_way   (.1 <mult>; -1 = server, 0 = unlimited)
 │   ├── 4. Unit Cap Mult 3-way = <mult> ... unit_cap_mult.three_way (.1 <mult>)
 │   ├── 5. Shrimp Cap = <max> ............. count_caps.shrimp    (.1 <max>; -1 = unlimited; immediate)
