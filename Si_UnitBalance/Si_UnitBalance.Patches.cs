@@ -422,13 +422,34 @@ namespace Si_UnitBalance
         // =============================================
         private static readonly FieldInfo _depositEntryActiveField = AccessTools.Field(typeof(ResourceDepositPoint), "m_AIEntryPointsActive");
         private static readonly FieldInfo _harvQueueMoveField = AccessTools.Field(typeof(AIHarvesterAgent), "m_QueueMoveToPosition");
+        // 1.0.17+: vanilla's reverse-undock state (null on older builds).
+        private static readonly FieldInfo _harvUndockReversingField = AccessTools.Field(typeof(AIHarvesterAgent), "m_UndockReversing");
         private static readonly Dictionary<int, float> _harvExitLastLog = new Dictionary<int, float>();
 
-        // Private flag list in both branches (1.0.x also has public GetIsEntryPointActive, absent on 0.9.47).
+        // 1.0.17+: ResourceDepositPoint.GetIsEntryPointForDriving(int) (private) = active AND its ramp leads onto a
+        // navmesh island with a resource field (unless no ramp of the bay does). Every vanilla approach-point query
+        // (GetApproachPointAhead, GetClosestApproachPoint, ...) filters with it; null on older builds.
+        private static readonly Func<ResourceDepositPoint, int, bool>? _depositEntryForDriving = CreateEntryForDriving();
+
+        private static Func<ResourceDepositPoint, int, bool>? CreateEntryForDriving()
+        {
+            try
+            {
+                var m = AccessTools.Method(typeof(ResourceDepositPoint), "GetIsEntryPointForDriving", new[] { typeof(int) });
+                return m != null && m.ReturnType == typeof(bool)
+                    ? (Func<ResourceDepositPoint, int, bool>)Delegate.CreateDelegate(typeof(Func<ResourceDepositPoint, int, bool>), m)
+                    : null;
+            }
+            catch { return null; }
+        }
+
+        // A ramp vanilla would drive through: GetIsEntryPointForDriving on 1.0.17+, else the private active flag list
+        // (both branches; 1.0.x also has public GetIsEntryPointActive, absent on 0.9.47).
         private static bool IsDepositEntryActive(ResourceDepositPoint dp, int index)
         {
             try
             {
+                if (_depositEntryForDriving != null) return _depositEntryForDriving(dp, index);
                 if (_depositEntryActiveField != null && _depositEntryActiveField.GetValue(dp) is List<bool> active && index < active.Count)
                     return active[index];
             }
@@ -522,6 +543,8 @@ namespace Si_UnitBalance
 
                     var agent = FindDockedHarvester(__instance, worldPos);
                     if (agent == null) return true;
+                    // 1.0.17+: vanilla is backing out on its own and asks for the forward ramp as its fallback.
+                    if (_harvUndockReversingField != null && _harvUndockReversingField.GetValue(agent) is bool reversing && reversing) return true;
                     var unit = agent.Unit;
                     var team = unit != null ? unit.Team : null;
                     if (unit == null || team == null) return true;

@@ -4,6 +4,22 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-12 — Harvester exit toward patch follows the 1.0.17 ramp reachability (v7.14.1)
+
+Game 1.0.17 changed `ResourceDepositPoint`: every approach-point query (`GetApproachPointAhead`,
+`GetClosestApproachPoint`, ...) now skips a ramp whose foot has no navmesh or leads onto a navmesh island without
+a resource field (private `GetIsEntryPointForDriving`, unless no ramp of the bay is usable). The
+`harvester_exit_toward_patch` prefix and the refinery-spawn rotation still read only the raw active flags
+(`m_AIEntryPointsActive`), so they could send a harvester out through a ramp vanilla now refuses, onto an island
+it cannot harvest from (vanilla then hops it back after 8-30 s).
+- **Ramp filter:** `IsDepositEntryActive` calls `GetIsEntryPointForDriving` by reflection when present (1.0.17+),
+  else the old flag list (0.9.47 / 1.0.15 unchanged).
+- **Vanilla reverse undock left alone:** 1.0.17 backs an empty harvester out through the rear ramp itself
+  (`m_UndockReversing`, >= 40 m saving, ramp within ~25 deg of straight behind) and, when that stalls, asks
+  `GetApproachPointAhead` for the forward ramp. The prefix now passes that call through instead of handing back
+  the rear ramp again.
+- Note: the undock part of this feature overlaps the new vanilla reverse undock; whether to keep it is open.
+
 ## 2026-11-11 — Player Cap Exempt on the ModUI admin page, `!b capexempt` (v7.14.0)
 
 The setting was only reachable three levels deep in the proxied chat menu (`!b` > 6 > 2), the buffer row wrapped,
