@@ -4,6 +4,22 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-11 — Player Cap Exempt on the ModUI admin page, `!b capexempt` (v7.14.0)
+
+The setting was only reachable three levels deep in the proxied chat menu (`!b` > 6 > 2), the buffer row wrapped,
+and the page listed `Sol_Allied` / `Centauri_Allied` (0 of 150, red OFF) although they were not in the match.
+- **New stateless sub-command** `!b capexempt [status | on | off | buffer 1..10]` (same AdminMod power as `!b`,
+  never touches the caller's menu state). Replies to on/off/buffer are two lines: what changed, then a compact
+  summary of the teams in play (`Sol 17/150, players hold 4, activates at 145`).
+- **ModUI export:** section "Player Cap Exempt" on the admin page with an ON/OFF switch row (`!b capexempt`), a
+  buffer value row (`!b capexempt buffer`) and a "Live status" report (`!b capexempt status`). Only the switch
+  state and buffer are exported, no live counts. The browse tree stays cached by config mtime; the commands are
+  spliced in from the live values, so the rows follow a change made through either path.
+- **Teams in play only:** `GameModeExt.GetTeamSetupActive` on the team's BaseTeamSetup, or a standing structure.
+- **Chat page tidied:** `2. Buffer = N (1..10)`, the explanation on its own line, no per-team "OFF" while the
+  switch is off, help cut to two lines.
+- Menu toggle, menu buffer edit and the new command share `DynCapSetEnabled` / `DynCapApplyBuffer`.
+
 ## 2026-11-09 — Player Cap Exempt: wider window, forced client recount (v7.13.3)
 
 Live report: cap reached, soldier buttons grey, the soldier cap cost on the cards did not go to 0.

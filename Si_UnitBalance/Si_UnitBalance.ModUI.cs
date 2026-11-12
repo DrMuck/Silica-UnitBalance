@@ -23,7 +23,8 @@ namespace Si_UnitBalance
     // Row = [label, current, vanilla, note]; vanilla/note only when the value differs from vanilla.
     //
     // Cost: the build walks every unit's prefab (same work as CacheVanillaBaseValues) and is cached
-    // until the config file changes; the periodic calls return the cached string.
+    // until the config file changes; the periodic calls return the cached string. The commands (with the
+    // Player Cap Exempt switch/buffer values) are spliced in from the live statics, see ModUIData.
     // =============================================
     public partial class UnitBalance
     {
@@ -72,6 +73,10 @@ namespace Si_UnitBalance
             return v.HasValue ? v.Value.ToString("0.##", CultureInfo.InvariantCulture) : null;
         }
         private static string _hudDocKey = "";
+        // The browse tree (~80 KB, walks every prefab) is cached by config mtime; the commands (switch/value rows with
+        // their current `v`) are rebuilt from the live statics, so a toggle shows up even when the mtime did not move.
+        private static string _hudBrowseJson;
+        private static string _hudBrowseKey = "";
 
         public static string ModUIData()
         {
@@ -81,15 +86,24 @@ namespace Si_UnitBalance
                 string key;
                 try { key = File.GetLastWriteTimeUtc(_configPath).Ticks.ToString(CultureInfo.InvariantCulture) + "|" + (_enabled ? 1 : 0); }
                 catch { key = "nofile|" + (_enabled ? 1 : 0); }
-                if (_hudDoc != null && key == _hudDocKey) return _hudDoc;
                 // Base values come from the vanilla snapshot taken before the overrides; without it (before the
-                // first apply, or right after a map change) keep whatever was built last.
-                if (_vanillaBaseCache.Count == 0) return _hudDoc;
-                var started = DateTime.UtcNow;
-                string doc = BuildHudDocument();
-                if (doc == null) return _hudDoc;
-                _hudDoc = doc; _hudDocKey = key;
-                MelonLogger.Msg($"[HUD] Balance browser document built: {doc.Length / 1024} KB in {(DateTime.UtcNow - started).TotalMilliseconds:0} ms");
+                // first apply, or right after a map change) keep the browse tree that was built last.
+                if ((_hudBrowseJson == null || key != _hudBrowseKey) && _vanillaBaseCache.Count > 0)
+                {
+                    var started = DateTime.UtcNow;
+                    string browse = BuildHudBrowse();
+                    if (browse != null)
+                    {
+                        _hudBrowseJson = browse; _hudBrowseKey = key;
+                        MelonLogger.Msg($"[HUD] Balance browser document built: {browse.Length / 1024} KB in {(DateTime.UtcNow - started).TotalMilliseconds:0} ms");
+                    }
+                }
+                if (_hudBrowseJson == null) return _hudDoc;
+                string docKey = _hudBrowseKey + "|" + (_enabled ? 1 : 0) + "|" + (_playerInfantryIgnoreCap ? 1 : 0) + "|" + _playerCapExemptBuffer;
+                if (_hudDoc != null && docKey == _hudDocKey) return _hudDoc;
+                _hudDoc = "{\"enabled\":" + (_enabled ? "true" : "false") + ",\"browse\":" + _hudBrowseJson
+                    + ",\"commands\":" + JsonConvert.SerializeObject(BuildHudCommands(), Formatting.None) + "}";
+                _hudDocKey = docKey;
                 return _hudDoc;
             }
             catch (Exception ex)
@@ -106,7 +120,29 @@ namespace Si_UnitBalance
             "dispense_timeout", "aim_compensation", "pitch_max_up", "pitch_max_down", "ai_lead_velocity", "ai_lead_gravity", "ai_lead_drag"
         };
 
-        private static string BuildHudDocument()
+        // Top-level commands: decorate the registry entries and add the "default" form the registry cannot see.
+        // The !b editing menu stays a proxied chat menu by decision (2026-10-20); Player Cap Exempt gets its own rows
+        // through the stateless "!b capexempt" sub-command. Only the switch state and buffer go in here, never live
+        // counts: every change rehashes the whole mod entry (browse tree included) for every client.
+        private static JArray BuildHudCommands()
+        {
+            const string pce = "Player Cap Exempt";
+            return new JArray
+            {
+                new JObject { ["t"] = "/stats", ["l"] = "Stats of my unit", ["d"] = "Health, speed and weapon values of the unit you control, with the vanilla value next to every change.", ["a"] = false },
+                new JObject { ["t"] = "!rebalance", ["l"] = "Reapply balance", ["d"] = "Re-reads the config and applies all overrides to the running match.", ["a"] = true },
+                new JObject { ["t"] = "!rebalance default", ["l"] = "Revert to vanilla", ["d"] = "Removes every override and restores vanilla values for the running match.", ["a"] = true },
+                new JObject { ["t"] = "!b", ["l"] = "Balance editor (chat menu)", ["d"] = "The numbered chat menu that edits the config live.", ["a"] = true },
+                new JObject { ["t"] = "!b capexempt", ["l"] = "Exemption", ["d"] = "Near the unit cap, Sol and Centauri units that players control stop counting against it.", ["a"] = true, ["g"] = pce,
+                    ["v"] = _playerInfantryIgnoreCap ? "on" : "off", ["ch"] = new JArray(new JArray("on", "ON"), new JArray("off", "OFF")) },
+                new JObject { ["t"] = "!b capexempt buffer", ["l"] = "Buffer (cap points)", ["d"] = "Cap points kept free below the raised cap, 1 to 10; 1 uses it fully.", ["a"] = true, ["g"] = pce,
+                    ["v"] = _playerCapExemptBuffer.ToString(CultureInfo.InvariantCulture) },
+                new JObject { ["t"] = "!b capexempt status", ["l"] = "Live status", ["d"] = "Shows cap points in use and the exemption state of every team in play.", ["a"] = true, ["g"] = pce, ["i"] = true }
+            };
+        }
+
+        /// <summary>The browse tree as JSON ({"title":..,"sections":[..]}), or null when the config is unusable.</summary>
+        private static string BuildHudBrowse()
         {
             JObject root;
             try { root = JObject.Parse(File.ReadAllText(_configPath)); }
@@ -146,16 +182,7 @@ namespace Si_UnitBalance
                     ["title"] = _enabled ? "Unit balance" : "Unit balance (mod disabled: vanilla values)",
                     ["sections"] = sections
                 };
-                // Top-level commands: decorate the registry entries and add the "default" form the registry cannot see.
-                // The !b editing menu stays a proxied chat menu by decision (2026-10-20).
-                var commands = new JArray
-                {
-                    new JObject { ["t"] = "/stats", ["l"] = "Stats of my unit", ["d"] = "Health, speed and weapon values of the unit you control, with the vanilla value next to every change.", ["a"] = false },
-                    new JObject { ["t"] = "!rebalance", ["l"] = "Reapply balance", ["d"] = "Re-reads the config and applies all overrides to the running match.", ["a"] = true },
-                    new JObject { ["t"] = "!rebalance default", ["l"] = "Revert to vanilla", ["d"] = "Removes every override and restores vanilla values for the running match.", ["a"] = true },
-                    new JObject { ["t"] = "!b", ["l"] = "Balance editor (chat menu)", ["d"] = "The numbered chat menu that edits the config live.", ["a"] = true }
-                };
-                return JsonConvert.SerializeObject(new JObject { ["enabled"] = _enabled, ["browse"] = browse, ["commands"] = commands }, Formatting.None);
+                return JsonConvert.SerializeObject(browse, Formatting.None);
             }
             finally { if (releaseInfos) _sharedAllInfos = null; }
         }

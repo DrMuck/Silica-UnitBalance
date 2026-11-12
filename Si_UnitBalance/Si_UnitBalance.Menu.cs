@@ -853,6 +853,15 @@ namespace Si_UnitBalance
                 if (parts.Length > 1) extraArgs = parts[1].Trim();
             }
 
+            // "!b capexempt ..." → stateless Player Cap Exempt command (ModUI rows, chat); leaves the menu state alone
+            const string capExemptWord = "capexempt";
+            if (extraArgs.StartsWith(capExemptWord, StringComparison.OrdinalIgnoreCase)
+                && (extraArgs.Length == capExemptWord.Length || extraArgs[capExemptWord.Length] == ' '))
+            {
+                OnCapExemptCommand(player, extraArgs.Substring(capExemptWord.Length).Trim());
+                return;
+            }
+
             // "!b exit" → close
             if (extraArgs.Equals("exit", StringComparison.OrdinalIgnoreCase))
             {
@@ -2203,26 +2212,16 @@ namespace Si_UnitBalance
                 // ── Player Cap Exempt (DynamicCap.cs) ────────────────
                 case MenuLevel.PlayerCapExempt:
                 {
-                    string pceStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Cap&Decay > Player Cap Exempt</color> " + _dimColor + "(units players are playing don't fill the unit cap · Sol/Centauri teams)</color>");
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Exemption [" + pceStatus + "] " + _dimColor + "(applies immediately)</color>");
-                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Buffer = " + _valueColor + _playerCapExemptBuffer + "</color> " + _dimColor + "(cap points kept free below the raised cap; 1 = use it fully; 1..10)</color>");
-                    int liveLines = 0;
-                    try
-                    {
-                        foreach (var t in Team.Teams)
-                        {
-                            string line = DynCapLiveLine(t);
-                            if (line == null) continue;
-                            SendChatToPlayer(player, _chatPrefix + "Live " + line);
-                            liveLines++;
-                        }
-                    }
-                    catch { }
-                    if (liveLines == 0) SendChatToPlayer(player, _chatPrefix + _dimColor + "Live: no Sol/Centauri team with a unit cap right now (no match running)</color>");
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "How it works: once a team reaches its standard cap, its player units count 0 on server and clients, so the commander can keep building. The cap is raised by the points players hold; when that raised cap is reached the units count again.</color>");
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Starts " + _playerCapExemptLead + " points below the standard cap. Unit cards keep their old cap cost until the structure is selected again; cap bar and build buttons follow at once.</color>");
-                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 1 (buffer 1 cap point)</color>");
+                    // Rows stay short: the ModUI client turns "2. Buffer = N" into a field + SET and cuts the value at " (".
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Cap&Decay > Player Cap Exempt</color> " + _dimColor + "(Sol/Centauri)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> Exemption [" + DynCapOnOff(_playerInfantryIgnoreCap) + "]");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "2.</color> Buffer = " + _valueColor + _playerCapExemptBuffer + "</color> " + _dimColor + "(" + DynCapBufferMin + ".." + DynCapBufferMax + ")</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Buffer: cap points kept free below the raised cap, 1 = use it fully.</color>");
+                    var pceViews = DynCapTeamsInPlay();
+                    foreach (var v in pceViews) SendChatToPlayer(player, _chatPrefix + "Live " + DynCapLiveLine(v));
+                    if (pceViews.Count == 0) SendChatToPlayer(player, _chatPrefix + _dimColor + "Live: no Sol/Centauri team in play</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "From " + _playerCapExemptLead + " below the cap, units players hold count 0, so the cap rises by what they hold.</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 3 (buffer 3)</color>");
                     break;
                 }
 
@@ -2504,24 +2503,12 @@ namespace Si_UnitBalance
                 SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Use .2 <points> on this page (1 is the on/off switch).</color>");
                 return;
             }
-            if (!int.TryParse(valueStr, System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out int newValue) || newValue < 1 || newValue > 10)
+            if (!DynCapApplyBuffer(player, valueStr, out int oldValue, out int newValue))
             {
-                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (integer 1..10 cap points)</color>");
+                SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Invalid value: " + valueStr + " (integer " + DynCapBufferMin + ".." + DynCapBufferMax + " cap points)</color>");
                 return;
             }
-            int oldValue = _playerCapExemptBuffer;
-            _playerCapExemptBuffer = newValue;
-            WriteNumberToJson("player_cap_exempt_buffer", newValue);
-            if (_playerInfantryIgnoreCap)
-            {
-                try { foreach (var t in Team.Teams) if (t != null) DynCapEvaluate(t); } catch { }
-            }
             SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt buffer: " + _valueColor + oldValue + "</color> -> " + _valueColor + newValue + "</color> " + _dimColor + "(applies immediately)</color>");
-            string pn = GetPlayerName(player);
-            string sid = GetPlayerSteamId(player);
-            WriteAuditLog(pn, sid, "capdecay", "player_cap_exempt_buffer", oldValue.ToString(), newValue.ToString());
-            MelonLogger.Msg($"[BAL] {pn} ({sid}): player_cap_exempt_buffer {oldValue} -> {newValue}");
             ShowCurrentMenu(player, state);
         }
 

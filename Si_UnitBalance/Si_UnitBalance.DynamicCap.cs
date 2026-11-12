@@ -59,6 +59,10 @@ namespace Si_UnitBalance
         // Per-team state keys the ObjectInfo assets of the team's faction, which assumes each faction
         // appears once per match (Sol / Centauri / Alien), as in every vanilla versus mode.
         // Human teams (Sol, Centauri) only: alien teams never open a window.
+        //
+        // Admin access (7.14.0): chat menu !b > 6 > 2, or the stateless "!b capexempt [status|on|off|buffer N]"
+        // that the ModUI admin page uses for its switch, buffer and status rows. Both go through
+        // DynCapSetEnabled / DynCapApplyBuffer. Live lines list only teams in play (DynCapTeamInPlay).
         // =============================================
 
         private static int _playerCapExemptBuffer = 1;     // config "player_cap_exempt_buffer": open while tc + buffer <= E
@@ -406,55 +410,231 @@ namespace Si_UnitBalance
             }
         }
 
-        /// <summary>Chat/ModUI status line for the toggle.</summary>
+        // ---- settings: one code path for the chat menu page and "!b capexempt" ----
+        private const int DynCapBufferMin = 1;
+        private const int DynCapBufferMax = 10;
+
+        private static void DynCapEvaluateAll()
+        {
+            try { foreach (var t in Team.Teams) if (t != null) DynCapEvaluate(t); }
+            catch (Exception ex) { MelonLogger.Warning($"[DYNCAP] evaluate-all failed: {ex.Message}"); }
+        }
+
+        /// <summary>Switch the exemption on or off: config write, close or re-evaluate every team, audit log.
+        /// False (and nothing written) when it is already in that state.</summary>
+        private static bool DynCapSetEnabled(object player, bool on)
+        {
+            if (_playerInfantryIgnoreCap == on) return false;
+            _playerInfantryIgnoreCap = on;
+            WriteBoolToJson("player_infantry_ignore_cap", on);
+            if (!on) DynCapCloseAll("toggle off");
+            else DynCapEvaluateAll();
+            string pn = GetPlayerName(player);
+            string sid = GetPlayerSteamId(player);
+            WriteAuditLog(pn, sid, "capdecay", "player_infantry_ignore_cap", (!on).ToString(), on.ToString());
+            MelonLogger.Msg($"[BAL] {pn} ({sid}): player_infantry_ignore_cap -> {on}");
+            return true;
+        }
+
+        /// <summary>Set the buffer from chat text (whole number 1..10): config write, re-evaluate while on, audit log.
+        /// False when the text is not a valid buffer; nothing is changed then.</summary>
+        private static bool DynCapApplyBuffer(object player, string valueStr, out int oldValue, out int newValue)
+        {
+            oldValue = _playerCapExemptBuffer;
+            if (!int.TryParse(valueStr?.Trim(), System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out newValue)
+                || newValue < DynCapBufferMin || newValue > DynCapBufferMax)
+                return false;
+            _playerCapExemptBuffer = newValue;
+            WriteNumberToJson("player_cap_exempt_buffer", newValue);
+            if (_playerInfantryIgnoreCap) DynCapEvaluateAll();
+            string pn = GetPlayerName(player);
+            string sid = GetPlayerSteamId(player);
+            WriteAuditLog(pn, sid, "capdecay", "player_cap_exempt_buffer", oldValue.ToString(), newValue.ToString());
+            MelonLogger.Msg($"[BAL] {pn} ({sid}): player_cap_exempt_buffer {oldValue} -> {newValue}");
+            return true;
+        }
+
+        // ---- teams in play ----
+
+        /// <summary>True when the team takes part in the current match. Primary test is the game's own:
+        /// GameModeExt.GetTeamSetupActive(setup) for the team's BaseTeamSetup (setup enabled and listed for the
+        /// current TeamsVersus; MP_StrategyMatchmaking narrows it to its two match teams). Fallback: the team has a
+        /// standing structure, for modes or mods that field a team outside its setup. Unused factions and the
+        /// *_Allied teams of other versus modes fail both.</summary>
+        private static bool DynCapTeamInPlay(Team team)
+        {
+            if (team == null) return false;
+            try
+            {
+                if (GameMode.CurrentGameMode is GameModeExt mode && mode.BaseTeamSetups != null)
+                {
+                    foreach (BaseTeamSetup setup in mode.BaseTeamSetups)
+                        if (setup != null && setup.Team == team && mode.GetTeamSetupActive(setup)) return true;
+                }
+            }
+            catch { }
+            try
+            {
+                var structures = team.Structures;
+                for (int i = 0; i < structures.Count; i++)
+                {
+                    var s = structures[i];
+                    if (s != null && !s.IsDestroyed) return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        /// <summary>The numbers behind the switch for one team (true cap points, see the header).</summary>
+        private struct DynCapView
+        {
+            public string Name;
+            public bool Open;
+            public int S, Tc, Held, E, Buffer, Lead, ReopenGap;
+        }
+
+        private static bool DynCapTryView(Team team, out DynCapView v)
+        {
+            v = default;
+            try
+            {
+                if (team == null || !DynCapIsHumanTeam(team)) return false;
+                var entry = team.GetUnitTypeCapEntryForType(UnitCapType.Secondary);
+                int S = entry != null ? entry.Max : 0;
+                if (S <= 0) return false;
+                var st = DynCapState(team);
+                DynCapCount(team, st, out int tc, out int held);
+                int buffer = Math.Max(1, _playerCapExemptBuffer);
+                v = new DynCapView
+                {
+                    Name = team.TeamShortName, Open = st.Open, S = S, Tc = tc, Held = held, E = S + held,
+                    Buffer = buffer, Lead = Math.Max(0, _playerCapExemptLead),
+                    ReopenGap = buffer + (st.ClosedAtTop ? DynCapTopHysteresis : 0)
+                };
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[DYNCAP] live numbers failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>Sol/Centauri teams in play in the current match that have a standard cap, in team order.</summary>
+        private static List<DynCapView> DynCapTeamsInPlay()
+        {
+            var list = new List<DynCapView>();
+            try
+            {
+                foreach (var t in Team.Teams)
+                    if (DynCapTeamInPlay(t) && DynCapTryView(t, out var v)) list.Add(v);
+            }
+            catch { }
+            return list;
+        }
+
+        /// <summary>Chat status for the Cap&amp;Decay overview line.</summary>
         private static string DynCapStatus()
         {
             if (!_playerInfantryIgnoreCap) return "off";
             var sb = new StringBuilder();
-            foreach (var kv in _dynCap)
+            foreach (var v in DynCapTeamsInPlay())
             {
-                if (kv.Key < 0 || kv.Key >= Team.Teams.Count) continue;
-                var team = Team.Teams[kv.Key];
-                if (team == null || !DynCapIsHumanTeam(team)) continue;
                 if (sb.Length > 0) sb.Append(" · ");
-                sb.Append(team.TeamShortName).Append(kv.Value.Open ? " active" : " inactive");
+                sb.Append(v.Name).Append(v.Open ? " active" : " inactive");
             }
             return sb.Length > 0 ? sb.ToString() : "on";
         }
 
-        /// <summary>One menu line per Sol/Centauri team with the numbers behind the switch. Null when the team
-        /// has no standard cap (no match running) or is not a human team.</summary>
-        private static string DynCapLiveLine(Team team)
+        /// <summary>One line per team for the menu page and the status report. No state part while the switch
+        /// is off: the switch row says so already.</summary>
+        private static string DynCapLiveLine(DynCapView v)
         {
-            try
+            string line = v.Name + ": " + v.Tc + "/" + v.S + " cap points in use · players hold " + v.Held;
+            if (!_playerInfantryIgnoreCap) return line;
+            string state;
+            if (v.Open)
+                state = "<color=#55FF55>ACTIVE</color>, cap raised to " + v.E + ", closes at " + Math.Max(0, v.E - v.Buffer + 1);
+            else if (v.Tc + v.Lead < v.S)
+                state = "<color=#FFAA00>inactive</color>, activates at " + Math.Max(0, v.S - v.Lead);
+            else if (v.Held <= 0)
+                state = "<color=#FFAA00>inactive</color>, no player holds a cap unit";
+            else
+                state = "<color=#FFAA00>inactive</color>, raised cap " + v.E + " used up, reopens at " + Math.Max(0, v.E - v.ReopenGap);
+            return line + " · " + state;
+        }
+
+        /// <summary>Second line of a "!b capexempt" reply: every team in play on one line, no colour.</summary>
+        private static string DynCapSummary()
+        {
+            var views = DynCapTeamsInPlay();
+            if (views.Count == 0) return "No Sol/Centauri team in play.";
+            var sb = new StringBuilder();
+            foreach (var v in views)
             {
-                if (team == null || !DynCapIsHumanTeam(team)) return null;
-                var entry = team.GetUnitTypeCapEntryForType(UnitCapType.Secondary);
-                int S = entry != null ? entry.Max : 0;
-                if (S <= 0) return null;
-                var st = DynCapState(team);
-                DynCapCount(team, st, out int tc, out int held);
-                int E = S + held;
-                int buffer = Math.Max(1, _playerCapExemptBuffer);
-                int lead = Math.Max(0, _playerCapExemptLead);
-                int reopenGap = buffer + (st.ClosedAtTop ? DynCapTopHysteresis : 0);
-                string state;
-                if (!_playerInfantryIgnoreCap)
-                    state = "<color=#FF5555>OFF</color>";
-                else if (st.Open)
-                    state = "<color=#55FF55>ACTIVE</color> (cap raised to " + E + ", closes at " + Math.Max(0, E - buffer + 1) + " in use)";
-                else if (tc + lead < S)
-                    state = "<color=#FFAA00>INACTIVE</color> (activates at " + Math.Max(0, S - lead) + " in use)";
-                else if (held <= 0)
-                    state = "<color=#FFAA00>INACTIVE</color> (no player holds a cap unit, nothing to exempt)";
-                else
-                    state = "<color=#FFAA00>INACTIVE</color> (raised cap " + E + " is used up, reopens at " + Math.Max(0, E - reopenGap) + " or fewer in use)";
-                return team.TeamShortName + ": " + tc + " of " + S + " cap points in use · players hold " + held + " · " + state;
+                if (sb.Length > 0) sb.Append(" · ");
+                sb.Append(v.Name).Append(' ').Append(v.Tc).Append('/').Append(v.S).Append(", players hold ").Append(v.Held);
+                if (!_playerInfantryIgnoreCap) continue;
+                if (v.Open) sb.Append(", active (cap ").Append(v.E).Append(')');
+                else if (v.Tc + v.Lead < v.S) sb.Append(", activates at ").Append(Math.Max(0, v.S - v.Lead));
+                else if (v.Held <= 0) sb.Append(", nothing to exempt");
+                else sb.Append(", raised cap ").Append(v.E).Append(" full");
             }
-            catch (Exception ex)
+            return sb.ToString();
+        }
+
+        private static string DynCapOnOff(bool on) => on ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+
+        // ---- "!b capexempt [status | on | off | buffer <1..10>]" ----
+        // Stateless admin sub-command for the ModUI panel (switch row, value row, status report) and for chat.
+        // Reached through OnBalanceCommand, so AdminMod's power check of !b applies; never touches the caller's
+        // menu state. Replies to on/off/buffer stay at two lines so the panel shows them inline.
+        private static void OnCapExemptCommand(object player, string args)
+        {
+            var parts = (args ?? "").Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            string sub = parts.Length > 0 ? parts[0].ToLowerInvariant() : "status";
+            switch (sub)
             {
-                MelonLogger.Warning($"[DYNCAP] live line failed: {ex.Message}");
-                return null;
+                case "status":
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Player Cap Exempt</color> " + DynCapOnOff(_playerInfantryIgnoreCap)
+                        + " · buffer " + _valueColor + _playerCapExemptBuffer + "</color> · starts " + _playerCapExemptLead + " below the cap");
+                    var views = DynCapTeamsInPlay();
+                    foreach (var v in views) SendChatToPlayer(player, _chatPrefix + DynCapLiveLine(v));
+                    if (views.Count == 0) SendChatToPlayer(player, _chatPrefix + _dimColor + "No Sol/Centauri team in play.</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Near the cap, units players hold count 0, so the cap rises by what they hold.</color>");
+                    return;
+                }
+                case "on":
+                case "off":
+                {
+                    bool on = sub == "on";
+                    if (DynCapSetEnabled(player, on))
+                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + DynCapOnOff(on) + (on ? " (buffer " + _playerCapExemptBuffer + ")" : "") + ".");
+                    else
+                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt is already " + DynCapOnOff(on) + ".");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + DynCapSummary() + "</color>");
+                    return;
+                }
+                case "buffer":
+                {
+                    string raw = parts.Length > 1 ? parts[1] : "";
+                    if (!DynCapApplyBuffer(player, raw, out int oldValue, out int newValue))
+                    {
+                        SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Buffer must be a whole number " + DynCapBufferMin + ".." + DynCapBufferMax
+                            + (raw.Length > 0 ? " (got " + raw + ")" : "") + ", e.g. !b capexempt buffer 3</color>");
+                        return;
+                    }
+                    SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt buffer: " + _valueColor + oldValue + "</color> -> " + _valueColor + newValue + "</color>"
+                        + (_playerInfantryIgnoreCap ? "." : " (switch is OFF)."));
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + DynCapSummary() + "</color>");
+                    return;
+                }
+                default:
+                    SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Unknown option: " + parts[0] + ". Use !b capexempt status, on, off or buffer 1..10</color>");
+                    return;
             }
         }
 

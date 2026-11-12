@@ -1877,22 +1877,14 @@ namespace Si_UnitBalance
                 case MenuLevel.PlayerCapExempt:
                     if (selection == 1)
                     {
-                        // Toggle the player cap exemption (DynamicCap.cs)
-                        _playerInfantryIgnoreCap = !_playerInfantryIgnoreCap;
-                        WriteBoolToJson("player_infantry_ignore_cap", _playerInfantryIgnoreCap);
-                        if (!_playerInfantryIgnoreCap) DynCapCloseAll("toggle off");
-                        else foreach (var t in Team.Teams) if (t != null) DynCapEvaluate(t);
-                        string capStatus = _playerInfantryIgnoreCap ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
-                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + capStatus + " " + _dimColor + "(applies immediately)</color>");
-                        string pn2 = GetPlayerName(player);
-                        string sid2 = GetPlayerSteamId(player);
-                        WriteAuditLog(pn2, sid2, "capdecay", "player_infantry_ignore_cap", (!_playerInfantryIgnoreCap).ToString(), _playerInfantryIgnoreCap.ToString());
-                        MelonLogger.Msg($"[BAL] {pn2} ({sid2}): player_infantry_ignore_cap -> {_playerInfantryIgnoreCap}");
+                        // Toggle the player cap exemption (DynamicCap.cs; shared with "!b capexempt on|off")
+                        DynCapSetEnabled(player, !_playerInfantryIgnoreCap);
+                        SendChatToPlayer(player, _chatPrefix + "Player Cap Exempt: " + DynCapOnOff(_playerInfantryIgnoreCap) + " " + _dimColor + "(applies immediately)</color>");
                         break;
                     }
                     if (selection == 2)
                     {
-                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 <points> (e.g. .2 1 = use the raised cap fully, .2 3 = keep 3 points free; 1..10)</color>");
+                        SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .2 <points> (e.g. .2 1 = use the raised cap fully, .2 3 = keep 3 points free; " + DynCapBufferMin + ".." + DynCapBufferMax + ")</color>");
                         return;
                     }
                     SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1 (on/off) or 2 (buffer).</color>");
