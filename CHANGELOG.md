@@ -4,6 +4,41 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-14 — Round-start apply: one scan, one postfix, no compounding, [OMVERIFY] read-back (v7.15.0)
+
+Stage 1 of making the per-round revert + re-apply cheaper. The sequence itself (GameRestart clears
+`_overridesApplied`, the base-spawn prefix reverts + re-applies + drains + syncs) is unchanged; nothing is skipped.
+- **One asset scan per apply.** Every Apply* step ran its own `Resources.FindObjectsOfTypeAll<ObjectInfo>()`
+  (or `<ProjectileData>`), ~0.3 s each, ~23 per apply (~7 of the ~9 s round-start freeze). The shared-array
+  mechanism of `CacheVanillaBaseValues` is now a scan scope (`BeginAssetScan` / `EndAssetScan`, try/finally)
+  around `ApplyOverridesLogic` and `!rebalance`: the first call per type scans, every later step gets the same
+  array; the live `Unit` list of the aim-comp / pitch passes is shared the same way. Steps, order and writes are
+  unchanged; outside a scope every accessor scans as before. The DamageManagerData source is registered in
+  `AssetSourceRegistry` only when it is missing (first apply, or after `ClearAll` emptied the registry) or holds a
+  destroyed asset, instead of on every apply.
+- **Base-spawn postfix once.** `SpawnStructuresAndStartingResources` calls `SpawnBaseStructures`, both are
+  bracketed, so propagate + `SyncOverridesToAllPlayers(0.5 s)` ran twice per round start. A depth counter runs it
+  once, after the outermost call (base structures, starting resources and side AI teams in place). Builds with only
+  one of the two methods run it once as before. The prefix (apply, drain, `SyncOverridesNow`) is unchanged.
+- **No per-round compounding of direct prefab writes.** CreatureAttack melee `Damage`,
+  `AttackProjectileAimDistMax`, `AttackProjectileSpread`, `AttackProjectileAimAngle` and the `ModifyPrefabSpeeds`
+  fallback are written straight onto the prefab, not through OverrideManager, so `OMRevertAll` never undid them;
+  with their first-seen caches emptied at every round end and by `!rebalance`, each apply read the already-scaled
+  value as vanilla and scaled it again (x1.2, x1.44, ...). Every such write (plus the direct health / projectile
+  lifetime+speed fallbacks used only when OverrideManager is unavailable) now records the pre-mod value, and
+  `RestoreDirectWrites` puts them back right after `OMRevertAll` (also on `!rebalance default`). A multiplier set
+  back to 1 or removed from the config now leaves the vanilla value. OM-backed paths unchanged.
+- **[OMVERIFY] read-back (logging only).** After every completed apply, once OverrideManager's queue drained, a
+  snapshot records every Enabled OM member's real value (read through the MemberInfo, not
+  `MemberOverride.GetValue()`), direct-write sentinels (base structure FoW on prefab + networked twin, one
+  TargetingDistance, Nest `SpawnOnInit.MaxPerTeam`, every recorded direct write) and anchor instance ids. Before
+  every re-apply one line is logged, always on:
+  `[OMVERIFY] pre-apply: members=.. enabled=.. snap=.. mismatches=.. missing=.. dyncap=.. sentinels=a/b ok ids=ok blocked=n/m src=base-spawn snapsrc=.. age=..s (x.x ms)`.
+  Player Cap Exempt windows that are open are skipped (`dyncap=`), not reported. New JSON-only key
+  `debug_om_probe` (default false, no menu entry) adds the same check at game-ended, level-unload,
+  revertall-blocked, level-loaded, game-restart, post-base-spawn (plus the live base structures' FoW) and
+  game-started, and logs `OverrideManager.ClearAll` / non-blocked `RevertAll` calls with a short stack.
+
 ## 2026-11-12 — Harvester exit toward patch follows the 1.0.17 ramp reachability (v7.14.1)
 
 Game 1.0.17 changed `ResourceDepositPoint`: every approach-point query (`GetApproachPointAhead`,

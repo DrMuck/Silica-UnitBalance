@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.14.1", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.15.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -414,7 +414,21 @@ namespace Si_UnitBalance
                 MelonLogger.Warning($"Failed to subscribe to OnFinishLoadingLevel: {ex.Message} — using legacy override mode");
             }
 
-            MelonLogger.Msg($"Unit Balance v7.14.1 initialized. Config: {_configPath}");
+            // OnStartUnloadingLevel (GameLevelLoader, both branches): only feeds the debug_om_probe log.
+            try
+            {
+                var osulField = typeof(GameLevelLoader).GetField("OnStartUnloadingLevel",
+                    BindingFlags.Public | BindingFlags.Static);
+                if (osulField != null && osulField.FieldType == typeof(Action))
+                {
+                    var unloadHandler = (Action)Delegate.CreateDelegate(typeof(Action),
+                        typeof(UnitBalance).GetMethod("OnStartUnloadingLevel", BindingFlags.NonPublic | BindingFlags.Static));
+                    osulField.SetValue(null, (Action)osulField.GetValue(null) + unloadHandler);
+                }
+            }
+            catch (Exception ex) { MelonLogger.Warning($"Failed to subscribe to OnStartUnloadingLevel: {ex.Message}"); }
+
+            MelonLogger.Msg($"Unit Balance v7.15.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -531,6 +545,18 @@ namespace Si_UnitBalance
                         prefix: new HarmonyMethod(typeof(Patch_OMRevertAll), "Prefix"));
                     MelonLogger.Msg("Patched OverrideManager.RevertAll — blocking game revert during scene transitions");
                 }
+
+                // OverrideManager.ClearAll: logging only (debug_om_probe), the call itself is unchanged.
+                try
+                {
+                    var omClearAll = typeof(OverrideManager).GetMethod("ClearAll",
+                        BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(bool) }, null);
+                    if (omClearAll != null)
+                        harmony.Patch(omClearAll, prefix: new HarmonyMethod(typeof(Patch_OMClearAll), "Prefix"));
+                    else
+                        MelonLogger.Msg("OverrideManager.ClearAll(bool) not present on this build — [OMVERIFY] cannot log it");
+                }
+                catch (Exception cex) { MelonLogger.Warning($"Patching OverrideManager.ClearAll threw: {cex.Message}"); }
 
                 // Patch ConstructionSite.SpawnObject to ensure full health on building completion
                 // Fixes vanilla timing bug where first-built structures get partial health due to
@@ -857,6 +883,10 @@ namespace Si_UnitBalance
                 _discordAutoPost = config["discord_auto_post"]?.Value<bool>() ?? false;
                 _discordWebhookUrl = config["discord_webhook_url"]?.Value<string>() ?? "";
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
+                // JSON only: extra [OMVERIFY] read-backs at every lifecycle point (logging only)
+                _debugOmProbe = config["debug_om_probe"]?.Value<bool>() ?? false;
+                if (_debugOmProbe)
+                    MelonLogger.Msg("[CONFIG] debug_om_probe ON: [OMVERIFY] checks at every lifecycle hook, ClearAll/RevertAll calls logged with a stack");
                 _playerInfantryIgnoreCap = config["player_infantry_ignore_cap"]?.Value<bool>() ?? false;
                 _playerCapExemptBuffer = config["player_cap_exempt_buffer"]?.Value<int>() ?? 1;
                 if (_playerCapExemptBuffer < 1) _playerCapExemptBuffer = 1;

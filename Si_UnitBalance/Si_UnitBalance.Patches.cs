@@ -1150,6 +1150,7 @@ namespace Si_UnitBalance
             {
                 // 1. Revert all current OM overrides (restores originals, notifies clients)
                 DynCapCloseAll("rebalance");
+                OMVerifyCheck("pre-apply", "rebalance"); // read-only, logging only
                 scanOwner = BeginAssetScan();
                 if (_omInitialized && _overrideManagerType != null)
                 {
@@ -1184,6 +1185,7 @@ namespace Si_UnitBalance
                     _unitCapMult3Way = -1;
                     ApplyUnitCapMultiplier("rebalance default");
                     _spawnCooldowns.Clear();
+                    OMVerifyInvalidate("reverted by !rebalance default");
                     MelonLogger.Msg("[Rebalance] Vanilla defaults restored. Use !rebalance to reload config.");
                     return;
                 }
@@ -1247,6 +1249,7 @@ namespace Si_UnitBalance
                     _overridesApplied = true;
                     FlushPrefabPool("after rebalance");
                     MelonLogger.Msg("[Rebalance] All overrides re-applied");
+                    OMVerifyAfterApply("rebalance"); // logging only
 
                     // 5. Sync to all connected players
                     if (omReady)
@@ -1353,6 +1356,7 @@ namespace Si_UnitBalance
                             var nest = ApplyAlienQueensMax();      // direct prefab mutation — immediate
                             if (nest != null)                      // drop only the Nest's clones made before the change
                                 FlushPrefabPool("alien_queens_max edit", new[] { nest });
+                            OMVerifyRecaptureSentinels("alien_queens_max edit"); // our own intended write, not a mismatch
                         }
                     }
                     else if (state.PendingParamKey == "nestreach")
@@ -2167,6 +2171,8 @@ namespace Si_UnitBalance
                         // sync (0.5 s later) never reaches that instance.
                         OMDrainQueue();
                         SyncOverridesNow("base spawn");
+                        // The queue is drained now: record the applied state (logging only).
+                        OMVerifySnapshotIfPending();
                     }
                 }
                 catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] prefix threw: " + ex.Message); }
@@ -2179,6 +2185,7 @@ namespace Si_UnitBalance
                     if (_baseSpawnDepth > 0) _baseSpawnDepth--;
                     if (_baseSpawnDepth > 0) return; // nested call: the outermost postfix does this once
                     if (!_enabled || !_configLoaded) return;
+                    OMVerifyProbe("post-base-spawn", liveBaseFoW: true);
                     MelonLogger.Msg("[BASESPAWN] base structures spawned — propagating and re-syncing");
                     try { PropagateToLiveInstances(); }
                     catch (Exception pex) { MelonLogger.Warning("[BASESPAWN] propagation threw: " + pex.Message); }

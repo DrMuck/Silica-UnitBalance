@@ -75,6 +75,7 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("[UnitBalance] Game restart (same map)");
                 }
                 _overridesApplied = false;
+                OMVerifyProbe("game-restart");
             }
         }
 
@@ -82,6 +83,7 @@ namespace Si_UnitBalance
         {
             public static void Postfix()
             {
+                OMVerifyProbe("game-started");
                 _gameStartedRan = true;
                 _lastPlayerSpawn.Clear();
                 _watchdogGeneration++; // redundant safety — already cancelled in Init
@@ -120,6 +122,7 @@ namespace Si_UnitBalance
         {
             if (!_enabled || !_configLoaded) return;
             if (string.IsNullOrEmpty(sceneName) || sceneName == "Loading" || sceneName == "MainMenu") return;
+            OMVerifyProbe("level-loaded");
 
             // Only apply once (first map after server start). OM state persists
             // through map changes because we block the game's RevertAll.
@@ -133,6 +136,12 @@ namespace Si_UnitBalance
             _lastMapName = sceneName;
             _vanillaBaseCache.Clear();
             ApplyOverridesLogic("level-load");
+        }
+
+        // GameLevelLoader.OnStartUnloadingLevel (static Action, both branches): probe only.
+        private static void OnStartUnloadingLevel()
+        {
+            OMVerifyProbe("level-unload");
         }
 
         // =============================================
@@ -410,16 +419,33 @@ namespace Si_UnitBalance
         // Only allows revert when we set _allowRevertAll = true (e.g., !rebalance).
         private static class Patch_OMRevertAll
         {
-            public static bool Prefix()
+            // RevertAll(bool notify, bool enqueue) on both branches; positional so a rename cannot break the patch.
+            public static bool Prefix(bool __0, bool __1)
             {
                 if (_allowRevertAll)
+                {
+                    OMVerifyLogCall($"RevertAll(notify={__0}, enqueue={__1}) allowed=mod");
                     return true; // our explicit request (e.g., !rebalance)
+                }
                 // TEMPORARY HOTFIX: In legacy mode, allow game's RevertAll through
                 // (we revert+apply each round anyway). REMOVE when old version dropped.
                 if (_legacyOverrideMode)
+                {
+                    OMVerifyLogCall($"RevertAll(notify={__0}, enqueue={__1}) allowed=legacy");
                     return true; // legacy mode — don't block, let game revert normally
+                }
                 LogDebug("[OverrideManager] RevertAll BLOCKED (game scene transition)");
+                OMVerifyNoteBlockedRevertAll(__0, __1);
                 return false; // block — OM overrides persist through map changes
+            }
+        }
+
+        // OverrideManager.ClearAll(bool notify): probe logging only, never changes the call.
+        private static class Patch_OMClearAll
+        {
+            public static void Prefix(bool __0)
+            {
+                OMVerifyLogCall($"ClearAll(notify={__0}) — wipes the OM table and SourceRegistry; its inner RevertAll goes through the RevertAll prefix");
             }
         }
 
@@ -501,6 +527,9 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("[UnitBalance] Overrides already active — skipping re-apply");
                     return;
                 }
+
+                // Read-only: is the state the last apply left behind still intact? (logging only)
+                OMVerifyCheck("pre-apply", source);
 
                 // One FindObjectsOfTypeAll per asset type for this whole apply (closed in finally).
                 scanOwner = BeginAssetScan();
@@ -645,6 +674,10 @@ namespace Si_UnitBalance
                 // why the starter HQ and the first Radar Station spawned vanilla while
                 // the second Radar Station, built once the pool ran dry, came out right.
                 FlushPrefabPool("after overrides applied");
+
+                // Record what this apply left behind, for the next [OMVERIFY] pre-apply check
+                // (logging only; the member values are read once OverrideManager's queue drained).
+                OMVerifyAfterApply(source);
             }
             catch (Exception ex)
             {
@@ -941,6 +974,7 @@ namespace Si_UnitBalance
             {
                 MelonLogger.Msg("[UnitBalance] Game ended");
                 DynCapCloseAll("round end"); // OM keeps overrides between rounds, so the window must not stay open
+                OMVerifyProbe("game-ended");
 
                 // Clear the first-seen caches. For the values this mod writes onto prefab data
                 // directly (CreatureAttack melee Damage / AimDistMax / Spread / AimAngle, the speed-field
