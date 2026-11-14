@@ -1005,6 +1005,19 @@ namespace Si_UnitBalance
             else ((PropertyInfo)m).SetValue(obj, value);
         }
 
+        // KNOWN GAP (documented, not tracked): the direct branches below exist only for a build WITHOUT a
+        // usable OverrideManager (InitOverrideManager failed, useOM == false). Both supported game branches
+        // (0.9.47 and 1.0.x) have it, so they are unreachable there; in that mode they would still read the
+        // current value as vanilla and compound on every apply:
+        //   ScaleProjectileDamage (impact/ricochet/splash/penetrating damage, splash radius), VehicleTurret
+        //   AimDistance and UnitAimAt AimDistanceMax, VehicleTurret Primary/Secondary ReloadTime /
+        //   FireInterval / MagazineSize / MuzzleSpread, Soldier JumpSpeed, VisibleEventRadius (both passes),
+        //   m_fDragCoefficient (projectile tuning), the AI aim-lead factors (cache cleared by !rebalance), and
+        //   ConstructionData cost / build time / FinishedWaitTime / CleanUpTime.
+        // Every direct write that IS reachable with OverrideManager present (CreatureAttack fields, the
+        // ModifyPrefabSpeeds fallback, the strafe / turn-radius / health fallbacks when OMSetFloat fails)
+        // goes through WriteFloatTracked.
+
         /// <summary>Puts every recorded direct prefab write back to its vanilla value (the OMRevertAll
         /// counterpart for the values OverrideManager does not track). Never throws.</summary>
         private static void RestoreDirectWrites(string why)
@@ -2354,8 +2367,10 @@ namespace Si_UnitBalance
                                 LogDebug($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (OM)");
                             else
                             {
-                                if (f != null) f.SetValue(comp, newVal);
-                                else { var p = ct.GetProperty("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance); p?.SetValue(comp, newVal); }
+                                // Not an OM member (OMSetFloat failed / no OM): recorded for RestoreDirectWrites,
+                                // or the next apply would read this as the original and scale it again.
+                                if (f != null) WriteFloatTracked(comp, f, newVal, $"{name}.CreatureDecapod.FlyMoveScaleSide", comp);
+                                else { var p = ct.GetProperty("FlyMoveScaleSide", BindingFlags.Public | BindingFlags.Instance); if (p != null) WriteFloatTracked(comp, p, newVal, $"{name}.CreatureDecapod.FlyMoveScaleSide", comp); }
                                 LogDebug($"  CreatureDecapod.FlyMoveScaleSide: {orig} -> {newVal} (direct)");
                             }
                             done = true;
@@ -2391,8 +2406,9 @@ namespace Si_UnitBalance
                                 LogDebug($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (OM)");
                             else
                             {
-                                if (f != null) f.SetValue(comp, newVal);
-                                else { var p = ct.GetProperty("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance); p?.SetValue(comp, newVal); }
+                                // Not an OM member (OMSetFloat failed / no OM): recorded for RestoreDirectWrites.
+                                if (f != null) WriteFloatTracked(comp, f, newVal, $"{name}.VehicleAir.StrafeSpeed", comp);
+                                else { var p = ct.GetProperty("StrafeSpeed", BindingFlags.Public | BindingFlags.Instance); if (p != null) WriteFloatTracked(comp, p, newVal, $"{name}.VehicleAir.StrafeSpeed", comp); }
                                 LogDebug($"  VehicleAir.StrafeSpeed: {orig} -> {newVal} (direct)");
                             }
                             done = true;
@@ -2443,7 +2459,7 @@ namespace Si_UnitBalance
                     }
                     else
                     {
-                        field.SetValue(comp, newVal);
+                        WriteFloatTracked(comp, field, newVal, $"{name}.VehicleWheeled.TurningCircleRadius", comp); // not an OM member: recorded for RestoreDirectWrites
                         LogDebug($"[TURNRADIUS] {name}: TurningCircleRadius {orig:F1} -> {newVal:F1} (direct)");
                         applied++;
                     }

@@ -28,6 +28,15 @@ Stage 1 of making the per-round revert + re-apply cheaper. The sequence itself (
   lifetime+speed fallbacks used only when OverrideManager is unavailable) now records the pre-mod value, and
   `RestoreDirectWrites` puts them back right after `OMRevertAll` (also on `!rebalance default`). A multiplier set
   back to 1 or removed from the config now leaves the vanilla value. OM-backed paths unchanged.
+  Review round: the strafe (`FlyMoveScaleSide` / `StrafeSpeed`) and turn-radius (`TurningCircleRadius`) direct
+  fallbacks, reachable with OverrideManager present whenever `OMSetFloat` fails, read the current value as the
+  original without a cache and compounded the same way; they now go through the tracked write too. The direct
+  writes that exist only without a usable OverrideManager (unreachable on 0.9.47 and 1.0.x) stay untracked and
+  are listed in a comment above `RestoreDirectWrites`.
+- **Base-spawn bracket survives an exception.** The depth is decremented in a Harmony finalizer (HarmonyX 2.10.2
+  as shipped with MelonLoader). If the outer method throws after the inner `SpawnBaseStructures` finished, the
+  finalizer runs propagate + sync once (7.14.1 ran it from the inner postfix); nothing runs when nothing finished,
+  as before. If the finalizer patch were refused, the bracket falls back to postfix bookkeeping + frame stamp.
 - **[OMVERIFY] read-back (logging only).** After every completed apply, once OverrideManager's queue drained, a
   snapshot records every Enabled OM member's real value (read through the MemberInfo, not
   `MemberOverride.GetValue()`), direct-write sentinels (base structure FoW on prefab + networked twin, one

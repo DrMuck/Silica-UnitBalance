@@ -2132,11 +2132,19 @@ namespace Si_UnitBalance
         // structures, the starting resources and the side AI teams are all in place. A build that has
         // only one of the two methods enters once and runs it once. The prefix body is left as it was
         // on every entry (the nested entry finds _overridesApplied set and does nothing).
-        // Harmony skips a postfix when the original throws, which would leave the depth raised; the
-        // frame stamp resets such a leftover on the next round start (both calls of one round start
-        // run in the same frame).
+        // Harmony skips the postfix when the original throws. The depth is therefore decremented in a
+        // finalizer (HarmonyX 2.10.2, shipped with MelonLoader, supports them; a void finalizer leaves
+        // the exception as it is). If the OUTER method throws after the inner SpawnBaseStructures
+        // finished, the base structures exist but the outer postfix never runs: the finalizer then does
+        // the work once, as 7.14.1 did from the inner postfix. If nothing finished (inner threw, or a
+        // single-method build threw), no postfix ran in 7.14.1 either and none runs now.
+        // Should the finalizer patch be refused, the postfix decrements as before and the frame stamp
+        // resets a leftover depth on the next round start (both calls of one round start run in the
+        // same frame).
         private static int _baseSpawnDepth;
         private static int _baseSpawnFrame = -1;
+        private static bool _baseSpawnHasFinalizer;  // set when the finalizer was patched in
+        private static bool _baseSpawnInnerDone;     // a nested bracketed call completed (its postfix ran)
 
         private static class Patch_BaseSpawn
         {
@@ -2151,6 +2159,7 @@ namespace Si_UnitBalance
                         _baseSpawnDepth = 0;
                     }
                     _baseSpawnFrame = frame;
+                    if (_baseSpawnDepth == 0) _baseSpawnInnerDone = false;
                     _baseSpawnDepth++;
                 }
                 catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] prefix depth bookkeeping threw: " + ex.Message); }
@@ -2182,8 +2191,42 @@ namespace Si_UnitBalance
             {
                 try
                 {
+                    bool outermost;
+                    if (_baseSpawnHasFinalizer)
+                        outermost = _baseSpawnDepth <= 1;        // the finalizer decrements afterwards
+                    else
+                    {
+                        if (_baseSpawnDepth > 0) _baseSpawnDepth--;
+                        outermost = _baseSpawnDepth == 0;
+                    }
+                    if (!outermost) { _baseSpawnInnerDone = true; return; } // nested call: the outermost does this once
+                    BaseSpawnWork();
+                }
+                catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] postfix threw: " + ex.Message); }
+            }
+
+            // Runs after the postfix, also when the original threw (then the postfix was skipped).
+            public static void Finalizer(Exception __exception)
+            {
+                try
+                {
+                    int depth = _baseSpawnDepth;
                     if (_baseSpawnDepth > 0) _baseSpawnDepth--;
-                    if (_baseSpawnDepth > 0) return; // nested call: the outermost postfix does this once
+                    if (__exception != null && depth == 1 && _baseSpawnInnerDone)
+                    {
+                        MelonLogger.Warning("[BASESPAWN] the outer base-spawn method threw after the base structures were spawned ("
+                            + __exception.GetType().Name + ": " + __exception.Message + ") — propagating and re-syncing from the finalizer");
+                        BaseSpawnWork();
+                    }
+                    if (depth <= 1) _baseSpawnInnerDone = false;
+                }
+                catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] finalizer threw: " + ex.Message); }
+            }
+
+            private static void BaseSpawnWork()
+            {
+                try
+                {
                     if (!_enabled || !_configLoaded) return;
                     OMVerifyProbe("post-base-spawn", liveBaseFoW: true);
                     MelonLogger.Msg("[BASESPAWN] base structures spawned — propagating and re-syncing");

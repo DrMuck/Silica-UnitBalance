@@ -517,20 +517,51 @@ namespace Si_UnitBalance
                 // simply logs and carries on.
                 {
                     int bracketed = 0;
+                    // The finalizer keeps the bracket depth right when a bracketed method throws. It is
+                    // all-or-nothing: if any method refuses it, it is taken off the others again and the
+                    // postfix does the depth bookkeeping (see Patch_BaseSpawn).
+                    bool finalizerOk = true;
+                    var withFinalizer = new List<MethodBase>();
                     foreach (var spawnName in new[] { "SpawnStructuresAndStartingResources", "SpawnBaseStructures" })
                     {
                         try
                         {
                             var m = AccessTools.Method(typeof(MP_Strategy), spawnName);
                             if (m == null) { MelonLogger.Msg($"MP_Strategy.{spawnName} not present on this build"); continue; }
-                            harmony.Patch(m,
-                                prefix:  new HarmonyMethod(typeof(Patch_BaseSpawn), "Prefix"),
-                                postfix: new HarmonyMethod(typeof(Patch_BaseSpawn), "Postfix"));
+                            bool patched = false;
+                            if (finalizerOk)
+                            {
+                                try
+                                {
+                                    harmony.Patch(m,
+                                        prefix:    new HarmonyMethod(typeof(Patch_BaseSpawn), "Prefix"),
+                                        postfix:   new HarmonyMethod(typeof(Patch_BaseSpawn), "Postfix"),
+                                        finalizer: new HarmonyMethod(typeof(Patch_BaseSpawn), "Finalizer"));
+                                    withFinalizer.Add(m);
+                                    patched = true;
+                                }
+                                catch (Exception fex)
+                                {
+                                    finalizerOk = false;
+                                    MelonLogger.Warning($"Patching {spawnName} with a finalizer threw: {fex.Message} — bracket without finalizer");
+                                    foreach (var done in withFinalizer)
+                                    {
+                                        try { harmony.Unpatch(done, HarmonyPatchType.Finalizer, harmony.Id); }
+                                        catch (Exception uex) { MelonLogger.Warning($"Removing the base-spawn finalizer threw: {uex.Message}"); }
+                                    }
+                                    withFinalizer.Clear();
+                                }
+                            }
+                            if (!patched)
+                                harmony.Patch(m,
+                                    prefix:  new HarmonyMethod(typeof(Patch_BaseSpawn), "Prefix"),
+                                    postfix: new HarmonyMethod(typeof(Patch_BaseSpawn), "Postfix"));
                             bracketed++;
-                            MelonLogger.Msg($"Bracketed MP_Strategy.{spawnName} — overrides applied before the base spawn, propagated after");
+                            MelonLogger.Msg($"Bracketed MP_Strategy.{spawnName} — overrides applied before the base spawn, propagated after{(patched ? " (with finalizer)" : "")}");
                         }
                         catch (Exception bex) { MelonLogger.Warning($"Patching {spawnName} threw: {bex.Message}"); }
                     }
+                    _baseSpawnHasFinalizer = finalizerOk && withFinalizer.Count > 0;
                     if (bracketed == 0)
                         MelonLogger.Warning("No base-spawn method found — starter structures may keep vanilla values");
                 }
