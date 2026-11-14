@@ -1157,6 +1157,9 @@ namespace Si_UnitBalance
                     _overridesApplied = false;
                     MelonLogger.Msg("[Rebalance] Reverted all overrides");
                 }
+                // Direct prefab writes are not OM members: put their vanilla values back too (both for
+                // "!rebalance default" and before the re-apply below reads anything as vanilla).
+                RestoreDirectWrites(defaultMode ? "rebalance default" : "rebalance");
 
                 // 2. Clear direct-mutation caches
                 _originalCreatureAttackAimDist.Clear();
@@ -2154,7 +2157,7 @@ namespace Si_UnitBalance
                     if (!_overridesApplied)
                     {
                         MelonLogger.Msg("[BASESPAWN] overrides not applied yet at the base spawn — applying now");
-                        ApplyOverridesLogic();
+                        ApplyOverridesLogic("base-spawn");
                         // ApplyOverridesLogic reverted with notify=true: the clients got the "r"
                         // packet immediately and are vanilla right now, while our re-applied
                         // values sit in OM's queue until the next frame. The base structures are

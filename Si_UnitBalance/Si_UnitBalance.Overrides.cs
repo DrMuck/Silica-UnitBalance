@@ -444,10 +444,12 @@ namespace Si_UnitBalance
 
                                 if (!set)
                                 {
-                                    // Fallback: direct mutation (no client sync — may cause desync)
-                                    set = SetFloatMember(dataObj, "Health", newHealth);
-                                    if (!set) set = SetFloatMember(dataObj, "MaxHealth", newHealth);
-                                    if (!set) set = SetFloatMember(dataObj, "m_MaxHealth", newHealth);
+                                    // Fallback: direct mutation (no client sync — may cause desync).
+                                    // Not an OM member, so it is recorded for RestoreDirectWrites.
+                                    var dmdOwner = dataObj as UnityEngine.Object;
+                                    set = SetFloatMemberTracked(dataObj, "Health", newHealth, $"{dataName}.Health", dmdOwner);
+                                    if (!set) set = SetFloatMemberTracked(dataObj, "MaxHealth", newHealth, $"{dataName}.MaxHealth", dmdOwner);
+                                    if (!set) set = SetFloatMemberTracked(dataObj, "m_MaxHealth", newHealth, $"{dataName}.m_MaxHealth", dmdOwner);
                                     if (set)
                                         LogDebug($"[HEALTH] {name}: Health {origHealth:F0} -> {newHealth:F0} (x{hpMult:F2}) (direct mutation — no client sync!)");
                                 }
@@ -814,7 +816,7 @@ namespace Si_UnitBalance
                                     if (origDmg > 0)
                                     {
                                         float newDmg = origDmg * effectiveDmgMult;
-                                        SetFloatMember(attackObj, "Damage", newDmg);
+                                        SetFloatMemberTracked(attackObj, "Damage", newDmg, $"{name}.{attackFieldName}.Damage", comp);
                                         LogDebug($"[DMG] {name} -> {attackFieldName}.Damage: {origDmg:F0} -> {newDmg:F0} (melee, direct)");
                                         anyApplied = true;
                                     }
@@ -917,6 +919,134 @@ namespace Si_UnitBalance
             new Dictionary<string, float>();
         private static readonly Dictionary<string, float> _originalAimLeadDrag =
             new Dictionary<string, float>();
+
+        // =============================================
+        // DIRECT PREFAB WRITES AND THE ROUND-TO-ROUND COMPOUNDING
+        //
+        // OverrideManager members are reverted by OMRevertAll before every apply, so a value read
+        // after it is vanilla. A value this mod writes straight onto persistent prefab data (the
+        // CreatureAttack instance on a CreatureDecapod prefab, the ModifyPrefabSpeeds fallback, the
+        // direct health / projectile fallbacks) is NOT an OM member: nothing reverts it. The prefabs
+        // live for the whole process (they are not scene objects), and the first-seen caches above are
+        // emptied at every round end and by !rebalance, so the next apply read the already-scaled value
+        // as "vanilla" and scaled it again: x1.2, x1.44, x1.73 ... one step per round.
+        //
+        // Every such write now goes through WriteFloatTracked, which remembers the value the member had
+        // before this mod first touched it (per target object and member, for the process lifetime),
+        // and RestoreDirectWrites puts all of them back right after OMRevertAll. The apply then starts
+        // from vanilla exactly like the OM-backed values do: no compounding, and a multiplier that goes
+        // back to 1 or is removed from the config leaves the vanilla value on the prefab.
+        // =============================================
+
+        private sealed class DirectWrite
+        {
+            public object Target = null!;     // the object written (CreatureAttack, component, asset)
+            public MemberInfo Member = null!; // FieldInfo or PropertyInfo of a float member
+            public UnityEngine.Object? Owner; // the Unity object that holds Target (destroyed -> entry dropped)
+            public float Vanilla;             // value before the first write by this mod
+            public string Label = "";         // for logs and [OMVERIFY] sentinels
+        }
+
+        private sealed class ReferenceComparer : IEqualityComparer<object>
+        {
+            public new bool Equals(object? a, object? b) => ReferenceEquals(a, b);
+            public int GetHashCode(object o) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o);
+        }
+
+        private static readonly Dictionary<object, Dictionary<string, DirectWrite>> _directWriteIndex =
+            new Dictionary<object, Dictionary<string, DirectWrite>>(new ReferenceComparer());
+        private static readonly List<DirectWrite> _directWrites = new List<DirectWrite>();
+
+        /// <summary>The member SetFloatMember would write: a field of that name, else a writable property.</summary>
+        private static MemberInfo? ResolveFloatMemberForWrite(object obj, string name)
+        {
+            var type = obj.GetType();
+            var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null) return field;
+            var prop = type.GetProperty(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (prop != null && prop.CanWrite) return prop;
+            return null;
+        }
+
+        /// <summary>SetFloatMember, plus the record RestoreDirectWrites needs. Same member resolution.</summary>
+        private static bool SetFloatMemberTracked(object obj, string name, float value, string label, UnityEngine.Object? owner)
+        {
+            var m = ResolveFloatMemberForWrite(obj, name);
+            if (m == null) return false;
+            WriteFloatTracked(obj, m, value, label, owner);
+            return true;
+        }
+
+        /// <summary>Writes a float field/property and records its pre-mod value on the first write.</summary>
+        private static void WriteFloatTracked(object obj, MemberInfo m, float value, string label, UnityEngine.Object? owner)
+        {
+            try
+            {
+                if (!_directWriteIndex.TryGetValue(obj, out var byMember))
+                {
+                    byMember = new Dictionary<string, DirectWrite>();
+                    _directWriteIndex[obj] = byMember;
+                }
+                if (!byMember.ContainsKey(m.Name))
+                {
+                    object cur = m is FieldInfo cf ? cf.GetValue(obj) : ((PropertyInfo)m).GetValue(obj);
+                    if (cur is float vanilla)
+                    {
+                        var dw = new DirectWrite { Target = obj, Member = m, Owner = owner ?? (obj as UnityEngine.Object), Vanilla = vanilla, Label = label };
+                        byMember[m.Name] = dw;
+                        _directWrites.Add(dw);
+                    }
+                }
+            }
+            catch (Exception ex) { LogDebug($"[DIRECT] could not record {label}: {ex.Message}"); }
+
+            // The write itself, exactly as before (exceptions propagate as they did from SetValue).
+            if (m is FieldInfo f) f.SetValue(obj, value);
+            else ((PropertyInfo)m).SetValue(obj, value);
+        }
+
+        /// <summary>Puts every recorded direct prefab write back to its vanilla value (the OMRevertAll
+        /// counterpart for the values OverrideManager does not track). Never throws.</summary>
+        private static void RestoreDirectWrites(string why)
+        {
+            try
+            {
+                if (_directWrites.Count == 0) return;
+                int restored = 0, dropped = 0, failed = 0;
+                for (int i = _directWrites.Count - 1; i >= 0; i--)
+                {
+                    var dw = _directWrites[i];
+                    try
+                    {
+                        if (dw.Owner is UnityEngine.Object uo && uo == null)
+                        {
+                            // The object is gone (would only happen if the asset was unloaded); a reloaded copy is vanilla.
+                            _directWrites.RemoveAt(i);
+                            if (_directWriteIndex.TryGetValue(dw.Target, out var byMember))
+                            {
+                                byMember.Remove(dw.Member.Name);
+                                if (byMember.Count == 0) _directWriteIndex.Remove(dw.Target);
+                            }
+                            dropped++;
+                            continue;
+                        }
+                        object cur = dw.Member is FieldInfo cf ? cf.GetValue(dw.Target) : ((PropertyInfo)dw.Member).GetValue(dw.Target);
+                        if (cur is float fv && fv == dw.Vanilla) continue;
+                        if (dw.Member is FieldInfo f) f.SetValue(dw.Target, dw.Vanilla);
+                        else ((PropertyInfo)dw.Member).SetValue(dw.Target, dw.Vanilla);
+                        restored++;
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        MelonLogger.Warning($"[DIRECT] restore of {dw.Label} failed: {ex.Message}");
+                    }
+                }
+                MelonLogger.Msg($"[DIRECT] {why}: {restored} of {_directWrites.Count} direct prefab write(s) put back to vanilla before the re-apply" +
+                    (dropped > 0 ? $", {dropped} dropped (object destroyed)" : "") + (failed > 0 ? $", {failed} failed" : ""));
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[DIRECT] restore ({why}) threw: {ex.Message}"); }
+        }
 
         private static void ApplyRangeOverrides(bool useOM)
         {
@@ -1095,7 +1225,7 @@ namespace Si_UnitBalance
                                             _originalCreatureAttackAimDist[key] = orig;
                                         }
                                         float newVal = orig * effectiveAimDistMult;
-                                        SetFloatMember(attackObj, "AttackProjectileAimDistMax", newVal);
+                                        SetFloatMemberTracked(attackObj, "AttackProjectileAimDistMax", newVal, $"{name}.{attackFieldName}.AttackProjectileAimDistMax", comp);
                                         LogDebug($"  CreatureAttack.{attackFieldName}.AimDistMax: {orig} -> {newVal} (direct{(isInstantHitAtk ? ", instant-hit" : "")})");
                                     }
                                 }
@@ -1116,7 +1246,7 @@ namespace Si_UnitBalance
                                             _originalSpread[key] = orig;
                                         }
                                         float newVal = orig * atkAccMult;
-                                        SetFloatMember(attackObj, "AttackProjectileSpread", newVal);
+                                        SetFloatMemberTracked(attackObj, "AttackProjectileSpread", newVal, $"{name}.{attackFieldName}.AttackProjectileSpread", comp);
                                         LogDebug($"  CreatureAttack.{attackFieldName}.Spread: {orig} -> {newVal} (direct)");
                                     }
 
@@ -1140,7 +1270,7 @@ namespace Si_UnitBalance
                                                 _originalAimAngle[aaKey] = origAA;
                                             }
                                             float newAA = origAA * atkAccMult;
-                                            SetFloatMember(attackObj, "AttackProjectileAimAngle", newAA);
+                                            SetFloatMemberTracked(attackObj, "AttackProjectileAimAngle", newAA, $"{name}.{attackFieldName}.AttackProjectileAimAngle", comp);
                                             LogDebug($"  CreatureAttack.{attackFieldName}.AimAngle: {origAA:F2} -> {newAA:F2} (direct, instant-hit accuracy)");
                                         }
                                     }
@@ -2480,7 +2610,7 @@ namespace Si_UnitBalance
                             orig = _originalMoveSpeeds[key];
 
                         float newVal = orig * mult;
-                        field.SetValue(comp, newVal);
+                        WriteFloatTracked(comp, field, newVal, $"{unitName}.{typeName}.{field.Name}", comp); // not an OM member
                         LogDebug($"  [{typeName}] field {field.Name}: {orig} -> {newVal}");
                         totalModified++;
                     }
@@ -2510,7 +2640,7 @@ namespace Si_UnitBalance
                             orig = _originalMoveSpeeds[key];
 
                         float newVal = orig * mult;
-                        prop.SetValue(comp, newVal);
+                        WriteFloatTracked(comp, prop, newVal, $"{unitName}.{typeName}.{prop.Name}", comp); // not an OM member
                         LogDebug($"  [{typeName}] prop {prop.Name}: {orig} -> {newVal}");
                         totalModified++;
                     }
@@ -2884,13 +3014,13 @@ namespace Si_UnitBalance
                 if (Math.Abs(rangeMult - 1f) > 0.001f && origSpeed > 0)
                 {
                     if (useOM) OMSetFloat(pdTarget, "m_fBaseSpeed", newSpeed);
-                    else SetFloatMember(pdObj, "m_fBaseSpeed", newSpeed);
+                    else SetFloatMemberTracked(pdObj, "m_fBaseSpeed", newSpeed, $"{pdName}.m_fBaseSpeed", pdObj as UnityEngine.Object); // no OM: recorded for RestoreDirectWrites
                 }
                 if (Math.Abs(speedMult - 1f) > 0.001f && origSpeed > 0)
                 {
                     float finalSpeed = newSpeed * speedMult;
                     if (useOM) OMSetFloat(pdTarget, "m_fBaseSpeed", finalSpeed);
-                    else SetFloatMember(pdObj, "m_fBaseSpeed", finalSpeed);
+                    else SetFloatMemberTracked(pdObj, "m_fBaseSpeed", finalSpeed, $"{pdName}.m_fBaseSpeed", pdObj as UnityEngine.Object); // no OM: recorded for RestoreDirectWrites
                     newSpeed = finalSpeed;
                 }
                 LogDebug($"  ProjectileData '{pdName}' (instant-hit): Range {origSpeed:F0} -> {newSpeed:F0}{(useOM ? " (OM)" : "")}");
@@ -2907,14 +3037,14 @@ namespace Si_UnitBalance
                 if (ltChanged && origLt > 0)
                 {
                     if (useOM) OMSetFloat(pdTarget, "m_fLifeTime", newLt);
-                    else SetFloatMember(pdObj, "m_fLifeTime", newLt);
+                    else SetFloatMemberTracked(pdObj, "m_fLifeTime", newLt, $"{pdName}.m_fLifeTime", pdObj as UnityEngine.Object); // no OM: recorded for RestoreDirectWrites
                     LogDebug($"  ProjectileData '{pdName}': Lifetime {origLt} -> {newLt:F2}");
                 }
 
                 if (Math.Abs(speedMult - 1f) > 0.001f && origSpeed > 0)
                 {
                     if (useOM) OMSetFloat(pdTarget, "m_fBaseSpeed", newSpeed);
-                    else SetFloatMember(pdObj, "m_fBaseSpeed", newSpeed);
+                    else SetFloatMemberTracked(pdObj, "m_fBaseSpeed", newSpeed, $"{pdName}.m_fBaseSpeed", pdObj as UnityEngine.Object); // no OM: recorded for RestoreDirectWrites
                     LogDebug($"  ProjectileData '{pdName}': Speed {origSpeed} -> {newSpeed:F1}");
                 }
 
@@ -2937,7 +3067,7 @@ namespace Si_UnitBalance
             {
                 float newLt = origLt * lifetimeMult;
                 if (useOM) OMSetFloat(pdTarget, "m_fLifeTime", newLt);
-                else SetFloatMember(pdObj, "m_fLifeTime", newLt);
+                else SetFloatMemberTracked(pdObj, "m_fLifeTime", newLt, $"{pdName}.m_fLifeTime", pdObj as UnityEngine.Object); // no OM: recorded for RestoreDirectWrites
                 LogDebug($"  ProjectileData '{pdName}' (instant-hit): Lifetime {origLt} -> {newLt:F2}");
             }
 

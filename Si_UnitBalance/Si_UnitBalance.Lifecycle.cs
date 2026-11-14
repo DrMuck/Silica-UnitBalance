@@ -97,7 +97,7 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("[UnitBalance] [LEGACY] Reverting + applying overrides (legacy mode — no OnFinishLoadingLevel)");
                     _overridesApplied = false;
                     _vanillaBaseCache.Clear();
-                    ApplyOverridesLogic(); // includes OMRevertAll at top
+                    ApplyOverridesLogic("legacy"); // includes OMRevertAll at top
                 }
 
                 OnGameStartedLogic();
@@ -132,7 +132,7 @@ namespace Si_UnitBalance
             MelonLogger.Msg($"[UnitBalance] OnFinishLoadingLevel ({sceneName}) — applying overrides (first time)");
             _lastMapName = sceneName;
             _vanillaBaseCache.Clear();
-            ApplyOverridesLogic();
+            ApplyOverridesLogic("level-load");
         }
 
         // =============================================
@@ -489,7 +489,7 @@ namespace Si_UnitBalance
         /// (OnGameRestart) so overrides are active before starter units spawn.
         /// Safe to call multiple times — skips if already applied.
         /// </summary>
-        private static void ApplyOverridesLogic()
+        private static void ApplyOverridesLogic(string source = "other")
         {
             bool scanOwner = false;
             try
@@ -584,6 +584,11 @@ namespace Si_UnitBalance
                 if (omReady && _overrideManagerType != null)
                     OMRevertAll();
 
+                // The same for what this mod writes onto prefab data directly (CreatureAttack fields,
+                // speed-field fallback, ...): OMRevertAll does not know those, so put the recorded
+                // vanilla values back before anything below reads a value as "vanilla".
+                RestoreDirectWrites(source);
+
                 // Register DamageManagerData in OM (server-only — clients don't have this type registered)
                 if (omReady && _healthMultEnabled && _healthMultipliers.Count > 0)
                     RegisterDamageManagerDataInOM();
@@ -670,7 +675,7 @@ namespace Si_UnitBalance
                 // Apply if not yet done (OnFinishLoadingLevel is the primary hook,
                 // this is a fallback for edge cases)
                 if (!_overridesApplied)
-                    ApplyOverridesLogic();
+                    ApplyOverridesLogic("game-start");
 
                 bool omReady = _omInitialized;
 
@@ -937,7 +942,12 @@ namespace Si_UnitBalance
                 MelonLogger.Msg("[UnitBalance] Game ended");
                 DynCapCloseAll("round end"); // OM keeps overrides between rounds, so the window must not stay open
 
-                // Clear direct-mutation caches (objects are destroyed on map change)
+                // Clear the first-seen caches. For the values this mod writes onto prefab data
+                // directly (CreatureAttack melee Damage / AimDistMax / Spread / AimAngle, the speed-field
+                // fallback, direct health/projectile fallbacks) clearing alone would make the next apply
+                // read the already-scaled value as vanilla and scale it again; that is why every such
+                // write is recorded and put back to vanilla (RestoreDirectWrites) before the re-apply
+                // reads anything. The OM-backed reads are vanilla anyway after OMRevertAll.
                 _originalCreatureAttackAimDist.Clear();
                 _originalSpread.Clear();
                 _originalProjectileLifetimes.Clear();
