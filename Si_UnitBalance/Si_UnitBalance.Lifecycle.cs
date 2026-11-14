@@ -716,6 +716,8 @@ namespace Si_UnitBalance
                 // OM only modifies prefab data — live instances have independent component copies
                 try { PropagateToLiveInstances(); }
                 catch (Exception pex) { MelonLogger.Warning($"[LIVE] Propagation error on game start: {pex.Message}"); }
+                // debug_om_probe only: do live instances carry the prefab value or a doubly multiplied one? (read-only)
+                OMVerifyLiveCheck("game-started");
 
                 // Apply per-faction decay enable/disable (needs teams to be initialized)
                 ApplyDecayTeamSettings();

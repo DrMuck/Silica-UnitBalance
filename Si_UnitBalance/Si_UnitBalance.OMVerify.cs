@@ -55,6 +55,7 @@ namespace Si_UnitBalance
             public MemberInfo Member = null!;
             public UnityEngine.Object? Owner;
             public object? Expected;
+            public float? Vanilla; // recorded pre-mod value (tracked direct writes only)
         }
 
         private sealed class OMAnchor
@@ -246,6 +247,12 @@ namespace Si_UnitBalance
                     }
                 }
                 _omSentinels = _omPendingSentinels ?? new List<OMSentinel>();
+                int sentUnreadable = 0;
+                foreach (var sen in _omSentinels)
+                {
+                    try { sen.Expected = OMReadMember(sen.Member, sen.Target); }
+                    catch { sen.Expected = null; sentUnreadable++; }
+                }
                 _omAnchors = _omPendingAnchors ?? new List<OMAnchor>();
                 _omPendingSentinels = null;
                 _omPendingAnchors = null;
@@ -256,8 +263,9 @@ namespace Si_UnitBalance
                 _omBlockedSinceSnap = 0;
                 sw.Stop();
                 MelonLogger.Msg($"[OMVERIFY] snapshot src={_omSnapSrc}: members={members} enabled={_omSnap.Count} " +
-                    $"sentinels={_omSentinels.Count} anchors={_omAnchors.Count}{(unreadable > 0 ? $" unreadable={unreadable}" : "")}{note} " +
+                    $"sentinels={_omSentinels.Count} anchors={_omAnchors.Count}{(unreadable + sentUnreadable > 0 ? $" unreadable={unreadable + sentUnreadable}" : "")}{note} " +
                     $"({sw.Elapsed.TotalMilliseconds.ToString("F1", CultureInfo.InvariantCulture)} ms)");
+                OMVerifyLogValues();
             }
             catch (Exception ex)
             {
@@ -276,10 +284,12 @@ namespace Si_UnitBalance
             sentinels = sl;
             anchors = al;
 
-            void Add(string label, object target, MemberInfo m, UnityEngine.Object? owner)
+            // Only WHAT to watch is recorded here; the expected values are read in OMVerifyTakeSnapshot,
+            // after OverrideManager's queue drained (an OM set of the same field lands only then).
+            void Add(string label, object target, MemberInfo m, UnityEngine.Object? owner, float? vanilla = null)
             {
-                try { sl.Add(new OMSentinel { Label = label, Target = target, Member = m, Owner = owner, Expected = OMReadMember(m, target) }); }
-                catch { }
+                if (target != null && m != null)
+                    sl.Add(new OMSentinel { Label = label, Target = target, Member = m, Owner = owner, Vanilla = vanilla });
             }
             void AddSensor(string label, GameObject go, string field)
             {
@@ -361,7 +371,7 @@ namespace Si_UnitBalance
             try
             {
                 foreach (var dw in _directWrites)
-                    Add("direct:" + dw.Label, dw.Target, dw.Member, dw.Owner);
+                    Add("direct:" + dw.Label, dw.Target, dw.Member, dw.Owner, dw.Vanilla);
             }
             catch (Exception ex) { LogDebug("[OMVERIFY] direct sentinels: " + ex.Message); }
         }
@@ -391,6 +401,229 @@ namespace Si_UnitBalance
                 if (_debugOmProbe) MelonLogger.Msg($"[OMVERIFY] sentinels re-read after {why} ({n})");
             }
             catch { }
+        }
+
+        // ---------- absolute values ----------
+
+        private const int OMVerifyMaxValues = 60;
+
+        /// <summary>Invariant culture, at most 3 decimals, no thousands separators, never '=' or ';'.</summary>
+        private static string OMValueText(object? v)
+        {
+            if (ReferenceEquals(v, null)) return "?";
+            if (v is float f) return float.IsNaN(f) ? "NaN" : f.ToString("0.###", CultureInfo.InvariantCulture);
+            if (v is double d) return d.ToString("0.###", CultureInfo.InvariantCulture);
+            if (v is int i) return i.ToString(CultureInfo.InvariantCulture);
+            if (v is bool b) return b ? "true" : "false";
+            return OMFmt(v).Replace(";", ",").Replace("=", ":");
+        }
+
+        /// <summary>One always-on line per snapshot with the ABSOLUTE sentinel values, so a log shows
+        /// whether every apply produced the same numbers (the pre-apply check only compares with the
+        /// previous snapshot). Format (an analyser parses it):
+        ///   [OMVERIFY] values src=SRC: LABEL=VALUE; LABEL=VALUE(vVANILLA); ...[; +N more]
+        /// "(vVANILLA)" only on tracked direct writes. Labels never contain '=' or ';'.</summary>
+        private static void OMVerifyLogValues()
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.Append("[OMVERIFY] values src=").Append(_omSnapSrc).Append(": ");
+                int shown = 0;
+                foreach (var sen in _omSentinels)
+                {
+                    if (shown == OMVerifyMaxValues) break;
+                    if (shown > 0) sb.Append("; ");
+                    sb.Append(sen.Label.Replace("=", "_").Replace(";", "_")).Append('=').Append(OMValueText(sen.Expected));
+                    if (sen.Vanilla.HasValue) sb.Append("(v").Append(OMValueText(sen.Vanilla.Value)).Append(')');
+                    shown++;
+                }
+                if (shown == 0) sb.Append("none");
+                if (_omSentinels.Count > shown) sb.Append("; +").Append(_omSentinels.Count - shown).Append(" more");
+                MelonLogger.Msg(sb.ToString());
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[OMVERIFY] values line failed: {ex.Message}"); }
+        }
+
+        // ---------- live-instance check (probe only) ----------
+
+        private const int OMVerifyMaxLiveChecks = 8;
+
+        /// <summary>Reads a float/int field or property with the given binding (field first, as the live
+        /// propagation does). Null when absent or not numeric.</summary>
+        private static float? OMReadNumber(object obj, string member, BindingFlags flags)
+        {
+            var t = obj.GetType();
+            var f = t.GetField(member, flags);
+            if (f != null)
+            {
+                if (f.FieldType == typeof(float)) return (float)f.GetValue(obj);
+                if (f.FieldType == typeof(int)) return (int)f.GetValue(obj);
+                return null;
+            }
+            var p = t.GetProperty(member, flags);
+            if (p != null && p.CanRead)
+            {
+                if (p.PropertyType == typeof(float)) return (float)p.GetValue(obj);
+                if (p.PropertyType == typeof(int)) return (int)p.GetValue(obj);
+            }
+            return null;
+        }
+
+        private static float OMVerifySpeedMult(string name, string field)
+        {
+            float v;
+            if (field == "FlyMoveSpeed" && _flySpeedMultipliers.TryGetValue(name, out v)) return v;
+            if (field == "TurboSpeed" && _turboSpeedMultipliers.TryGetValue(name, out v)) return v;
+            if (field == "RunSpeed" && _runSpeedMultipliers.TryGetValue(name, out v)) return v;
+            if (field == "SprintSpeed" && _sprintSpeedMultipliers.TryGetValue(name, out v)) return v;
+            return _moveSpeedMultipliers.TryGetValue(name, out v) ? v : 1f;
+        }
+
+        /// <summary>Candidate members of one kind for a unit name, with the multiplier
+        /// PropagateToLiveInstances applies: 0 speed field, 1 strafe, 2 turn radius, 3 turret reload,
+        /// 4 magazine, 5 spread, 6 jump. comp "*" = any component (speed fields, DeclaredOnly).</summary>
+        private static List<(string comp, string field, BindingFlags flags, float mult)> OMVerifyLiveCandidates(int kind, string name)
+        {
+            const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            const BindingFlags declared = BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.Instance;
+            var list = new List<(string, string, BindingFlags, float)>();
+            float m;
+            switch (kind)
+            {
+                case 0:
+                    foreach (var fn in _speedFieldNames)
+                    {
+                        if (!_moveSpeedMultipliers.ContainsKey(name) && !_flySpeedMultipliers.ContainsKey(name)
+                            && !_turboSpeedMultipliers.ContainsKey(name) && !_runSpeedMultipliers.ContainsKey(name)
+                            && !_sprintSpeedMultipliers.ContainsKey(name)) break;
+                        m = OMVerifySpeedMult(name, fn);
+                        if (Math.Abs(m - 1f) > 0.001f) list.Add(("*", fn, declared, m));
+                    }
+                    break;
+                case 1:
+                    if (_strafeSpeedMultipliers.TryGetValue(name, out m))
+                    {
+                        list.Add(("CreatureDecapod", "FlyMoveScaleSide", any, m));
+                        list.Add(("VehicleAir", "StrafeSpeed", declared, m));
+                    }
+                    break;
+                case 2:
+                    if (_turnRadiusMultipliers.TryGetValue(name, out m)) list.Add(("VehicleWheeled", "TurningCircleRadius", any, m));
+                    break;
+                case 3:
+                    m = GetWeaponMult(_reloadTimeMultipliers, name, "pri");
+                    if (Math.Abs(m - 1f) > 0.001f) list.Add(("VehicleTurret", "PrimaryReloadTime", any, m));
+                    break;
+                case 4:
+                    m = GetWeaponMult(_magazineMultipliers, name, "pri");
+                    if (Math.Abs(m - 1f) > 0.001f) list.Add(("VehicleTurret", "PrimaryMagazineSize", any, m));
+                    break;
+                case 5:
+                    m = GetWeaponMult(_accuracyMultipliers, name, "pri");
+                    if (Math.Abs(m - 1f) > 0.001f) list.Add(("VehicleTurret", "PrimaryMuzzleSpread", any, m));
+                    break;
+                case 6:
+                    if (_jumpSpeedMultipliers.TryGetValue(name, out m))
+                    {
+                        list.Add(("Soldier", "JumpSpeed", any, m));
+                        list.Add(("PlayerMovement", "JumpSpeed", any, m));
+                        list.Add(("FPSMovement", "JumpSpeed", any, m));
+                    }
+                    break;
+            }
+            return list;
+        }
+
+        /// <summary>Probe only, after the GameStarted propagation: do already-spawned units carry the
+        /// prefab value (vanilla x multiplier once OverrideManager has written the prefab) or one that was
+        /// multiplied again? Up to 8 live units/structures, one per kind first (speed field, strafe, turn
+        /// radius, turret reload, magazine, spread, jump), then more of the same kinds. Read-only;
+        /// iterates the teams' Units/Structures only.</summary>
+        private static void OMVerifyLiveCheck(string tag)
+        {
+            if (!_debugOmProbe) return;
+            int checkedN = 0, diff = 0;
+            try
+            {
+                // live objects: units first (starting Queen, harvesters, starter vehicles), then structures
+                var live = new List<(GameObject go, ObjectInfo info)>();
+                var seen = new HashSet<int>();
+                var teams = Team.Teams;
+                if (teams != null)
+                {
+                    foreach (var team in teams)
+                    {
+                        if (team == null || team.Units == null) continue;
+                        foreach (var u in team.Units)
+                            if (u != null && u.ObjectInfo != null && u.ObjectInfo.Prefab != null && seen.Add(u.gameObject.GetInstanceID()))
+                                live.Add((u.gameObject, u.ObjectInfo));
+                    }
+                    foreach (var team in teams)
+                    {
+                        if (team == null || team.Structures == null) continue;
+                        foreach (var st in team.Structures)
+                            if (st != null && st.ObjectInfo != null && st.ObjectInfo.Prefab != null && seen.Add(st.gameObject.GetInstanceID()))
+                                live.Add((st.gameObject, st.ObjectInfo));
+                    }
+                }
+
+                var used = new HashSet<string>();
+                for (int pass = 0; pass < 2 && checkedN < OMVerifyMaxLiveChecks; pass++)
+                {
+                    for (int kind = 0; kind <= 6 && checkedN < OMVerifyMaxLiveChecks; kind++)
+                    {
+                        bool found = false;
+                        foreach (var entry in live)
+                        {
+                            if (found || checkedN >= OMVerifyMaxLiveChecks) break;
+                            var go = entry.go;
+                            var info = entry.info;
+                            if (go == null || info == null || info.Prefab == null) continue;
+                            string name = ResolveConfigName(info.DisplayName, info.name);
+                            if (string.IsNullOrEmpty(name)) continue;
+                            foreach (var c in OMVerifyLiveCandidates(kind, name))
+                            {
+                                Component? liveComp = null;
+                                float? liveV = null, prefabV = null;
+                                try
+                                {
+                                    foreach (var lc in go.GetComponentsInChildren<Component>(true))
+                                    {
+                                        if (lc == null || (c.comp != "*" && lc.GetType().Name != c.comp)) continue;
+                                        var v = OMReadNumber(lc, c.field, c.flags);
+                                        if (v == null) continue;
+                                        liveComp = lc; liveV = v;
+                                        break;
+                                    }
+                                    if (liveComp == null) continue;
+                                    string tn = liveComp.GetType().Name;
+                                    foreach (var pc in info.Prefab.GetComponentsInChildren<Component>(true))
+                                    {
+                                        if (pc == null || pc.GetType().Name != tn) continue;
+                                        prefabV = OMReadNumber(pc, c.field, c.flags); // first of the type, as the propagation reads it
+                                        break;
+                                    }
+                                }
+                                catch { continue; }
+                                if (liveComp == null || liveV == null || prefabV == null) continue;
+                                if (!used.Add(info.name + "|" + liveComp.GetType().Name + "|" + c.field)) continue;
+                                float lv = liveV.Value, pv = prefabV.Value;
+                                bool ok = lv == pv || Math.Abs(lv - pv) <= 0.001f * Math.Abs(pv);
+                                checkedN++;
+                                if (!ok) diff++;
+                                string line = $"[OMVERIFY] {tag} live-check unit={info.name} comp={liveComp.GetType().Name} field={c.field} " +
+                                    $"live={OMValueText(lv)} prefab={OMValueText(pv)} mult={OMValueText(c.mult)} {(ok ? "ok" : "DIFF")}";
+                                if (ok) MelonLogger.Msg(line); else MelonLogger.Warning(line);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[OMVERIFY] {tag} live-check failed: {ex.Message}"); }
+            try { MelonLogger.Msg($"[OMVERIFY] {tag} live-check: checked={checkedN} diff={diff}"); } catch { }
         }
 
         // ---------- check ----------

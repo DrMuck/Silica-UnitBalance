@@ -47,6 +47,16 @@ Stage 1 of making the per-round revert + re-apply cheaper. The sequence itself (
   `debug_om_probe` (default false, no menu entry) adds the same check at game-ended, level-unload,
   revertall-blocked, level-loaded, game-restart, post-base-spawn (plus the live base structures' FoW) and
   game-started, and logs `OverrideManager.ClearAll` / non-blocked `RevertAll` calls with a short stack.
+  Review round:
+  - Sentinel expected values are read inside the snapshot, after OverrideManager's queue drained (they were read
+    before the drain, so a field that is also OM-set in the same apply gave a false "sentinel FAIL").
+  - New always-on line per snapshot with the ABSOLUTE sentinel values, so a log shows whether every apply produced
+    the same numbers: `[OMVERIFY] values src=<src>: <label>=<value>; <label>=<value>(v<vanilla>); …` (vanilla only
+    on tracked direct writes, invariant culture, at most 3 decimals, first 60 then `; +<n> more`).
+  - Probe only, after the GameStarted propagation: up to 8 live units/structures with a propagated multiplier
+    (speed field, strafe, turn radius, turret reload, magazine, spread, jump) are compared with their prefab:
+    `[OMVERIFY] game-started live-check unit=<objectinfo> comp=<type> field=<member> live=<v> prefab=<v> mult=<m> ok|DIFF`
+    and `[OMVERIFY] game-started live-check: checked=<n> diff=<n>`. Read-only; PropagateToLiveInstances unchanged.
 
 ## 2026-11-12 — Harvester exit toward patch follows the 1.0.17 ramp reachability (v7.14.1)
 
