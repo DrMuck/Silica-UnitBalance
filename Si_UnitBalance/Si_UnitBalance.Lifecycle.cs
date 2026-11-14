@@ -264,8 +264,37 @@ namespace Si_UnitBalance
                     }
                 }
 
+                // Already registered (every apply after the first): the entry still holds the same
+                // assets, so re-building it would change nothing. It is rebuilt only when it is
+                // missing (first apply, or OverrideManager.ClearAll -> SourceRegistry.ClearSources
+                // emptied the registry, which the Count == 0 branch above repopulates) or when one of
+                // its assets has been destroyed.
+                if (sources.Contains("DamageManagerData"))
+                {
+                    bool intact = false;
+                    try
+                    {
+                        // ValueTuple<Type, IList, IList, MethodInfo>: Item2 = asset list
+                        object entry = sources["DamageManagerData"];
+                        var assetsField = entry?.GetType().GetField("Item2");
+                        if (assetsField?.GetValue(entry) is System.Collections.IList registered && registered.Count > 0)
+                        {
+                            intact = true;
+                            foreach (var a in registered)
+                                if (!(a is UnityEngine.Object uo) || uo == null) { intact = false; break; }
+                        }
+                    }
+                    catch { intact = false; }
+                    if (intact)
+                    {
+                        LogDebug("[OM-DMD] DamageManagerData source already registered — kept");
+                        return;
+                    }
+                    MelonLogger.Msg("[OM-DMD] DamageManagerData source holds destroyed assets — re-registering");
+                }
+
                 // Collect all unique DamageManagerData assets from ObjectInfo prefabs
-                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 var dmdAssets = new List<object>();
                 var dmdPaths = new List<string>();
                 var seen = new HashSet<string>();
@@ -462,6 +491,7 @@ namespace Si_UnitBalance
         /// </summary>
         private static void ApplyOverridesLogic()
         {
+            bool scanOwner = false;
             try
             {
                 if (!_enabled || !_configLoaded) return;
@@ -471,6 +501,9 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("[UnitBalance] Overrides already active — skipping re-apply");
                     return;
                 }
+
+                // One FindObjectsOfTypeAll per asset type for this whole apply (closed in finally).
+                scanOwner = BeginAssetScan();
 
                 _nameCache.Clear();
 
@@ -611,6 +644,10 @@ namespace Si_UnitBalance
             catch (Exception ex)
             {
                 MelonLogger.Error($"ApplyOverridesLogic error: {ex.Message}");
+            }
+            finally
+            {
+                EndAssetScan(scanOwner);
             }
         }
 

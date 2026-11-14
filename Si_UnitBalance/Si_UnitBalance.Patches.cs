@@ -1144,10 +1144,13 @@ namespace Si_UnitBalance
             else
                 MelonLogger.Msg("[Rebalance] Hot-reload triggered by admin chat command");
 
+            // One FindObjectsOfTypeAll per asset type for this whole reload (closed in finally).
+            bool scanOwner = false;
             try
             {
                 // 1. Revert all current OM overrides (restores originals, notifies clients)
                 DynCapCloseAll("rebalance");
+                scanOwner = BeginAssetScan();
                 if (_omInitialized && _overrideManagerType != null)
                 {
                     OMRevertAll();
@@ -1254,6 +1257,10 @@ namespace Si_UnitBalance
             catch (Exception ex)
             {
                 MelonLogger.Error($"[Rebalance] Hot-reload failed: {ex.Message}");
+            }
+            finally
+            {
+                EndAssetScan(scanOwner);
             }
         }
 

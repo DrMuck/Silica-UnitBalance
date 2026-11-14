@@ -150,8 +150,7 @@ namespace Si_UnitBalance
             var units = root["units"] as JObject;
             if (units == null) return null;
 
-            bool releaseInfos = _sharedAllInfos == null;
-            if (releaseInfos) _sharedAllInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            bool releaseInfos = BeginAssetScan(); // one ObjectInfo scan for the whole export
             try
             {
                 var sections = new JArray();
@@ -184,7 +183,7 @@ namespace Si_UnitBalance
                 };
                 return JsonConvert.SerializeObject(browse, Formatting.None);
             }
-            finally { if (releaseInfos) _sharedAllInfos = null; }
+            finally { EndAssetScan(releaseInfos); }
         }
 
         // "========== SOL — Barracks ==========" -> "Sol - Barracks". The config file on disk carries the em dash

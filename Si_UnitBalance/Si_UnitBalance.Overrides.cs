@@ -21,7 +21,7 @@ namespace Si_UnitBalance
             if (!hasUnitOverrides && !hasTechOverrides)
                 return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
             int techApplied = 0;
 
@@ -229,7 +229,7 @@ namespace Si_UnitBalance
         {
             if (_depositRadiusOverrides.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
 
             foreach (var info in allInfos)
@@ -269,7 +269,7 @@ namespace Si_UnitBalance
         {
             if (_extractionRadiusOverrides.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
 
             foreach (var info in allInfos)
@@ -307,7 +307,7 @@ namespace Si_UnitBalance
         {
             if (_unitCapOverrides.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
 
             foreach (var info in allInfos)
@@ -342,7 +342,7 @@ namespace Si_UnitBalance
         {
             if (_healthMultipliers.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
             var modifiedDMD = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -488,7 +488,7 @@ namespace Si_UnitBalance
             // oldHealth = vanilla value from _originalHealth cache
             // newHealth = current Data.Health (after override applied)
             var dataNameToRatio = new Dictionary<string, float>();
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
@@ -669,7 +669,7 @@ namespace Si_UnitBalance
         {
             if (_damageMultipliers.Count == 0 && _splashRadiusMultipliers.Count == 0 && _projectileOverrides.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
             var modifiedPD = new HashSet<string>(); // track already-modified ProjectileData assets
 
@@ -924,8 +924,8 @@ namespace Si_UnitBalance
                 && _accuracyMultipliers.Count == 0 && _magazineMultipliers.Count == 0 && _fireRateMultipliers.Count == 0
                 && _lifetimeMultipliers.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
-            var allProjectiles = Resources.FindObjectsOfTypeAll<ProjectileData>();
+            var allInfos = AllObjectInfos();
+            var allProjectiles = AllProjectileDatas();
             int applied = 0;
             var modifiedPD = new HashSet<string>();
 
@@ -1436,7 +1436,7 @@ namespace Si_UnitBalance
             if (_targetDistanceOverrides.Count == 0) return;
 
             BuildNetworkedPrefabIndex();
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0, twins = 0;
 
             foreach (var info in allInfos)
@@ -1481,7 +1481,7 @@ namespace Si_UnitBalance
             if (_fowDistanceOverrides.Count == 0) return;
             BuildNetworkedPrefabIndex();
             _fowPrefabsTouched.Clear();
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0, twins = 0;
             foreach (var info in allInfos)
             {
@@ -1787,7 +1787,7 @@ namespace Si_UnitBalance
             try
             {
                 BuildNetworkedPrefabIndex();
-                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 foreach (var info in allInfos)
                 {
                     if (info == null || info.Prefab == null) continue;
@@ -1892,7 +1892,7 @@ namespace Si_UnitBalance
         private static void ApplyJumpSpeedOverrides(bool useOM)
         {
             if (_jumpSpeedMultipliers.Count == 0) return;
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
             foreach (var info in allInfos)
             {
@@ -1935,7 +1935,7 @@ namespace Si_UnitBalance
         private static void ApplyVisibleEventRadiusOverrides(bool useOM)
         {
             if (_visibleEventRadiusMultipliers.Count == 0) return;
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
             var modifiedPD = new HashSet<string>();
             foreach (var info in allInfos)
@@ -2044,7 +2044,7 @@ namespace Si_UnitBalance
             if (_moveSpeedMultipliers.Count == 0 && _turboSpeedMultipliers.Count == 0 && _flySpeedMultipliers.Count == 0
                 && _runSpeedMultipliers.Count == 0 && _sprintSpeedMultipliers.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
 
             foreach (var info in allInfos)
@@ -2175,7 +2175,7 @@ namespace Si_UnitBalance
         private static void ApplyStrafeSpeedOverrides(bool useOM)
         {
             if (_strafeSpeedMultipliers.Count == 0) return;
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
             foreach (var info in allInfos)
             {
@@ -2280,7 +2280,7 @@ namespace Si_UnitBalance
         {
             if (_turnRadiusMultipliers.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
 
             foreach (var info in allInfos)
@@ -2329,7 +2329,7 @@ namespace Si_UnitBalance
         {
             if (_teleportCooldown < 0 && _teleportDuration < 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int applied = 0;
             var flags = BindingFlags.Public | BindingFlags.Instance;
 
@@ -2399,7 +2399,7 @@ namespace Si_UnitBalance
             var flags = BindingFlags.Public | BindingFlags.Instance;
 
             // Find all VehicleDispenser components in all ObjectInfo prefabs
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             foreach (var info in allInfos)
             {
                 if (info == null || info.Prefab == null) continue;
@@ -2570,7 +2570,7 @@ namespace Si_UnitBalance
         {
             if (_impactScaleBySpeedOverrides.Count == 0 && _dragMultipliers.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             var done = new HashSet<string>();
             int units = 0;
 
@@ -2637,7 +2637,7 @@ namespace Si_UnitBalance
             // Nothing to do until we've either got an override or previously touched a turret.
             if (_aimCompensationOverrides.Count == 0 && _aimCompVanilla.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int changed = 0;
             foreach (var info in allInfos)
             {
@@ -2685,7 +2685,7 @@ namespace Si_UnitBalance
             int live = 0;
             try
             {
-                var units = UnityEngine.Object.FindObjectsOfType(typeof(Unit));
+                var units = AllLiveUnits();
                 foreach (var uObj in units)
                 {
                     var unit = uObj as Unit;
@@ -2725,7 +2725,7 @@ namespace Si_UnitBalance
         {
             if (_pitchMaxUpOverrides.Count == 0 && _pitchMaxDownOverrides.Count == 0 && _pitchVanilla.Count == 0) return;
 
-            var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            var allInfos = AllObjectInfos();
             int changed = 0;
             foreach (var info in allInfos)
             {
@@ -2745,7 +2745,7 @@ namespace Si_UnitBalance
             int live = 0;
             try
             {
-                foreach (var uObj in UnityEngine.Object.FindObjectsOfType(typeof(Unit)))
+                foreach (var uObj in AllLiveUnits())
                 {
                     var unit = uObj as Unit;
                     if (unit == null || unit.ObjectInfo == null) continue;
@@ -3013,7 +3013,7 @@ namespace Si_UnitBalance
         {
             if (_proximityOverrides.Count == 0) return;
 
-            var allProjectiles = Resources.FindObjectsOfTypeAll<ProjectileData>();
+            var allProjectiles = AllProjectileDatas();
             int applied = 0;
 
             foreach (var pd in allProjectiles)
@@ -3158,7 +3158,7 @@ namespace Si_UnitBalance
             {
                 if (!useOM && _nestOnlyMutated.Count > 0)
                 {
-                    foreach (var info in Resources.FindObjectsOfTypeAll<ObjectInfo>())
+                    foreach (var info in AllObjectInfos())
                         if (info != null && _nestOnlyMutated.Contains(info.name))
                             info.StructureConstructionAnchor = true;
                     _nestOnlyMutated.Clear();
@@ -3170,7 +3170,7 @@ namespace Si_UnitBalance
             {
                 int applied = 0;
                 var names = new List<string>();
-                foreach (var info in Resources.FindObjectsOfTypeAll<ObjectInfo>())
+                foreach (var info in AllObjectInfos())
                 {
                     if (info == null || info.Prefab == null) continue;
                     if (!info.name.StartsWith("ObjectInfo_Alien_", StringComparison.OrdinalIgnoreCase)) continue;
@@ -3220,7 +3220,7 @@ namespace Si_UnitBalance
             {
                 SpawnOnInit target = null;
                 GameObject nestPrefab = null;
-                foreach (var info in Resources.FindObjectsOfTypeAll<ObjectInfo>())
+                foreach (var info in AllObjectInfos())
                 {
                     if (info == null || info.Prefab == null) continue;
                     if (!info.name.Equals("ObjectInfo_Alien_Nest", StringComparison.OrdinalIgnoreCase)) continue;
@@ -3260,7 +3260,7 @@ namespace Si_UnitBalance
         {
             try
             {
-                var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 foreach (var info in allInfos)
                 {
                     if (info == null || info.DisplayName != "Shrimp" || info.Prefab == null)
@@ -3346,7 +3346,7 @@ namespace Si_UnitBalance
                 if (_decayHuman.HasCustomParams || _decayAlien.HasCustomParams)
                 {
                     // Find all Decay components on structure prefabs
-                    var allInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                    var allInfos = AllObjectInfos();
                     var decayType = typeof(Decay);
                     var dataField = decayType.GetField("Data", BindingFlags.NonPublic | BindingFlags.Instance);
                     if (dataField == null)

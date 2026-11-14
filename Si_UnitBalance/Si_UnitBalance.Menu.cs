@@ -18,8 +18,86 @@ namespace Si_UnitBalance
         private static readonly Dictionary<string, Dictionary<string, string>> _vanillaBaseCache =
             new Dictionary<string, Dictionary<string, string>>();
 
-        // Shared ObjectInfo array — set during CacheVanillaBaseValues to avoid repeated FindObjectsOfTypeAll
-        private static ObjectInfo[] _sharedAllInfos = null;
+        // =============================================
+        // Shared asset scans ("scan scope")
+        //
+        // Resources.FindObjectsOfTypeAll<T>() costs ~0.3 s per call on a loaded server, and one
+        // override apply used to run it once per Apply* step (~23 times). Inside a scan scope the
+        // first call per type scans and every later call in the same scope gets the same array.
+        // A scope is opened and closed around ONE synchronous apply (BeginAssetScan / EndAssetScan
+        // in a try/finally), so the arrays never outlive the call that made them: no frame passes,
+        // no scene loads, nothing is destroyed in between. Nested scopes (CacheVanillaBaseValues
+        // inside an apply) reuse the outer arrays and leave the closing to the owner. Outside a
+        // scope every accessor scans exactly as before.
+        // =============================================
+
+        private static bool _assetScanActive;
+        private static int _assetScanFrame = -1;
+        private static ObjectInfo[]? _sharedAllInfos = null;
+        private static ProjectileData[]? _sharedAllProjectiles = null;
+        private static UnityEngine.Object[]? _sharedLiveUnits = null;
+
+        /// <summary>Opens a scan scope. Returns true when this call owns it and must close it
+        /// with <see cref="EndAssetScan"/> (in a finally).</summary>
+        internal static bool BeginAssetScan()
+        {
+            if (_assetScanActive)
+            {
+                if (_assetScanFrame == Time.frameCount) return false; // nested: the outer owner closes
+                // An owner never closed its scope (cannot happen with try/finally). Do not trust the arrays.
+                MelonLogger.Warning($"[SCAN] shared asset arrays from frame {_assetScanFrame} were still open in frame {Time.frameCount} — dropped");
+            }
+            _assetScanActive = true;
+            _assetScanFrame = Time.frameCount;
+            _sharedAllInfos = null;
+            _sharedAllProjectiles = null;
+            _sharedLiveUnits = null;
+            return true;
+        }
+
+        internal static void EndAssetScan(bool owner)
+        {
+            if (!owner) return;
+            _assetScanActive = false;
+            _assetScanFrame = -1;
+            _sharedAllInfos = null;
+            _sharedAllProjectiles = null;
+            _sharedLiveUnits = null;
+        }
+
+        private static bool AssetScanValid
+        {
+            get
+            {
+                if (!_assetScanActive) return false;
+                try { return _assetScanFrame == Time.frameCount; } // Time is main-thread only
+                catch { return false; }
+            }
+        }
+
+        /// <summary>Every ObjectInfo asset: the scope's array inside a scan scope, a fresh scan outside.</summary>
+        internal static ObjectInfo[] AllObjectInfos()
+        {
+            if (!AssetScanValid) return Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            if (_sharedAllInfos == null) _sharedAllInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
+            return _sharedAllInfos;
+        }
+
+        /// <summary>Every ProjectileData asset: the scope's array inside a scan scope, a fresh scan outside.</summary>
+        internal static ProjectileData[] AllProjectileDatas()
+        {
+            if (!AssetScanValid) return Resources.FindObjectsOfTypeAll<ProjectileData>();
+            if (_sharedAllProjectiles == null) _sharedAllProjectiles = Resources.FindObjectsOfTypeAll<ProjectileData>();
+            return _sharedAllProjectiles;
+        }
+
+        /// <summary>Live (scene) Unit components, as UnityEngine.Object.FindObjectsOfType(typeof(Unit)).</summary>
+        internal static UnityEngine.Object[] AllLiveUnits()
+        {
+            if (!AssetScanValid) return UnityEngine.Object.FindObjectsOfType(typeof(Unit));
+            if (_sharedLiveUnits == null) _sharedLiveUnits = UnityEngine.Object.FindObjectsOfType(typeof(Unit));
+            return _sharedLiveUnits;
+        }
 
         /// <summary>
         /// Snapshots base values from game objects while they are in vanilla state.
@@ -29,33 +107,38 @@ namespace Si_UnitBalance
         {
             _vanillaBaseCache.Clear();
             // Single scan — shared by GetUnitParamGroups and GetBaseValuesLive during caching
-            _sharedAllInfos = Resources.FindObjectsOfTypeAll<ObjectInfo>();
-            int cached = 0;
-            foreach (var faction in _unitNames)
+            // (inside an apply this reuses the apply's scan scope).
+            bool scanOwner = BeginAssetScan();
+            try
             {
-                foreach (var category in faction)
+                AllObjectInfos(); // warm the shared array once
+                int cached = 0;
+                foreach (var faction in _unitNames)
                 {
-                    foreach (string unitName in category)
+                    foreach (var category in faction)
                     {
-                        try
+                        foreach (string unitName in category)
                         {
-                            GetUnitParamGroups(unitName, out string[] groupNames, out string[][] groupKeys);
-                            var allKeys = new List<string>();
-                            foreach (var gk in groupKeys)
-                                allKeys.AddRange(gk);
-                            var baseVals = GetBaseValuesLive(unitName, allKeys.ToArray());
-                            if (baseVals.Count > 0)
+                            try
                             {
-                                _vanillaBaseCache[unitName] = baseVals;
-                                cached++;
+                                GetUnitParamGroups(unitName, out string[] groupNames, out string[][] groupKeys);
+                                var allKeys = new List<string>();
+                                foreach (var gk in groupKeys)
+                                    allKeys.AddRange(gk);
+                                var baseVals = GetBaseValuesLive(unitName, allKeys.ToArray());
+                                if (baseVals.Count > 0)
+                                {
+                                    _vanillaBaseCache[unitName] = baseVals;
+                                    cached++;
+                                }
                             }
+                            catch { }
                         }
-                        catch { }
                     }
                 }
+                MelonLogger.Msg($"[BASE] Cached vanilla base values for {cached} units");
             }
-            _sharedAllInfos = null; // release
-            MelonLogger.Msg($"[BASE] Cached vanilla base values for {cached} units");
+            finally { EndAssetScan(scanOwner); } // release (only when this call opened the scope)
         }
 
         // Match ObjectInfo against a menu unit name, handling resolved names (e.g. "Sol Harvester" → DisplayName "Harvester" + internal name containing "_Sol_")
@@ -253,7 +336,7 @@ namespace Si_UnitBalance
             secPD = null;
             try
             {
-                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
@@ -398,7 +481,7 @@ namespace Si_UnitBalance
             secName = "";
             try
             {
-                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
@@ -518,7 +601,7 @@ namespace Si_UnitBalance
             bool hasSoldier = false, hasVT = false, hasWheeled = false, hasHovered = false, hasAir = false, hasDecapod = false, hasMiningArms = false;
             try
             {
-                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
@@ -927,7 +1010,7 @@ namespace Si_UnitBalance
             var result = new Dictionary<string, string>();
             try
             {
-                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
@@ -3022,7 +3105,7 @@ namespace Si_UnitBalance
         {
             try
             {
-                var allInfos = _sharedAllInfos ?? Resources.FindObjectsOfTypeAll<ObjectInfo>();
+                var allInfos = AllObjectInfos();
                 ObjectInfo matchedInfo = null;
                 foreach (var info in allInfos)
                 {
