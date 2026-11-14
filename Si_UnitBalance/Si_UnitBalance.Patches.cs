@@ -2119,10 +2119,35 @@ namespace Si_UnitBalance
         // before 0.9.47, and SpawnBaseStructures is the older entry point, so
         // whichever the running build has is the one that gets bracketed.
         // =============================================
+        // Both methods are bracketed, and SpawnStructuresAndStartingResources calls SpawnBaseStructures,
+        // so one round start enters this bracket twice, nested. The depth counter makes the postfix work
+        // (propagate + sync coroutine) run once, at the end of the OUTERMOST call: that is after the base
+        // structures, the starting resources and the side AI teams are all in place. A build that has
+        // only one of the two methods enters once and runs it once. The prefix body is left as it was
+        // on every entry (the nested entry finds _overridesApplied set and does nothing).
+        // Harmony skips a postfix when the original throws, which would leave the depth raised; the
+        // frame stamp resets such a leftover on the next round start (both calls of one round start
+        // run in the same frame).
+        private static int _baseSpawnDepth;
+        private static int _baseSpawnFrame = -1;
+
         private static class Patch_BaseSpawn
         {
             public static void Prefix()
             {
+                try
+                {
+                    int frame = Time.frameCount;
+                    if (_baseSpawnDepth > 0 && _baseSpawnFrame != frame)
+                    {
+                        MelonLogger.Warning($"[BASESPAWN] bracket depth {_baseSpawnDepth} left over from frame {_baseSpawnFrame} (a base spawn threw?) — reset");
+                        _baseSpawnDepth = 0;
+                    }
+                    _baseSpawnFrame = frame;
+                    _baseSpawnDepth++;
+                }
+                catch (Exception ex) { MelonLogger.Warning("[BASESPAWN] prefix depth bookkeeping threw: " + ex.Message); }
+
                 try
                 {
                     if (!_enabled || !_configLoaded) return;
@@ -2148,6 +2173,8 @@ namespace Si_UnitBalance
             {
                 try
                 {
+                    if (_baseSpawnDepth > 0) _baseSpawnDepth--;
+                    if (_baseSpawnDepth > 0) return; // nested call: the outermost postfix does this once
                     if (!_enabled || !_configLoaded) return;
                     MelonLogger.Msg("[BASESPAWN] base structures spawned — propagating and re-syncing");
                     try { PropagateToLiveInstances(); }
