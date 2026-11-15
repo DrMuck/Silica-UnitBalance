@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.15.1", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.16.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -428,7 +428,7 @@ namespace Si_UnitBalance
             }
             catch (Exception ex) { MelonLogger.Warning($"Failed to subscribe to OnStartUnloadingLevel: {ex.Message}"); }
 
-            MelonLogger.Msg($"Unit Balance v7.15.1 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.16.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -941,6 +941,9 @@ namespace Si_UnitBalance
                 _noRefinerySellRefund = config["no_refinery_sell_refund"]?.Value<bool>() ?? false;
                 if (_noRefinerySellRefund)
                     MelonLogger.Msg("[CONFIG] No refinery sell refund: selling a refinery pays nothing back");
+                _alienStarterBioCache = config["alien_starter_biocache"]?.Value<bool>() ?? false;
+                if (_alienStarterBioCache)
+                    MelonLogger.Msg($"[CONFIG] Alien starter Bio Cache: one hidden Bio Cache {AlienBioCacheDepth:F0} m below each Alien starter Nest (Lesser Spawning Cyst from the start)");
                 _harvesterExitTowardPatch = config["harvester_exit_toward_patch"]?.Value<bool>() ?? false;
                 if (_harvesterExitTowardPatch)
                     MelonLogger.Msg("[CONFIG] Harvester exit toward patch: harvesters leave the refinery through the ramp facing their Balterium patch");
@@ -1394,6 +1397,7 @@ namespace Si_UnitBalance
     ""alien_queens_max"": -1,
     ""no_refinery_sell_refund"": false,
     ""harvester_exit_toward_patch"": false,
+    ""alien_starter_biocache"": false,
     ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
     ""tech_time"": { ""tier_1"": 60, ""tier_2"": 60, ""tier_3"": 60, ""tier_4"": 60, ""tier_5"": 60, ""tier_6"": 60, ""tier_7"": 60, ""tier_8"": 60 },
     ""tech_cost"": { ""tier_1"": -1, ""tier_2"": -1, ""tier_3"": -1, ""tier_4"": -1, ""tier_5"": -1, ""tier_6"": -1, ""tier_7"": -1, ""tier_8"": -1 },

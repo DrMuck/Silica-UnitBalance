@@ -51,6 +51,7 @@ namespace Si_UnitBalance
                 _watchdogGeneration++;
                 _watchdogFired = false;
                 _lastMapName = GetCurrentMapName();
+                StarterCacheResetRound();
                 MelonLogger.Msg($"[UnitBalance] Game init ({_lastMapName})");
             }
         }
@@ -75,6 +76,7 @@ namespace Si_UnitBalance
                     MelonLogger.Msg("[UnitBalance] Game restart (same map)");
                 }
                 _overridesApplied = false;
+                StarterCacheResetRound();
                 OMVerifyProbe("game-restart");
             }
         }
@@ -733,6 +735,9 @@ namespace Si_UnitBalance
 
                 // Apply per-faction decay enable/disable (needs teams to be initialized)
                 ApplyDecayTeamSettings();
+
+                // alien_starter_biocache: fallback when the base-spawn bracket did not run (one per team, never twice)
+                StarterCacheEnsureAll("game start");
 
                 MelonLogger.Msg($"[UnitBalance] Game started — propagation complete");
 

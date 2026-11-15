@@ -310,6 +310,7 @@ namespace Si_UnitBalance
             CompareBoolSetting("alien_queen_logistics_per_nest", "Queen Logistics per Nest", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("no_refinery_sell_refund", "No Refinery Sell Refund", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("harvester_exit_toward_patch", "Harvester Exit Toward Patch", defaultCfg, activeCfg, lastPushCfg, changes);
+            CompareBoolSetting("alien_starter_biocache", "Alien Starter Bio Cache", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("health_mult_enabled", "Health Mult (server-only)", defaultCfg, activeCfg, lastPushCfg, changes);
         }
 

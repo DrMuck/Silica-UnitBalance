@@ -9,6 +9,7 @@
     "alien_queens_max": -1,
     "no_refinery_sell_refund": false,
     "harvester_exit_toward_patch": false,
+    "alien_starter_biocache": false,
     "player_infantry_ignore_cap": false,
     "player_cap_exempt_buffer": 3,
     "count_caps": {

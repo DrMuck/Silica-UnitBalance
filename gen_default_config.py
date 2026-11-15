@@ -590,6 +590,7 @@ config = {
     "alien_queens_max": -1,
     "no_refinery_sell_refund": False,
     "harvester_exit_toward_patch": False,
+    "alien_starter_biocache": False,  # hidden Bio Cache 50 m under each Alien starter Nest: Lesser Spawning Cyst from the start
     "player_infantry_ignore_cap": False,  # Sol/Centauri: player-controlled soldiers free the Secondary cap (UnitCapValue window, synced to clients)
     "player_cap_exempt_buffer": 3,        # cap points kept free below the enhanced cap so a burst of queued builds cannot pass it (min 2)
     "count_caps": {

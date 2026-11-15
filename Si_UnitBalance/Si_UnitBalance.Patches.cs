@@ -1185,6 +1185,7 @@ namespace Si_UnitBalance
                     _unitCapMult3Way = -1;
                     ApplyUnitCapMultiplier("rebalance default");
                     ScheduleUnitCapRecount("rebalance default"); // UnitCapValue went back to vanilla
+                    StarterCacheRemoveAll("!rebalance default"); // vanilla has no hidden Bio Cache
                     _spawnCooldowns.Clear();
                     OMVerifyInvalidate("reverted by !rebalance default");
                     MelonLogger.Msg("[Rebalance] Vanilla defaults restored. Use !rebalance to reload config.");
@@ -1215,6 +1216,9 @@ namespace Si_UnitBalance
 
                     ApplyUnitCapMultiplier("rebalance");
                     ScheduleUnitCapRecount("rebalance"); // cap counts were made with the reverted values
+                    // alien_starter_biocache follows the reloaded config (never a second one this round)
+                    if (_alienStarterBioCache) StarterCacheEnsureAll("rebalance");
+                    else StarterCacheRemoveAll("rebalance: off in the config");
 
                     // 4.5 Propagate overrides to already-spawned units in the scene
                     // (OM only modifies prefab data — live instances have independent component copies)
@@ -1744,7 +1748,7 @@ namespace Si_UnitBalance
 
                 // ── HTP Menu ──────────────────────────────────────────
                 case MenuLevel.HTPMenu:
-                    if (selection < 1 || selection > 7) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-7.</color>"); return; }
+                    if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
                     if (selection == 1) state.Level = MenuLevel.HTPHoverbike;
                     else if (selection == 2) state.Level = MenuLevel.HTPTier;
                     else if (selection == 3) state.Level = MenuLevel.HTPTeleport;
@@ -1784,6 +1788,12 @@ namespace Si_UnitBalance
                         string steamId3 = GetPlayerSteamId(player);
                         WriteAuditLog(playerName3, steamId3, "htp", "watchdog_enabled", (!_watchdogEnabled).ToString(), _watchdogEnabled.ToString());
                         MelonLogger.Msg($"[BAL] {playerName3} ({steamId3}): watchdog_enabled -> {_watchdogEnabled}");
+                    }
+                    else if (selection == 8)
+                    {
+                        // Toggle the hidden Alien starter Bio Cache (AlienBioCache.cs; shared with "!b biocache on|off")
+                        AlienCacheSetEnabled(player, !_alienStarterBioCache);
+                        SendChatToPlayer(player, _chatPrefix + AlienCacheStatusLine() + " " + _dimColor + "(immediate)</color>");
                     }
                     break;
 
@@ -2208,6 +2218,7 @@ namespace Si_UnitBalance
                     try { PropagateToLiveInstances(); }
                     catch (Exception pex) { MelonLogger.Warning("[BASESPAWN] propagation threw: " + pex.Message); }
                     ProbeLiveFoW("after-base-spawn");
+                    StarterCacheEnsureAll("base spawn"); // alien_starter_biocache (no-op when off)
                     try { MelonCoroutines.Start(SyncOverridesToAllPlayers(0.5f)); }
                     catch (Exception sex) { MelonLogger.Warning("[BASESPAWN] sync threw: " + sex.Message); }
                 }

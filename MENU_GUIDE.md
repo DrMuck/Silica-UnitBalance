@@ -49,7 +49,8 @@ Root
 │   ├── 4. Shrimp Aim    [ON/OFF toggle]
 │   ├── 5. Additional Spawn [ON/OFF]
 │   ├── 6. Discord        (auto-post + webhook URL)
-│   └── 7. Watchdog [ON/OFF]    (round-transition stall recovery)
+│   ├── 7. Watchdog [ON/OFF]    (round-transition stall recovery)
+│   └── 8. Alien Starter Bio Cache [ON/OFF]   (hidden Bio Cache 50 m under the starter Nest: Lesser Spawning Cyst from the start; immediate; also "!b biocache on|off|status")
 ├── 6. Cap&Decay   →  unit cap · structure decay · count caps
 │   ├── 1. Decay         →  1. Human · 2. Alien   →  enable, keep_production, delay, tick, amount_pct, randomize_pct
 │   ├── 2. Player Cap Exempt [ON/OFF]  →  1. Exemption [ON/OFF] · 2. Buffer = <points> (.2 <points>, 1..10, default 1) · Live line per Sol/Centauri team (in use / held / ACTIVE or INACTIVE + reason)

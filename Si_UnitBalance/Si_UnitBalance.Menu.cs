@@ -945,6 +945,15 @@ namespace Si_UnitBalance
                 return;
             }
 
+            // "!b biocache ..." → stateless Alien starter Bio Cache switch (ModUI row, chat); leaves the menu state alone
+            const string bioCacheWord = "biocache";
+            if (extraArgs.StartsWith(bioCacheWord, StringComparison.OrdinalIgnoreCase)
+                && (extraArgs.Length == bioCacheWord.Length || extraArgs[bioCacheWord.Length] == ' '))
+            {
+                OnAlienCacheCommand(player, extraArgs.Substring(bioCacheWord.Length).Trim());
+                return;
+            }
+
             // "!b exit" → close
             if (extraArgs.Equals("exit", StringComparison.OrdinalIgnoreCase))
             {
@@ -2083,6 +2092,8 @@ namespace Si_UnitBalance
                     string watchdogStatus = _watchdogEnabled ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "5.</color> Additional Spawn [" + spawnStatus + "]  " + _itemColor + "6.</color> Discord");
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]");
+                    string bioCacheStatus = _alienStarterBioCache ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "8.</color> Alien Starter Bio Cache [" + bioCacheStatus + "] " + _dimColor + "(hidden Bio Cache 50 m under the starter Nest: Lesser Spawning Cyst from the start)</color>");
                     break;
                 }
 

@@ -4,6 +4,22 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-15 — Alien starter Bio Cache switch (v7.16.0)
+
+New switch `alien_starter_biocache` (default off; HTP menu `!b` > 5 > 8, stateless `!b biocache [status|on|off]`,
+ModUI row "Alien starter Bio Cache" in "Alien rules"). When on, every Alien team that has a starter Nest gets one
+finished Bio Cache spawned 50 m straight below that Nest at round start (base-spawn bracket, GameStarted fallback).
+`ConstructionData_Alien_LesserSpawningCyst.MustHaveObjects` is [Bio Cache], checked through `Team.GetHasStructure`
+on the server and by the client's build menu, so a Lesser Spawning Cyst can be built from the first second.
+- **Neutralised on the server, per instance:** its `ResourceDepositPoints` list is emptied (the Nest has no deposit
+  point, a Bio Cache's has no AI entry points, so Shrimps would otherwise all be sent to drop off 50 m underground
+  and the vanilla AI commander would see a working economy and never build its first Bio Cache), and
+  `Target.SetDetectable(false)` keeps every enemy sensor from detecting or targeting it. Its 4000 storage is kept.
+- **One per team:** base spawn, game start and `!rebalance` never add a second one in a round, not even after it
+  was destroyed; only switching it off and on again spawns a replacement. Removed (stored resources go to the team
+  bank) when the switch goes off, on `!rebalance default`, and when the starter Nest above it is destroyed.
+- Log tag `[ALIENCACHE]`.
+
 ## 2026-11-15 — `!rebalance` re-applies unit caps and decay (v7.15.1)
 
 `OnRebalanceCommand` carried its own copy of the apply steps, which lacked `ApplyUnitCapOverrides` and

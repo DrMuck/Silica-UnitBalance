@@ -99,7 +99,8 @@ namespace Si_UnitBalance
                     }
                 }
                 if (_hudBrowseJson == null) return _hudDoc;
-                string docKey = _hudBrowseKey + "|" + (_enabled ? 1 : 0) + "|" + (_playerInfantryIgnoreCap ? 1 : 0) + "|" + _playerCapExemptBuffer;
+                string docKey = _hudBrowseKey + "|" + (_enabled ? 1 : 0) + "|" + (_playerInfantryIgnoreCap ? 1 : 0) + "|" + _playerCapExemptBuffer
+                    + "|" + (_alienStarterBioCache ? 1 : 0);
                 if (_hudDoc != null && docKey == _hudDocKey) return _hudDoc;
                 _hudDoc = "{\"enabled\":" + (_enabled ? "true" : "false") + ",\"browse\":" + _hudBrowseJson
                     + ",\"commands\":" + JsonConvert.SerializeObject(BuildHudCommands(), Formatting.None) + "}";
@@ -137,7 +138,9 @@ namespace Si_UnitBalance
                     ["v"] = _playerInfantryIgnoreCap ? "on" : "off", ["ch"] = new JArray(new JArray("on", "ON"), new JArray("off", "OFF")) },
                 new JObject { ["t"] = "!b capexempt buffer", ["l"] = "Buffer (cap points)", ["d"] = "Cap points kept free below the raised cap, 1 to 10; 1 uses it fully.", ["a"] = true, ["g"] = pce,
                     ["v"] = _playerCapExemptBuffer.ToString(CultureInfo.InvariantCulture) },
-                new JObject { ["t"] = "!b capexempt status", ["l"] = "Live status", ["d"] = "Shows cap points in use and the exemption state of every team in play.", ["a"] = true, ["g"] = pce, ["i"] = true }
+                new JObject { ["t"] = "!b capexempt status", ["l"] = "Live status", ["d"] = "Shows cap points in use and the exemption state of every team in play.", ["a"] = true, ["g"] = pce, ["i"] = true },
+                new JObject { ["t"] = "!b biocache", ["l"] = "Alien starter Bio Cache", ["d"] = "A hidden Bio Cache 50 m under each Alien starter Nest, so a Lesser Spawning Cyst can be built from the start. Applies at once.", ["a"] = true, ["g"] = "Alien rules",
+                    ["v"] = _alienStarterBioCache ? "on" : "off", ["ch"] = new JArray(new JArray("on", "ON"), new JArray("off", "OFF")) }
             };
         }
 
@@ -428,6 +431,7 @@ namespace Si_UnitBalance
                     if (root["alien_queens_max"] != null) rows.Add(Row("Max Queens", Num(root["alien_queens_max"]) == "-1" ? "vanilla" : Num(root["alien_queens_max"]) == "0" ? "one per Nest" : Num(root["alien_queens_max"])));
                     if (root["alien_queen_logistics_per_nest"] != null) rows.Add(Row("Queen logistics per Nest", Num(root["alien_queen_logistics_per_nest"]), "off"));
                     if (root["shrimp_disable_aim"] != null) rows.Add(Row("Shrimps do not shoot", Num(root["shrimp_disable_aim"]), "off"));
+                    if (root["alien_starter_biocache"] != null) rows.Add(Row("Hidden Bio Cache under the starter Nest", Num(root["alien_starter_biocache"]), "off"));
                     Group("Alien rules", rows);
                 }
                 {
