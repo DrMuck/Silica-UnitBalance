@@ -82,6 +82,68 @@ namespace Si_UnitBalance
 
         private static readonly Dictionary<int, DynCapTeamState> _dynCap = new Dictionary<int, DynCapTeamState>();
         private static bool _inDynCapRecompute; // re-entrancy guard: our own UpdateUnitCapValues calls skip evaluation
+        private static float _dynCapHoldUntil = -1f; // realtime: no evaluation before this (rebalance, queue not drained)
+
+        /// <summary>
+        /// After !rebalance: Team.UnitCapEntries[].Current is a cached sum of UnitCapValue, recounted
+        /// only on a unit/queue change (server and every client). The revert + re-apply changed the
+        /// values under it, so the cap shown and enforced stayed stale until the team's next change.
+        /// Once OverrideManager's queue drained (the re-applied values are on the assets), recount every
+        /// team on the server (Team.UpdateUnitCapValues, which also re-evaluates Player Cap Exempt through
+        /// the normal postfix), then, after the delayed client sync has reached every player, nudge the
+        /// clients to recount (the same CONSTRUCT_DEQUEUE 255 nudge Player Cap Exempt uses).
+        /// </summary>
+        private static void ScheduleUnitCapRecount(string why)
+        {
+            try
+            {
+                _dynCapHoldUntil = Time.realtimeSinceStartup + 5f;
+                int players = 0;
+                try { var pl = Player.Players; if (pl != null) players = Math.Max(0, pl.Count - 1); } catch { }
+                // SyncOverridesToAllPlayers(0.5 s) sends one player every 0.5 s; nudge after the last one.
+                float clientDelay = 1f + 0.5f * players;
+                MelonCoroutines.Start(UnitCapRecountAfterDrain(why, clientDelay));
+            }
+            catch (Exception ex)
+            {
+                _dynCapHoldUntil = -1f;
+                MelonLogger.Warning($"[UNITCAP] {why}: recount not scheduled: {ex.Message}");
+            }
+        }
+
+        private static IEnumerator UnitCapRecountAfterDrain(string why, float clientDelay)
+        {
+            float started = Time.realtimeSinceStartup;
+            for (int i = 0; i < 120; i++)
+            {
+                yield return null;
+                if (OMQueuesEmpty() != false) break; // drained (or cannot tell: one frame is enough for OM.Update)
+            }
+            _dynCapHoldUntil = -1f;
+            int teams = 0;
+            try
+            {
+                foreach (var team in Team.Teams)
+                {
+                    if (team == null) continue;
+                    try { team.UpdateUnitCapValues(); teams++; }
+                    catch (Exception tex) { MelonLogger.Warning($"[UNITCAP] {why}: recount of {team.TeamShortName} failed: {tex.Message}"); }
+                }
+                MelonLogger.Msg($"[UNITCAP] {why}: recounted unit caps for {teams} team(s) on the server, client recount in {Math.Max(0f, clientDelay - (Time.realtimeSinceStartup - started)):F1} s");
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[UNITCAP] {why}: server recount failed: {ex.Message}"); }
+
+            float wait = clientDelay - (Time.realtimeSinceStartup - started);
+            if (wait > 0f) yield return new WaitForSeconds(wait);
+            int nudged = 0;
+            try
+            {
+                foreach (var team in Team.Teams)
+                    if (team != null && DynCapNudgeClients(team)) nudged++;
+                MelonLogger.Msg($"[UNITCAP] {why}: client recount nudged for {nudged} team(s)");
+            }
+            catch (Exception ex) { MelonLogger.Warning($"[UNITCAP] {why}: client recount nudge failed: {ex.Message}"); }
+        }
 
         /// <summary>Sol/Centauri: the base structure prefab carries a HumanStructure component.</summary>
         private static bool DynCapIsHumanTeam(Team team)
@@ -347,6 +409,11 @@ namespace Si_UnitBalance
         {
             if (!_playerInfantryIgnoreCap || team == null || _inDynCapRecompute) return;
             if (!Game.GetIsServer()) return;
+            // !rebalance: the re-applied UnitCapValue overrides sit in OverrideManager's queue until the
+            // next Update. An OPEN in that gap would record the reverted vanilla values as "originals"
+            // and the queued set would then overwrite the zeros. ScheduleUnitCapRecount re-evaluates
+            // once the queue drained (the hold also expires on its own after a few seconds).
+            if (Time.realtimeSinceStartup < _dynCapHoldUntil) return;
             try
             {
                 var st = DynCapState(team);

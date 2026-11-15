@@ -1184,6 +1184,7 @@ namespace Si_UnitBalance
                     _unitCapMult2Way = -1;
                     _unitCapMult3Way = -1;
                     ApplyUnitCapMultiplier("rebalance default");
+                    ScheduleUnitCapRecount("rebalance default"); // UnitCapValue went back to vanilla
                     _spawnCooldowns.Clear();
                     OMVerifyInvalidate("reverted by !rebalance default");
                     MelonLogger.Msg("[Rebalance] Vanilla defaults restored. Use !rebalance to reload config.");
@@ -1209,37 +1210,11 @@ namespace Si_UnitBalance
                     // Snapshot vanilla base values before overrides modify them
                     CacheVanillaBaseValues();
 
-                    ApplyConstructionDataOverrides(omReady);
-                    if (_healthMultEnabled)
-                    {
-                        ApplyHealthOverrides(omReady);
-                        ReclampLiveHealth();
-                    }
-                    ApplyProjectileDamageOverrides(omReady);
-                    ApplyProjectileTuningOverrides(omReady);
-                    ApplyAimCompensationOverrides();
-                    ApplyTurretPitchOverrides();
-                    ApplyRangeOverrides(omReady);
-                    ApplyTargetDistanceOverrides(omReady);
-                    ApplyFoWDistanceOverrides(omReady);
-                    ApplyJumpSpeedOverrides(omReady);
-                    ApplyVisibleEventRadiusOverrides(omReady);
-                    ApplyMoveSpeedOverrides(omReady);
-                    ApplyStrafeSpeedOverrides(omReady);
-                    ApplyTurnRadiusOverrides(omReady);
-                    ApplyTeleportOverrides(omReady);
-                    ApplyDispenserTimeoutOverrides(omReady);
-                    ApplyProximityDetonationOverrides();
-                    ApplyDepositRadiusOverrides(omReady);
-                    ApplyExtractionRadiusOverrides(omReady);
-
-                    if (_shrimpDisableAim)
-                        ApplyShrimpAimDisable();
-
-                    ApplyAlienNestOnlyBuild(omReady);
-                    ApplyAlienQueensMax();
+                    // Same step sequence as the round-start apply (incl. unit caps and decay since 7.15.1)
+                    ApplyOverrideSteps(omReady);
 
                     ApplyUnitCapMultiplier("rebalance");
+                    ScheduleUnitCapRecount("rebalance"); // cap counts were made with the reverted values
 
                     // 4.5 Propagate overrides to already-spawned units in the scene
                     // (OM only modifies prefab data — live instances have independent component copies)

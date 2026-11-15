@@ -511,6 +511,49 @@ namespace Si_UnitBalance
         }
 
         /// <summary>
+        /// THE apply step sequence, shared by ApplyOverridesLogic (round start / level load) and
+        /// !rebalance so the two cannot drift apart again (until 7.15.0 the rebalance copy lacked
+        /// ApplyUnitCapOverrides and ApplyDecayOverrides, so a rebalance left the unit-cap overrides
+        /// reverted until the next round start). Callers do everything around it: OMRevertAll,
+        /// RestoreDirectWrites, DMD registration, CacheVanillaBaseValues, live propagation, sync.
+        /// </summary>
+        private static void ApplyOverrideSteps(bool omReady)
+        {
+                    ApplyConstructionDataOverrides(omReady);
+                    if (_healthMultEnabled)
+                    {
+                        ApplyHealthOverrides(omReady);
+                        ReclampLiveHealth();
+                    }
+                    ApplyProjectileDamageOverrides(omReady);
+                    ApplyProjectileTuningOverrides(omReady);
+                    ApplyAimCompensationOverrides();
+                    ApplyTurretPitchOverrides();
+                    ApplyRangeOverrides(omReady);
+                    ApplyTargetDistanceOverrides(omReady);
+                    ApplyFoWDistanceOverrides(omReady);
+                    ApplyJumpSpeedOverrides(omReady);
+                    ApplyVisibleEventRadiusOverrides(omReady);
+                    ApplyMoveSpeedOverrides(omReady);
+                    ApplyStrafeSpeedOverrides(omReady);
+                    ApplyTurnRadiusOverrides(omReady);
+                    ApplyTeleportOverrides(omReady);
+                    ApplyDispenserTimeoutOverrides(omReady);
+                    ApplyProximityDetonationOverrides();
+                    ApplyUnitCapOverrides(omReady);
+                    ApplyDepositRadiusOverrides(omReady);
+                    ApplyExtractionRadiusOverrides(omReady);
+
+                    if (_shrimpDisableAim)
+                        ApplyShrimpAimDisable();
+
+                    ApplyAlienNestOnlyBuild(omReady);
+                    ApplyAlienQueensMax();
+
+                    ApplyDecayOverrides();
+        }
+
+        /// <summary>
         /// Apply all overrides to prefab/asset data. Called during voting phase
         /// (OnGameRestart) so overrides are active before starter units spawn.
         /// Safe to call multiple times — skips if already applied.
@@ -627,38 +670,7 @@ namespace Si_UnitBalance
                 if (_vanillaBaseCache.Count == 0)
                     CacheVanillaBaseValues();
 
-                ApplyConstructionDataOverrides(omReady);
-                if (_healthMultEnabled)
-                {
-                    ApplyHealthOverrides(omReady);
-                    ReclampLiveHealth();
-                }
-                ApplyProjectileDamageOverrides(omReady);
-                ApplyProjectileTuningOverrides(omReady);
-                ApplyAimCompensationOverrides();
-                ApplyTurretPitchOverrides();
-                ApplyRangeOverrides(omReady);
-                ApplyTargetDistanceOverrides(omReady);
-                ApplyFoWDistanceOverrides(omReady);
-                ApplyJumpSpeedOverrides(omReady);
-                ApplyVisibleEventRadiusOverrides(omReady);
-                ApplyMoveSpeedOverrides(omReady);
-                ApplyStrafeSpeedOverrides(omReady);
-                ApplyTurnRadiusOverrides(omReady);
-                ApplyTeleportOverrides(omReady);
-                ApplyDispenserTimeoutOverrides(omReady);
-                ApplyProximityDetonationOverrides();
-                ApplyUnitCapOverrides(omReady);
-                ApplyDepositRadiusOverrides(omReady);
-                ApplyExtractionRadiusOverrides(omReady);
-
-                if (_shrimpDisableAim)
-                    ApplyShrimpAimDisable();
-
-                ApplyAlienNestOnlyBuild(omReady);
-                ApplyAlienQueensMax();
-
-                ApplyDecayOverrides();
+                ApplyOverrideSteps(omReady);
 
                 _overridesApplied = true;
 

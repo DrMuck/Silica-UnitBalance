@@ -4,6 +4,21 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-15 — `!rebalance` re-applies unit caps and decay (v7.15.1)
+
+`OnRebalanceCommand` carried its own copy of the apply steps, which lacked `ApplyUnitCapOverrides` and
+`ApplyDecayOverrides`: after a rebalance the `unit_cap` overrides stayed reverted (staging: 601 enabled OM members
+instead of 620) until the next round-start apply, and decay parameter edits waited for the next round.
+- **One step list.** The step sequence moved into `ApplyOverrideSteps(omReady)`, called by `ApplyOverridesLogic`
+  and by `!rebalance`; the order is the round-start order. Everything around it (revert, direct-write restore,
+  cache clears, vanilla base cache, cap multiplier, live propagation, sync, [OMVERIFY], Discord) is unchanged.
+- **Unit-cap recount after a rebalance.** `UnitCapEntry.Current` is a cached sum recounted only on a unit/queue
+  change, on the server and on every client, so the cap stayed counted with the old values. Once OverrideManager's
+  queue drained, every team is recounted on the server (`Team.UpdateUnitCapValues`, which also lets Player Cap
+  Exempt re-evaluate), and after the delayed client sync the clients get the CONSTRUCT_DEQUEUE recount nudge.
+  Player Cap Exempt does not evaluate until that drain (at most 5 s), so a window cannot open on the reverted
+  values. Also after `!rebalance default`.
+
 ## 2026-11-14 — Round-start apply: one scan, one postfix, no compounding, [OMVERIFY] read-back (v7.15.0)
 
 Stage 1 of making the per-round revert + re-apply cheaper. The sequence itself (GameRestart clears
