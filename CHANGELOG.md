@@ -4,6 +4,34 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-17 — Alien starter node lines (v7.17.0)
+
+New setting `alien_starter_node_lines` (int 0-6, default 0 = off; HTP menu `!b` > 5 > 9 with `.1 <n>`, stateless
+`!b nodelines [status|off|0-6]`, ModUI row "Alien starter node lines" in "Alien rules", Discord diff line) and the
+JSON-only `alien_starter_node_lines_max_m` (default 600). Human teams can place a refinery at their Balterium from the
+first second; an Alien commander first has to chain Nodes to the Biotics. With N > 0 every Alien team in play gets
+finished Nodes from its starter Nest towards its N closest Biotics patches, 2 s after the round started (after
+Si_MapBalance's round-start work, before Si_StarterUnits' +5 s spawn), so a Bio Cache and a Lesser Spawning Cyst can
+be placed at those patches from the start.
+- **Game rules reused, not re-invented:** a Node spawned with `Game.SpawnPrefab` is what a finished construction
+  spawns; `AlienStructure.InitLink` links it to the Nest / previous node. Every node position is grounded the way
+  vanilla placement does it (ray from 1500 m, grid snap, `GetSnappedRotation` per 90° yaw, `adjustY`) and passes the
+  server's own area test (`GetGroundSlopeClear` incl. the perch rule, `GetObstructed`: structures, sites, Biotics with
+  resources, units, props). Each hop is checked with the game's anchor distance (placement and link form) against the
+  node it hangs on; reach values and half-extents are read live (after overrides) and printed in the summary.
+- **Lines:** patches nearest first; each attaches to the nearest member of the network laid so far (Nest or a starter
+  node), so lines share trunks. A patch is tapped when a member is a legal Bio Cache anchor for the spot just outside
+  the patch edge (a patch already in reach counts and needs no node). Hop = Node reach − 2 × node half-extent; a blocked
+  hop sidesteps (±15…60 m) or shortens; the last node stays clear of the Bio Cache spot; a line that cannot continue
+  ends there and is logged. No backfill: exactly the N closest patches are considered.
+- **Skipped patches (logged):** Bio Cache spot more than `alien_starter_node_lines_max_m` from the Nest, beyond
+  `alien_nest_reach_radius` when that is set, or nearer to another team's base structure than to the Nest. With
+  `alien_nest_only_build` on, nothing is laid (Nodes are no anchors then and could not link to each other).
+- **Once per round:** never re-laid by `!rebalance`, never removed (not on switch-off, not on `!rebalance default`);
+  the nodes are ordinary structures. A changed N applies from the next round.
+- Log tag `[NODELINES]`: one summary per team plus one line per patch and per node, read-back at t+5 s (alive, linked
+  to the Nest, anchors, and a Bio Cache placement probe per tapped patch) and at t+60 s.
+
 ## 2026-11-15 — Alien starter Bio Cache switch (v7.16.0)
 
 New switch `alien_starter_biocache` (default off; HTP menu `!b` > 5 > 8, stateless `!b biocache [status|on|off]`,

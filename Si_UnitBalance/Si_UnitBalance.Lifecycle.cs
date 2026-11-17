@@ -52,6 +52,7 @@ namespace Si_UnitBalance
                 _watchdogFired = false;
                 _lastMapName = GetCurrentMapName();
                 StarterCacheResetRound();
+                NodeLinesResetRound();
                 MelonLogger.Msg($"[UnitBalance] Game init ({_lastMapName})");
             }
         }
@@ -77,6 +78,7 @@ namespace Si_UnitBalance
                 }
                 _overridesApplied = false;
                 StarterCacheResetRound();
+                NodeLinesResetRound();
                 OMVerifyProbe("game-restart");
             }
         }
@@ -738,6 +740,9 @@ namespace Si_UnitBalance
 
                 // alien_starter_biocache: fallback when the base-spawn bracket did not run (one per team, never twice)
                 StarterCacheEnsureAll("game start");
+
+                // alien_starter_node_lines: laid once, 2 s later (after Si_MapBalance's round-start work)
+                NodeLinesScheduleRound("game start");
 
                 MelonLogger.Msg($"[UnitBalance] Game started — propagation complete");
 

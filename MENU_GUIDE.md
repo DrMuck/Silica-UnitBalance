@@ -50,7 +50,8 @@ Root
 │   ├── 5. Additional Spawn [ON/OFF]
 │   ├── 6. Discord        (auto-post + webhook URL)
 │   ├── 7. Watchdog [ON/OFF]    (round-transition stall recovery)
-│   └── 8. Alien Starter Bio Cache [ON/OFF]   (hidden Bio Cache 50 m under the starter Nest: Lesser Spawning Cyst from the start; immediate; also "!b biocache on|off|status")
+│   ├── 8. Alien Starter Bio Cache [ON/OFF]   (hidden Bio Cache 50 m under the starter Nest: Lesser Spawning Cyst from the start; immediate; also "!b biocache on|off|status")
+│   └── 9. Alien Starter Node Lines = N        (Nodes from the starter Nest to the N closest Biotics, 0-6; .1 <n>; next round; also "!b nodelines 0-6|off|status")
 ├── 6. Cap&Decay   →  unit cap · structure decay · count caps
 │   ├── 1. Decay         →  1. Human · 2. Alien   →  enable, keep_production, delay, tick, amount_pct, randomize_pct
 │   ├── 2. Player Cap Exempt [ON/OFF]  →  1. Exemption [ON/OFF] · 2. Buffer = <points> (.2 <points>, 1..10, default 1) · Live line per Sol/Centauri team (in use / held / ACTIVE or INACTIVE + reason)
@@ -143,6 +144,7 @@ The mod has a `PropagateToLiveInstances` pass on game start (and during `!rebala
 | **Alien Nest Finished-Anchor Only (Strategystyle /4)** | ✅ immediate (checked on every Nest placement; commander gets chat warning + sound) | ✅ | ✅ |
 | **No Refinery Sell Refund (Strategystyle /6)** | ✅ immediate (checked on every deconstruct tick, also for refineries already being sold; commander gets a chat notice) | ✅ | ✅ |
 | **Harvester Exit Toward Patch (Strategystyle /7)** | ✅ immediate (checked at every undock and every refinery harvester spawn) | ✅ | ✅ |
+| **Alien Starter Node Lines (HTP /9)** | ❌ the running round keeps its lines (never re-laid, never removed) | ❌ (`!rebalance` never lays lines) | ✅ laid 2 s after the round starts |
 
 **Rule of thumb:** if you want guaranteed-fresh values, **start a new round** after `!rebalance`. That's the cleanest "everything is the new version" state.
 

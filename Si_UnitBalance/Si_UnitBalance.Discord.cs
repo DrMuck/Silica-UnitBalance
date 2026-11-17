@@ -302,6 +302,18 @@ namespace Si_UnitBalance
                 }
             }
 
+            // Alien starter node lines (0 = off)
+            {
+                int av = ClampNodeLines(activeCfg["alien_starter_node_lines"]?.Value<int>() ?? 0);
+                int dv = ClampNodeLines(defaultCfg["alien_starter_node_lines"]?.Value<int>() ?? 0);
+                if (av != dv)
+                {
+                    int lastVal = ClampNodeLines(lastPushCfg?["alien_starter_node_lines"]?.Value<int>() ?? dv);
+                    changes.Add(new BalanceChange("Global Settings", "Alien Starter Node Lines", "alien_starter_node_lines",
+                        FmtNodeLines(dv), FmtNodeLines(av), av != lastVal));
+                }
+            }
+
             // Bool toggles
             CompareBoolSetting("additional_spawn", "Additional Spawn", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("shrimp_disable_aim", "Shrimp Disable Aim", defaultCfg, activeCfg, lastPushCfg, changes);

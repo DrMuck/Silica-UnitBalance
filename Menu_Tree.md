@@ -178,7 +178,8 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
 │   ├── 5. Additional Spawn [ON/OFF] ...... additional_spawn (next game)
 │   ├── 6. Discord ........................ auto-post toggle + webhook URL
 │   ├── 7. Watchdog [ON/OFF] .............. watchdog_enabled
-│   └── 8. Alien Starter Bio Cache [ON/OFF]  alien_starter_biocache (immediate: spawns / removes the hidden Bio Cache 50 m under each Alien starter Nest; stateless form "!b biocache [status|on|off]", ModUI row)
+│   ├── 8. Alien Starter Bio Cache [ON/OFF]  alien_starter_biocache (immediate: spawns / removes the hidden Bio Cache 50 m under each Alien starter Nest; stateless form "!b biocache [status|on|off]", ModUI row)
+│   └── 9. Alien Starter Node Lines = N ... alien_starter_node_lines (0-6, 0 = off; next round: finished Nodes from each Alien starter Nest to its N closest Biotics; .1 <n> sets it; JSON-only alien_starter_node_lines_max_m = 600; stateless form "!b nodelines [status|off|0-6]", ModUI row)
 ├── 6. Cap&Decay (unit cap · structure decay · count caps)
 │   ├── 1. Decay .......................... 1. Human · 2. Alien → enable, keep_production, delay, tick, amount_pct, randomize_pct
 │   ├── 2. Player Cap Exempt [ON/OFF] ..... 1. Exemption → player_infantry_ignore_cap (immediate) · 2. Buffer = <points> → player_cap_exempt_buffer (.2 <points>, 1..10, default 1, immediate; start margin: player_cap_exempt_lead, JSON only, default 5) · Live line per Sol/Centauri team

@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.16.0", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.17.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -127,7 +127,7 @@ namespace Si_UnitBalance
         // Per-player menu state for !b command (keyed by SteamID for stable identity across Il2Cpp wrappers)
         private static readonly Dictionary<long, BalanceMenuState> _menuStates = new Dictionary<long, BalanceMenuState>();
 
-        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTierTime, HTPTierCost, HTPTeleport, HTPDecay, HTPDecayFaction, HTPUnitCap, DiscordMenu, CapDecayMenu, CountCap, NestReach, QueensMax, StrategyMenu, PlayerCapExempt }
+        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTierTime, HTPTierCost, HTPTeleport, HTPDecay, HTPDecayFaction, HTPUnitCap, DiscordMenu, CapDecayMenu, CountCap, NestReach, QueensMax, StrategyMenu, PlayerCapExempt, NodeLines }
         // HTPDecay* / HTPUnitCap live under Cap&Decay (root 6) since v7.4.0; enum names kept for the save/audit plumbing.
         private class BalanceMenuState
         {
@@ -428,7 +428,7 @@ namespace Si_UnitBalance
             }
             catch (Exception ex) { MelonLogger.Warning($"Failed to subscribe to OnStartUnloadingLevel: {ex.Message}"); }
 
-            MelonLogger.Msg($"Unit Balance v7.16.0 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.17.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -944,6 +944,11 @@ namespace Si_UnitBalance
                 _alienStarterBioCache = config["alien_starter_biocache"]?.Value<bool>() ?? false;
                 if (_alienStarterBioCache)
                     MelonLogger.Msg($"[CONFIG] Alien starter Bio Cache: one hidden Bio Cache {AlienBioCacheDepth:F0} m below each Alien starter Nest (Lesser Spawning Cyst from the start)");
+                _alienStarterNodeLines = ClampNodeLines(config["alien_starter_node_lines"]?.Value<int>() ?? 0);
+                _alienStarterNodeLinesMaxM = config["alien_starter_node_lines_max_m"]?.Value<float>() ?? NodeLinesMaxMDefault;
+                if (_alienStarterNodeLinesMaxM < 50f) _alienStarterNodeLinesMaxM = NodeLinesMaxMDefault;
+                if (_alienStarterNodeLines > 0)
+                    MelonLogger.Msg($"[CONFIG] Alien starter node lines: Nodes from each starter Nest to its {_alienStarterNodeLines} closest Biotics (max {_alienStarterNodeLinesMaxM:F0} m from the Nest), from the next round start");
                 _harvesterExitTowardPatch = config["harvester_exit_toward_patch"]?.Value<bool>() ?? false;
                 if (_harvesterExitTowardPatch)
                     MelonLogger.Msg("[CONFIG] Harvester exit toward patch: harvesters leave the refinery through the ramp facing their Balterium patch");
@@ -1398,6 +1403,8 @@ namespace Si_UnitBalance
     ""no_refinery_sell_refund"": false,
     ""harvester_exit_toward_patch"": false,
     ""alien_starter_biocache"": false,
+    ""alien_starter_node_lines"": 0,
+    ""alien_starter_node_lines_max_m"": 600,
     ""description"": ""Vanilla base config. All multipliers at 1.00 = no change. See Si_UnitBalance_Config_Default.json for comprehensive template with all units."",
     ""tech_time"": { ""tier_1"": 60, ""tier_2"": 60, ""tier_3"": 60, ""tier_4"": 60, ""tier_5"": 60, ""tier_6"": 60, ""tier_7"": 60, ""tier_8"": 60 },
     ""tech_cost"": { ""tier_1"": -1, ""tier_2"": -1, ""tier_3"": -1, ""tier_4"": -1, ""tier_5"": -1, ""tier_6"": -1, ""tier_7"": -1, ""tier_8"": -1 },

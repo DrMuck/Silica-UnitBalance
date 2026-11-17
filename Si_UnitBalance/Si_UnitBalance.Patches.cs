@@ -1556,6 +1556,8 @@ namespace Si_UnitBalance
                     state.Level = MenuLevel.CapDecayMenu;
                 else if (state.Level == MenuLevel.NestReach || state.Level == MenuLevel.QueensMax)
                     state.Level = MenuLevel.StrategyMenu;
+                else if (state.Level == MenuLevel.NodeLines)
+                    state.Level = MenuLevel.HTPMenu;
                 else
                     state.Level = (MenuLevel)((int)state.Level - 1);
                 ShowCurrentMenu(player, state);
@@ -1643,6 +1645,13 @@ namespace Si_UnitBalance
             if (state.Level == MenuLevel.QueensMax && !string.IsNullOrEmpty(arg2))
             {
                 HandleQueensMaxEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // HTP node lines edit: "/1 3" = lines to the 3 closest Biotics from the next round, "/1 0" = off
+            if (state.Level == MenuLevel.NodeLines && !string.IsNullOrEmpty(arg2))
+            {
+                HandleNodeLinesEdit(player, state, selection, arg2);
                 return;
             }
 
@@ -1748,7 +1757,7 @@ namespace Si_UnitBalance
 
                 // ── HTP Menu ──────────────────────────────────────────
                 case MenuLevel.HTPMenu:
-                    if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
+                    if (selection < 1 || selection > 9) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-9.</color>"); return; }
                     if (selection == 1) state.Level = MenuLevel.HTPHoverbike;
                     else if (selection == 2) state.Level = MenuLevel.HTPTier;
                     else if (selection == 3) state.Level = MenuLevel.HTPTeleport;
@@ -1794,6 +1803,10 @@ namespace Si_UnitBalance
                         // Toggle the hidden Alien starter Bio Cache (AlienBioCache.cs; shared with "!b biocache on|off")
                         AlienCacheSetEnabled(player, !_alienStarterBioCache);
                         SendChatToPlayer(player, _chatPrefix + AlienCacheStatusLine() + " " + _dimColor + "(immediate)</color>");
+                    }
+                    else if (selection == 9)
+                    {
+                        state.Level = MenuLevel.NodeLines;
                     }
                     break;
 
@@ -1926,6 +1939,10 @@ namespace Si_UnitBalance
 
                 case MenuLevel.QueensMax:
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <n> (.1 0 = every Nest gets a Queen, .1 3 = at most 3, .1 -1 = vanilla)</color>");
+                    return;
+
+                case MenuLevel.NodeLines:
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <n> (.1 3 = the 3 closest Biotics, .1 0 = off; max " + NodeLinesMax + ")</color>");
                     return;
 
                 case MenuLevel.HTPDecay:

@@ -954,6 +954,15 @@ namespace Si_UnitBalance
                 return;
             }
 
+            // "!b nodelines ..." → stateless Alien starter node lines setting (ModUI row, chat); leaves the menu state alone
+            const string nodeLinesWord = "nodelines";
+            if (extraArgs.StartsWith(nodeLinesWord, StringComparison.OrdinalIgnoreCase)
+                && (extraArgs.Length == nodeLinesWord.Length || extraArgs[nodeLinesWord.Length] == ' '))
+            {
+                OnNodeLinesCommand(player, extraArgs.Substring(nodeLinesWord.Length).Trim());
+                return;
+            }
+
             // "!b exit" → close
             if (extraArgs.Equals("exit", StringComparison.OrdinalIgnoreCase))
             {
@@ -2094,6 +2103,7 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Watchdog [" + watchdogStatus + "]");
                     string bioCacheStatus = _alienStarterBioCache ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "8.</color> Alien Starter Bio Cache [" + bioCacheStatus + "] " + _dimColor + "(hidden Bio Cache 50 m under the starter Nest: Lesser Spawning Cyst from the start)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "9.</color> Alien Starter Node Lines = " + _valueColor + FmtNodeLines(_alienStarterNodeLines) + "</color> " + _dimColor + "(Nodes from the starter Nest to the N closest Biotics; next round)</color>");
                     break;
                 }
 
@@ -2347,6 +2357,16 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> max = " + _valueColor + FmtQueensMax(_alienQueensMax) + "</color> " + _dimColor + "(Queens per team; every newly built Nest spawns a docked Queen while below max)</color>");
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Vanilla = 1 (only the starting Nest). Server-side, applies to Nests built after saving.</color>");
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 0 (every Nest) · .1 3 (at most 3) · .1 -1 (vanilla)</color>");
+                    break;
+                }
+
+                case MenuLevel.NodeLines:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "HTP > Alien Starter Node Lines</color> " + _dimColor + "(Nodes from the starter Nest to the closest Biotics)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> lines = " + _valueColor + FmtNodeLines(_alienStarterNodeLines) + "</color> " + _dimColor + "(N closest Biotics patches per Alien team, 0-" + NodeLinesMax + ")</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Finished Nodes are laid 2 s after the round starts so a Bio Cache + Lesser Cyst fit next to those patches. Patches more than "
+                        + _alienStarterNodeLinesMaxM.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m from the Nest (alien_starter_node_lines_max_m) or nearer to another base are skipped. Applies from the next round.</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 3 (three patches) · .1 0 (off)</color>");
                     break;
                 }
 

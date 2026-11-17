@@ -100,7 +100,7 @@ namespace Si_UnitBalance
                 }
                 if (_hudBrowseJson == null) return _hudDoc;
                 string docKey = _hudBrowseKey + "|" + (_enabled ? 1 : 0) + "|" + (_playerInfantryIgnoreCap ? 1 : 0) + "|" + _playerCapExemptBuffer
-                    + "|" + (_alienStarterBioCache ? 1 : 0);
+                    + "|" + (_alienStarterBioCache ? 1 : 0) + "|" + _alienStarterNodeLines;
                 if (_hudDoc != null && docKey == _hudDocKey) return _hudDoc;
                 _hudDoc = "{\"enabled\":" + (_enabled ? "true" : "false") + ",\"browse\":" + _hudBrowseJson
                     + ",\"commands\":" + JsonConvert.SerializeObject(BuildHudCommands(), Formatting.None) + "}";
@@ -140,7 +140,10 @@ namespace Si_UnitBalance
                     ["v"] = _playerCapExemptBuffer.ToString(CultureInfo.InvariantCulture) },
                 new JObject { ["t"] = "!b capexempt status", ["l"] = "Live status", ["d"] = "Shows cap points in use and the exemption state of every team in play.", ["a"] = true, ["g"] = pce, ["i"] = true },
                 new JObject { ["t"] = "!b biocache", ["l"] = "Alien starter Bio Cache", ["d"] = "A hidden Bio Cache 50 m under each Alien starter Nest, so a Lesser Spawning Cyst can be built from the start. Applies at once.", ["a"] = true, ["g"] = "Alien rules",
-                    ["v"] = _alienStarterBioCache ? "on" : "off", ["ch"] = new JArray(new JArray("on", "ON"), new JArray("off", "OFF")) }
+                    ["v"] = _alienStarterBioCache ? "on" : "off", ["ch"] = new JArray(new JArray("on", "ON"), new JArray("off", "OFF")) },
+                new JObject { ["t"] = "!b nodelines", ["l"] = "Alien starter node lines", ["d"] = "Finished Nodes from each Alien starter Nest to its N closest Biotics patches, so a Bio Cache and a Lesser Spawning Cyst fit there from the start. Applies from the next round.", ["a"] = true, ["g"] = "Alien rules",
+                    ["v"] = _alienStarterNodeLines.ToString(CultureInfo.InvariantCulture),
+                    ["ch"] = new JArray(new JArray("0", "OFF"), new JArray("1", "1"), new JArray("2", "2"), new JArray("3", "3"), new JArray("4", "4"), new JArray("5", "5"), new JArray("6", "6")) }
             };
         }
 
@@ -432,6 +435,7 @@ namespace Si_UnitBalance
                     if (root["alien_queen_logistics_per_nest"] != null) rows.Add(Row("Queen logistics per Nest", Num(root["alien_queen_logistics_per_nest"]), "off"));
                     if (root["shrimp_disable_aim"] != null) rows.Add(Row("Shrimps do not shoot", Num(root["shrimp_disable_aim"]), "off"));
                     if (root["alien_starter_biocache"] != null) rows.Add(Row("Hidden Bio Cache under the starter Nest", Num(root["alien_starter_biocache"]), "off"));
+                    if (root["alien_starter_node_lines"] != null) rows.Add(Row("Starter node lines to the closest Biotics", Num(root["alien_starter_node_lines"]) == "0" ? "off" : Num(root["alien_starter_node_lines"]), "off"));
                     Group("Alien rules", rows);
                 }
                 {
