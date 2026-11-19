@@ -194,7 +194,8 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
     ├── 4. Alien Nest Finished-Anchor Only [ON/OFF] alien_nest_finished_anchor_only (a new Nest must anchor to a finished structure, not a Nest under construction; immediate)
     ├── 5. Queen Logistics per Nest [ON/OFF]  alien_queen_logistics_per_nest (structures build only while their nearest Nest has its Queen docked; needs Alien Queens 0/N; immediate)
     ├── 6. No Refinery Sell Refund [ON/OFF]  no_refinery_sell_refund (selling a refinery pays nothing back; immediate)
-    └── 7. Harvester Exit Toward Patch [ON/OFF]  harvester_exit_toward_patch (harvesters leave the refinery by the ramp facing their patch, refinery spawns face it; immediate)
+    ├── 7. Harvester Exit Toward Patch [ON/OFF]  harvester_exit_toward_patch (harvesters leave the refinery by the ramp facing their patch, refinery spawns face it; immediate)
+    └── 8. Queen Build Limit = <n> ........ alien_queen_build_max (Queens per Alien team, alive + growing; 0 = off, 2-10, default 2; .1 <n>; immediate; player command "!queenb" for the Alien commander; stateless form "!b queenbuild [status|off|2-10]", ModUI row)
 
 
 ═══════════════════════════════════════════════════════════════════

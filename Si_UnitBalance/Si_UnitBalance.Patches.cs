@@ -1554,7 +1554,7 @@ namespace Si_UnitBalance
                     state.Level = MenuLevel.CapDecayMenu;
                 else if (state.Level == MenuLevel.CountCap)
                     state.Level = MenuLevel.CapDecayMenu;
-                else if (state.Level == MenuLevel.NestReach || state.Level == MenuLevel.QueensMax)
+                else if (state.Level == MenuLevel.NestReach || state.Level == MenuLevel.QueensMax || state.Level == MenuLevel.QueenBuild)
                     state.Level = MenuLevel.StrategyMenu;
                 else if (state.Level == MenuLevel.NodeLines)
                     state.Level = MenuLevel.HTPMenu;
@@ -1652,6 +1652,13 @@ namespace Si_UnitBalance
             if (state.Level == MenuLevel.NodeLines && !string.IsNullOrEmpty(arg2))
             {
                 HandleNodeLinesEdit(player, state, selection, arg2);
+                return;
+            }
+
+            // Strategystyle queen build limit edit: "/1 2" = one extra Queen per team, "/1 0" = off
+            if (state.Level == MenuLevel.QueenBuild && !string.IsNullOrEmpty(arg2))
+            {
+                HandleQueenBuildEdit(player, state, selection, arg2);
                 return;
             }
 
@@ -1835,8 +1842,12 @@ namespace Si_UnitBalance
 
                 // ── Strategystyle Menu (alien nest-centric build rules + refinery sell refund + harvester exit) ──
                 case MenuLevel.StrategyMenu:
-                    if (selection < 1 || selection > 7) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-7.</color>"); return; }
-                    if (selection == 1)
+                    if (selection < 1 || selection > 8) { SendChatToPlayer(player, _chatPrefix + "<color=#FF5555>Pick 1-8.</color>"); return; }
+                    if (selection == 8)
+                    {
+                        state.Level = MenuLevel.QueenBuild;
+                    }
+                    else if (selection == 1)
                     {
                         // Toggle nest-only alien building (anchor flag off for every alien structure but the Nest)
                         _alienNestOnlyBuild = !_alienNestOnlyBuild;
@@ -1943,6 +1954,10 @@ namespace Si_UnitBalance
 
                 case MenuLevel.NodeLines:
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <n> (.1 3 = the 3 closest Biotics, .1 0 = off; max " + NodeLinesMax + ")</color>");
+                    return;
+
+                case MenuLevel.QueenBuild:
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 <n> (.1 2 = one extra Queen per team, .1 0 = off; max " + QueenBuildMaxLimit + ")</color>");
                     return;
 
                 case MenuLevel.HTPDecay:

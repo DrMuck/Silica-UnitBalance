@@ -35,7 +35,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.17.0", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.18.1", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -127,7 +127,7 @@ namespace Si_UnitBalance
         // Per-player menu state for !b command (keyed by SteamID for stable identity across Il2Cpp wrappers)
         private static readonly Dictionary<long, BalanceMenuState> _menuStates = new Dictionary<long, BalanceMenuState>();
 
-        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTierTime, HTPTierCost, HTPTeleport, HTPDecay, HTPDecayFaction, HTPUnitCap, DiscordMenu, CapDecayMenu, CountCap, NestReach, QueensMax, StrategyMenu, PlayerCapExempt, NodeLines }
+        private enum MenuLevel { Root, Faction, Category, Unit, ParamGroup, JsonMenu, JsonLoad, HTPMenu, HTPHoverbike, HTPHoverbikeParam, HTPTier, HTPTierTime, HTPTierCost, HTPTeleport, HTPDecay, HTPDecayFaction, HTPUnitCap, DiscordMenu, CapDecayMenu, CountCap, NestReach, QueensMax, StrategyMenu, PlayerCapExempt, NodeLines, QueenBuild }
         // HTPDecay* / HTPUnitCap live under Cap&Decay (root 6) since v7.4.0; enum names kept for the save/audit plumbing.
         private class BalanceMenuState
         {
@@ -428,7 +428,7 @@ namespace Si_UnitBalance
             }
             catch (Exception ex) { MelonLogger.Warning($"Failed to subscribe to OnStartUnloadingLevel: {ex.Message}"); }
 
-            MelonLogger.Msg($"Unit Balance v7.17.0 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.18.1 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -680,6 +680,8 @@ namespace Si_UnitBalance
                         harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_NestFinishedAnchor), "Prefix"));
                         harmony.Patch(construct, prefix: new HarmonyMethod(typeof(Patch_QueenLogisticsPerNest), "Prefix"));
                         MelonLogger.Msg($"Patched Structure.Construct ({construct.GetParameters().Length} params) for Shrimp/Harvester count caps + alien nest reach + nest finished-anchor + queen logistics per nest");
+                        // !queenb: registered last, so the rules above see the Colossus order first
+                        PatchQueenBuild(harmony, construct);
                     }
                     else MelonLogger.Warning("[CountCap] Structure.Construct not found — count caps / nest reach / nest finished-anchor / queen logistics inactive");
                 }
@@ -868,6 +870,16 @@ namespace Si_UnitBalance
                                     MelonLogger.Msg("Registered /stats as player command");
                                 }
                                 catch (Exception sx) { MelonLogger.Warning($"Failed to register /stats: {sx.Message}"); }
+
+                                // !queenb: the Alien commander arms the Queen order on the Colossus button (any player
+                                // may type it; the handler only acts for the commander of an Alien team)
+                                try
+                                {
+                                    _registerPlayerCmdMethod.Invoke(null, new object[] {
+                                        "queenb", MakeShim("QueenBuildShim", "OnQueenBuildCommand"), true /* hideFromChat */ });
+                                    MelonLogger.Msg("Registered !queenb as player command");
+                                }
+                                catch (Exception qx) { MelonLogger.Warning($"Failed to register !queenb: {qx.Message}"); }
                             }
                         }
                         else
@@ -916,6 +928,7 @@ namespace Si_UnitBalance
                 _watchdogEnabled = config["watchdog_enabled"]?.Value<bool>() ?? true;
                 // JSON only: extra [OMVERIFY] read-backs at every lifecycle point (logging only)
                 _debugOmProbe = config["debug_om_probe"]?.Value<bool>() ?? false;
+                _debugQueenBuildSelfTest = config["debug_queen_build_selftest"]?.Value<bool>() ?? false;
                 if (_debugOmProbe)
                     MelonLogger.Msg("[CONFIG] debug_om_probe ON: [OMVERIFY] checks at every lifecycle hook, ClearAll/RevertAll calls logged with a stack");
                 _playerInfantryIgnoreCap = config["player_infantry_ignore_cap"]?.Value<bool>() ?? false;
@@ -949,6 +962,9 @@ namespace Si_UnitBalance
                 if (_alienStarterNodeLinesMaxM < 50f) _alienStarterNodeLinesMaxM = NodeLinesMaxMDefault;
                 if (_alienStarterNodeLines > 0)
                     MelonLogger.Msg($"[CONFIG] Alien starter node lines: Nodes from each starter Nest to its {_alienStarterNodeLines} closest Biotics (max {_alienStarterNodeLinesMaxM:F0} m from the Nest), from the next round start");
+                _alienQueenBuildMax = ClampQueenBuildMax(config["alien_queen_build_max"]?.Value<int>() ?? 2);
+                if (_alienQueenBuildMax >= 2)
+                    MelonLogger.Msg($"[CONFIG] Queen from the Colossal Spawning Cyst (!queenb): up to {_alienQueenBuildMax} Queens per team");
                 _harvesterExitTowardPatch = config["harvester_exit_toward_patch"]?.Value<bool>() ?? false;
                 if (_harvesterExitTowardPatch)
                     MelonLogger.Msg("[CONFIG] Harvester exit toward patch: harvesters leave the refinery through the ramp facing their Balterium patch");
@@ -1400,6 +1416,7 @@ namespace Si_UnitBalance
     ""alien_nest_finished_anchor_only"": false,
     ""alien_queen_logistics_per_nest"": false,
     ""alien_queens_max"": -1,
+    ""alien_queen_build_max"": 2,
     ""no_refinery_sell_refund"": false,
     ""harvester_exit_toward_patch"": false,
     ""alien_starter_biocache"": false,

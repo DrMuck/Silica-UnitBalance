@@ -66,7 +66,8 @@ Root
     ├── 4. Alien Nest Finished-Anchor Only [ON/OFF]  (a new Nest can't anchor to a Nest still under construction — needs a finished anchor in range; immediate)
     ├── 5. Queen Logistics per Nest [ON/OFF]  (alien structures build only while their nearest Nest has its Queen docked — vanilla is team-wide; needs 3. Alien Queens = 0; immediate)
     ├── 6. No Refinery Sell Refund [ON/OFF]  (selling a Sol/Cent refinery pays nothing back — stops build + sell for a cheap harvester; immediate)
-    └── 7. Harvester Exit Toward Patch [ON/OFF]  (harvesters leave the refinery by the ramp facing their Balterium patch instead of the ramp ahead; immediate)
+    ├── 7. Harvester Exit Toward Patch [ON/OFF]  (harvesters leave the refinery by the ramp facing their Balterium patch instead of the ramp ahead; immediate)
+    └── 8. Queen Build Limit = <n>  (!queenb: the Alien commander grows a Queen on the Colossus button of a Colossal Spawning Cyst; Queens per team, alive + growing; .1 <n>; 0 = off, 2-10; immediate)
 ```
 
 Inside any **Unit > Param Group** you'll see lines like:
@@ -144,6 +145,7 @@ The mod has a `PropagateToLiveInstances` pass on game start (and during `!rebala
 | **Alien Nest Finished-Anchor Only (Strategystyle /4)** | ✅ immediate (checked on every Nest placement; commander gets chat warning + sound) | ✅ | ✅ |
 | **No Refinery Sell Refund (Strategystyle /6)** | ✅ immediate (checked on every deconstruct tick, also for refineries already being sold; commander gets a chat notice) | ✅ | ✅ |
 | **Harvester Exit Toward Patch (Strategystyle /7)** | ✅ immediate (checked at every undock and every refinery harvester spawn) | ✅ | ✅ |
+| **Queen Build Limit (Strategystyle /8)** | ✅ immediate (checked at every `!queenb` and at the order; switching off cancels armed orders, a Queen already growing is finished) | ✅ | ✅ |
 | **Alien Starter Node Lines (HTP /9)** | ❌ the running round keeps its lines (never re-laid, never removed) | ❌ (`!rebalance` never lays lines) | ✅ laid 2 s after the round starts |
 
 **Rule of thumb:** if you want guaranteed-fresh values, **start a new round** after `!rebalance`. That's the cleanest "everything is the new version" state.

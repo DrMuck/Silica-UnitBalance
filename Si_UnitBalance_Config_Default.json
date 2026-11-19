@@ -7,6 +7,7 @@
     "alien_nest_finished_anchor_only": false,
     "alien_queen_logistics_per_nest": false,
     "alien_queens_max": -1,
+    "alien_queen_build_max": 2,
     "no_refinery_sell_refund": false,
     "harvester_exit_toward_patch": false,
     "alien_starter_biocache": false,

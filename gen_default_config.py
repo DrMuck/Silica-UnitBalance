@@ -588,6 +588,7 @@ config = {
     "alien_nest_finished_anchor_only": False,
     "alien_queen_logistics_per_nest": False,
     "alien_queens_max": -1,
+    "alien_queen_build_max": 2,  # !queenb: Queens per Alien team (alive + growing) through the Colossal Spawning Cyst; 0 = off
     "no_refinery_sell_refund": False,
     "harvester_exit_toward_patch": False,
     "alien_starter_biocache": False,  # hidden Bio Cache 50 m under each Alien starter Nest: Lesser Spawning Cyst from the start

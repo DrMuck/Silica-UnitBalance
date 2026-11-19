@@ -4,6 +4,61 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-19 — Queen from the Colossal Spawning Cyst: `!queenb` (v7.18.1)
+
+New player command `!queenb` for the Alien commander and new setting `alien_queen_build_max` (int, default 2;
+0 = off, 2-10; Strategystyle menu `!b` > 7 > 8 with `.1 <n>`, stateless `!b queenbuild [status|off|2-10]`, ModUI row
+"Queen build limit (!queenb)" in "Alien rules", Discord diff line). The game ships a complete
+`ConstructionData_Alien_Queen` (non-placeable, own construction site; vanilla 12000 / 300 s) that no structure lists.
+A vanilla client draws its production buttons from its own copy of a structure's private build list, and the list
+index is the network protocol byte, so a server cannot add a button. The feature borrows the Colossus button.
+- **Flow:** the commander types `!queenb` (armed). The next Colossus order of that team at a Colossal Spawning Cyst
+  grows a Queen instead. When her construction site ends (born, cancelled, cyst lost) the Colossus button builds a
+  Colossus again. `!queenb` a second time cancels an unused order; an unused order expires after 120 s; `!queenb`
+  while she grows shows the progress.
+- **Server side:** a `Structure.Construct` prefix (registered after the count-cap and nest rules) runs the vanilla
+  checks against the Queen's data (a docked Queen, the Queen's tier, resources, exit clear; plus: the cyst must be
+  idle), charges the Queen's cost and starts the game's own non-placeable production with the Queen's
+  `ConstructionData` (private `Structure.ConstructNonPlaceable`). The Queen is not in the cyst's list, so the game's own
+  start RPC stays silent (`IndexOf` = -1); the mod then sends the vanilla RPC for the Colossus slot, so every client
+  shows a production on that cyst. Progress is networked as a 0..1 fraction, so the bar is right on every client.
+  Cancelling on the cyst refunds the Queen's full cost through the game's own `CancelCurrent`. The Queen leaves the
+  cyst like any produced unit (`OnProduced`, rally point).
+- **Commander's card:** only the commander's client gets an override packet (the format of
+  `NetworkLayer.SendOverride`, sent to one player) that sets `ResourceCost` / `BuildUpTime` of
+  `ConstructionData_Alien_Colossus` to the Queen's values, so the card shows her price and time and the client's own
+  resource check uses her price. The server's Colossus data is not changed. At the end the client gets the server's
+  current Colossus values back (before the game's "production ended" RPC). The values are sent again after every full
+  override sync to that player, and put back at round end / round start.
+- **Price, time, tier:** the "Queen" unit's `cost_mult` / `build_time_mult` / `min_tier` (they act on
+  `ConstructionData_Alien_Queen`, which had no use before).
+- **Limit:** `alien_queen_build_max` = Queens per team, alive plus growing, checked at `!queenb` and again at the
+  order. While a Queen grows, further Colossus orders of the team are refused with a chat line (the commander's card
+  shows the Queen's values during that time).
+- **What a second Queen means:** the Queen is the Alien team's only Critical object (the Nest is not), so the team is
+  lost only when all Queens are dead; one docked Queen anywhere unlocks building for the team unless
+  `alien_queen_logistics_per_nest` is on; she needs a Nest of her own to dock in; `alien_queens_max` (Queens spawned by
+  new Nests) counts built Queens too.
+- **Limits a server cannot remove:** the commander's client decides whether the Colossus button exists and is enabled
+  (the Colossus' tech tier, cap space for one Colossus) and counts the growing "Colossus" against its own cap display;
+  the card keeps the name and icon of the Colossus and may show the new price only after the cyst is selected again;
+  other clients see a Colossus production on that cyst.
+- **Hint (7.18.1):** when an Alien team's first Colossal Spawning Cyst of the round is finished (prefix on
+  `ConstructionSite.Deinit(true)`, i.e. a completed construction, not a sold one) and the limit is 2 or more, the
+  commander gets two chat lines: the cyst can grow another Queen via `!queenb` + the Colossus button, with her price
+  and time, the Queen count against the limit, and the Colossus' tech tier if the team is below it. Once per team
+  and round; without a player commander at that moment nothing is marked and the next finished cyst tries again.
+- Log tag `[QUEENBUILD]`. JSON-only `debug_queen_build_selftest` (default false) runs a headless check 20 s into the
+  round (`[QUEENBUILD-TEST]` lines).
+- **Checked (staging server, 1.0.17, headless, no client):** busy cyst refused (`QueueFull`, order stays armed); idle
+  cyst: order taken over, site data `ConstructionData_Alien_Queen`, 300 s, 15000 charged (live config: Queen
+  `cost_mult` 1.25); second order while growing refused, nothing queued; site end -> 2 Queens alive, state cleared;
+  third Queen refused at the limit, nothing charged; unarmed order is a plain Colossus order again. Smoke verdict PASS,
+  no mod errors. 7.18.1: the hint hook fires when a cyst's construction site completes (no player commander in that
+  run, so the "waits for the next cyst" branch was the one seen).
+- **Client test by DrMuck (2026-11-19, local server, 7.18.0):** `!queenb` and the Queen from the Colossus button work.
+  The hint's chat text has not been seen in a game yet.
+
 ## 2026-11-17 — Alien starter node lines (v7.17.0)
 
 New setting `alien_starter_node_lines` (int 0-6, default 0 = off; HTP menu `!b` > 5 > 9 with `.1 <n>`, stateless

@@ -314,6 +314,18 @@ namespace Si_UnitBalance
                 }
             }
 
+            // Queen build limit (!queenb; 0 = off, default 2)
+            {
+                int av = ClampQueenBuildMax(activeCfg["alien_queen_build_max"]?.Value<int>() ?? 2);
+                int dv = ClampQueenBuildMax(defaultCfg["alien_queen_build_max"]?.Value<int>() ?? 2);
+                if (av != dv)
+                {
+                    int lastVal = ClampQueenBuildMax(lastPushCfg?["alien_queen_build_max"]?.Value<int>() ?? dv);
+                    changes.Add(new BalanceChange("Global Settings", "Queen Build Limit (!queenb)", "alien_queen_build_max",
+                        FmtQueenBuildMax(dv), FmtQueenBuildMax(av), av != lastVal));
+                }
+            }
+
             // Bool toggles
             CompareBoolSetting("additional_spawn", "Additional Spawn", defaultCfg, activeCfg, lastPushCfg, changes);
             CompareBoolSetting("shrimp_disable_aim", "Shrimp Disable Aim", defaultCfg, activeCfg, lastPushCfg, changes);

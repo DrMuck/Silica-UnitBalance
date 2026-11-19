@@ -53,6 +53,7 @@ namespace Si_UnitBalance
                 _lastMapName = GetCurrentMapName();
                 StarterCacheResetRound();
                 NodeLinesResetRound();
+                QueenBuildResetRound("game init");
                 MelonLogger.Msg($"[UnitBalance] Game init ({_lastMapName})");
             }
         }
@@ -79,6 +80,7 @@ namespace Si_UnitBalance
                 _overridesApplied = false;
                 StarterCacheResetRound();
                 NodeLinesResetRound();
+                QueenBuildResetRound("game restart");
                 OMVerifyProbe("game-restart");
             }
         }
@@ -744,6 +746,9 @@ namespace Si_UnitBalance
                 // alien_starter_node_lines: laid once, 2 s later (after Si_MapBalance's round-start work)
                 NodeLinesScheduleRound("game start");
 
+                // debug_queen_build_selftest only (JSON): headless check of the !queenb production path
+                QueenBuildSelfTestSchedule("game start");
+
                 MelonLogger.Msg($"[UnitBalance] Game started — propagation complete");
 
                 // Read the live buildings back after the round is running: the prefab
@@ -998,6 +1003,7 @@ namespace Si_UnitBalance
             {
                 MelonLogger.Msg("[UnitBalance] Game ended");
                 DynCapCloseAll("round end"); // OM keeps overrides between rounds, so the window must not stay open
+                QueenBuildResetRound("round end"); // same for a commander's Colossus card that still shows the Queen
                 OMVerifyProbe("game-ended");
 
                 // Clear the first-seen caches. For the values this mod writes onto prefab data

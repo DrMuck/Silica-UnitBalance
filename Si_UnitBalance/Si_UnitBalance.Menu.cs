@@ -963,6 +963,15 @@ namespace Si_UnitBalance
                 return;
             }
 
+            // "!b queenbuild ..." → stateless Queen build limit (ModUI row, chat); leaves the menu state alone
+            const string queenBuildWord = "queenbuild";
+            if (extraArgs.StartsWith(queenBuildWord, StringComparison.OrdinalIgnoreCase)
+                && (extraArgs.Length == queenBuildWord.Length || extraArgs[queenBuildWord.Length] == ' '))
+            {
+                OnQueenBuildSettingCommand(player, extraArgs.Substring(queenBuildWord.Length).Trim());
+                return;
+            }
+
             // "!b exit" → close
             if (extraArgs.Equals("exit", StringComparison.OrdinalIgnoreCase))
             {
@@ -2138,6 +2147,7 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "6.</color> No Refinery Sell Refund [" + nrStatus + "] " + _dimColor + "(selling a refinery pays nothing back; stops build+sell for a cheap harvester)</color>");
                     string heStatus = _harvesterExitTowardPatch ? "<color=#55FF55>ON</color>" : "<color=#FF5555>OFF</color>";
                     SendChatToPlayer(player, _chatPrefix + _itemColor + "7.</color> Harvester Exit Toward Patch [" + heStatus + "] " + _dimColor + "(harvesters leave the refinery by the ramp facing their Balterium patch)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "8.</color> Queen Build Limit = " + _valueColor + FmtQueenBuildMax(_alienQueenBuildMax) + "</color> " + _dimColor + "(!queenb: the Alien commander grows a Queen on the Colossus button; Queens per team)</color>");
                     break;
                 }
 
@@ -2367,6 +2377,15 @@ namespace Si_UnitBalance
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Finished Nodes are laid 2 s after the round starts so a Bio Cache + Lesser Cyst fit next to those patches. Patches more than "
                         + _alienStarterNodeLinesMaxM.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " m from the Nest (alien_starter_node_lines_max_m) or nearer to another base are skipped. Applies from the next round.</color>");
                     SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 3 (three patches) · .1 0 (off)</color>");
+                    break;
+                }
+
+                case MenuLevel.QueenBuild:
+                {
+                    SendChatToPlayer(player, _chatPrefix + _headerColor + "Strategystyle > Queen Build Limit</color> " + _dimColor + "(a Queen from the Colossal Spawning Cyst)</color>");
+                    SendChatToPlayer(player, _chatPrefix + _itemColor + "1.</color> limit = " + _valueColor + FmtQueenBuildMax(_alienQueenBuildMax) + "</color> " + _dimColor + "(Queens per Alien team, alive + growing; 0 = off, 2-" + QueenBuildMaxLimit + ")</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + QueenBuildHelp + "</color>");
+                    SendChatToPlayer(player, _chatPrefix + _dimColor + "Set: .1 2 (one extra Queen) · .1 0 (off). Immediate.</color>");
                     break;
                 }
 
