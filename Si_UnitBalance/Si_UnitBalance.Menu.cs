@@ -621,7 +621,8 @@ namespace Si_UnitBalance
                         else if (tn == "VehicleHovered") hasHovered = true;
                         else if (tn == "VehicleAir") hasAir = true;
                         else if (tn == "CreatureDecapod") hasDecapod = true;
-                        else if (tn == "MiningClaws" || tn == "MiningArmsBase" || tn == "MiningArmsLaser" || tn == "MiningArmsRoller") hasMiningArms = true;
+                        else if (tn == "MiningClaws" || tn == "MiningArmsBase" || tn == "MiningArmsLaser" || tn == "MiningArmsRoller"
+                                 || c is MiningClaws || c is MiningArmsBase) hasMiningArms = true;
                     }
                 }
             }
@@ -799,6 +800,14 @@ namespace Si_UnitBalance
                 // Unarmed structures: fow distance only
                 names.Add("Vision & Sense");
                 keys.Add(new[] { "fow_distance" });
+            }
+
+            // ── Harvesting (gatherers: Shrimp, Sol/Cent Harvester; Si_UnitBalance.Gatherers.cs) ──
+            // Appended after the existing groups so the numbers of the other groups stay as they were.
+            if (hasMiningArms)
+            {
+                names.Add("Harvesting");
+                keys.Add((string[])_gathererParamKeys.Clone());
             }
 
             // ── Proximity Detonation (only for units whose projectile has ProjectileProximityDetonation) ──
@@ -1197,6 +1206,12 @@ namespace Si_UnitBalance
                                         break;
                                     }
                                 }
+                                break;
+                            case GatherHarvestKey:
+                            case GatherCapacityKey:
+                            case GatherDepositKey:
+                                // vanilla ExtractAmount (per bite / per tick), MaxAmount, DepositAmount (per tick)
+                                val = GathererBaseText(matchedInfo, key)!; // null = no such member (val's null convention)
                                 break;
                             case "damage_mult":
                             {

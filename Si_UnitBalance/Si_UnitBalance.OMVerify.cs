@@ -482,7 +482,7 @@ namespace Si_UnitBalance
 
         /// <summary>Candidate members of one kind for a unit name, with the multiplier
         /// PropagateToLiveInstances applies: 0 speed field, 1 strafe, 2 turn radius, 3 turret reload,
-        /// 4 magazine, 5 spread, 6 jump. comp "*" = any component (speed fields, DeclaredOnly).</summary>
+        /// 4 magazine, 5 spread, 6 jump, 7 gatherer amounts. comp "*" = any component (speed fields, DeclaredOnly).</summary>
         private static List<(string comp, string field, BindingFlags flags, float mult)> OMVerifyLiveCandidates(int kind, string name)
         {
             const BindingFlags any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
@@ -531,6 +531,17 @@ namespace Si_UnitBalance
                         list.Add(("FPSMovement", "JumpSpeed", any, m));
                     }
                     break;
+                case 7:
+                    // Gatherers: live must equal the prefab (both = vanilla snapshot x mult, see Gatherers.cs)
+                    if (_harvestRateMultipliers.TryGetValue(name, out m))
+                        foreach (var comp in new[] { "MiningClaws", "MiningArmsLaser", "MiningArmsRoller" })
+                            list.Add((comp, "ExtractAmount", any, m));
+                    if (_depositRateMultipliers.TryGetValue(name, out m))
+                        foreach (var comp in new[] { "MiningClaws", "MiningArmsLaser", "MiningArmsRoller" })
+                            list.Add((comp, "DepositAmount", any, m));
+                    if (_cargoCapacityMultipliers.TryGetValue(name, out m))
+                        list.Add(("ResourceHolder", "MaxAmount", any, m));
+                    break;
             }
             return list;
         }
@@ -538,7 +549,7 @@ namespace Si_UnitBalance
         /// <summary>Probe only, after the GameStarted propagation: do already-spawned units carry the
         /// prefab value (vanilla x multiplier once OverrideManager has written the prefab) or one that was
         /// multiplied again? Up to 8 live units/structures, one per kind first (speed field, strafe, turn
-        /// radius, turret reload, magazine, spread, jump), then more of the same kinds. Read-only;
+        /// radius, turret reload, magazine, spread, jump, gatherer amounts), then more of the same kinds. Read-only;
         /// iterates the teams' Units/Structures only.</summary>
         private static void OMVerifyLiveCheck(string tag)
         {
@@ -571,7 +582,7 @@ namespace Si_UnitBalance
                 var used = new HashSet<string>();
                 for (int pass = 0; pass < 2 && checkedN < OMVerifyMaxLiveChecks; pass++)
                 {
-                    for (int kind = 0; kind <= 6 && checkedN < OMVerifyMaxLiveChecks; kind++)
+                    for (int kind = 0; kind <= 7 && checkedN < OMVerifyMaxLiveChecks; kind++)
                     {
                         bool found = false;
                         foreach (var entry in live)

@@ -48,7 +48,11 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
 │   │   ├── 3. Railgun Tank
 │   │   └── 4. Pulse Truck
 │   ├── 4. Ultra Heavy Factory
-│   │   ├── 1. Harvester
+│   │   ├── 1. Harvester .................... [gatherer: last group = Harvesting]
+│   │   │   └── N. Harvesting
+│   │   │       ├── harvest_rate_mult      (base: MiningArmsBase.ExtractAmount, per 0.5 s tick)
+│   │   │       ├── cargo_capacity_mult    (base: ResourceHolder.MaxAmount)
+│   │   │       └── deposit_rate_mult      (base: MiningArmsBase.DepositAmount, per 0.5 s tick)
 │   │   └── 2. Siege Tank
 │   ├── 5. Air Factory
 │   │   ├── 1. Gunship
@@ -96,7 +100,7 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
 │   │   ├── 3. Heavy Tank
 │   │   └── 4. Pyro Tank
 │   ├── 4. Ultra Heavy Factory
-│   │   ├── 1. Harvester
+│   │   ├── 1. Harvester .................... [gatherer: last group = Harvesting, as Sol]
 │   │   └── 2. Crimson Tank
 │   ├── 5. Air Factory
 │   │   ├── 1. Shuttle
@@ -117,7 +121,11 @@ Navigation: .1-.9 select | .back go up | .0 exit | !b <args> direct
 ├── 3. Alien
 │   ├── 1. Lesser Spawning Cyst
 │   │   ├── 1. Crab
-│   │   ├── 2. Shrimp
+│   │   ├── 2. Shrimp ....................... [gatherer: last group = Harvesting]
+│   │   │   └── N. Harvesting
+│   │   │       ├── harvest_rate_mult      (base: MiningClaws.ExtractAmount, per bite)
+│   │   │       ├── cargo_capacity_mult    (base: ResourceHolder.MaxAmount)
+│   │   │       └── deposit_rate_mult      (base: MiningClaws.DepositAmount, per 1 s tick)
 │   │   ├── 3. Shocker
 │   │   ├── 4. Wasp
 │   │   ├── 5. Dragonfly .................... [CreatureDecapod, ranged, spread 0.25]
@@ -267,6 +275,20 @@ Every unit expands into these parameter groups:
 │  fow_distance      │ Sensor.FogOfWarViewDistance     │ absolute  │
 │  visible_event_    │ ProjectileData.                 │ multiplier│
 │    radius_mult     │   VisibleEventRadius            │           │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  N. Harvesting  (gatherers only: Shrimp, Sol/Cent Harvester;    │
+│     appended after the other groups, so their numbers stay)     │
+├─────────────────────────────────────────────────────────────────┤
+│  Key               │ Base Value From                │ Type      │
+│────────────────────│────────────────────────────────│───────────│
+│  harvest_rate_mult │ MiningClaws/MiningArmsBase.    │ multiplier│
+│                    │   ExtractAmount                │ (int,≥1)  │
+│  cargo_capacity_   │ ResourceHolder.MaxAmount       │ multiplier│
+│    mult            │                                │ (int,≥1)  │
+│  deposit_rate_mult │ MiningClaws/MiningArmsBase.    │ multiplier│
+│                    │   DepositAmount                │ (int,≥1)  │
 └─────────────────────────────────────────────────────────────────┘
 
 

@@ -48,6 +48,7 @@ Selecting a unit opens these parameter groups:
 | **Secondary Weapon** | Same as primary (shown only if unit has a second weapon) |
 | **Movement** | `move_speed_mult`, `jump_speed_mult`, `turbo_speed_mult`, `turn_radius_mult` |
 | **Vision & Sense** | `target_distance`, `fow_distance`, `visible_event_radius_mult` |
+| **Harvesting** (Shrimp, Sol/Cent Harvester only) | `harvest_rate_mult`, `cargo_capacity_mult`, `deposit_rate_mult` |
 
 Each parameter displays its current value and the vanilla base value from the game prefab:
 ```
@@ -150,6 +151,9 @@ The JSON config (`Si_UnitBalance_Config.json`) can also be edited manually. The 
 | `turn_radius_mult` | multiplier | Scales vehicle turn radius (lower = tighter) |
 | `visible_event_radius_mult` | multiplier | Scales projectile visual render distance |
 | `dispense_timeout` | absolute | VehicleDispenser cooldown in seconds (Hoverbike) |
+| `harvest_rate_mult` | multiplier | Gatherers: scales `ExtractAmount` (Shrimp `MiningClaws`: Biotics per bite; Harvester `MiningArmsBase`: Balterium per 0.5 s tick) |
+| `cargo_capacity_mult` | multiplier | Gatherers: scales `ResourceHolder.MaxAmount` (cargo; synced to clients for the HUD bar) |
+| `deposit_rate_mult` | multiplier | Gatherers: scales `DepositAmount` (unloaded per tick at the Refinery / Bio Cache / Nest) |
 
 Per-weapon variants use `pri_` / `sec_` prefixes (e.g., `pri_damage_mult`, `sec_fire_rate_mult`).
 

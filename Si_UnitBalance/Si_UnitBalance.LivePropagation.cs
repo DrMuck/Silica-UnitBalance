@@ -42,6 +42,11 @@ namespace Si_UnitBalance
             }
 
             MelonLogger.Msg($"[LIVE] Propagated overrides to {totalUpdated}/{liveCount} live instances (units={liveUnits.Length}, structures={liveStructures.Length})");
+
+            // Gatherer params: absolute values from the vanilla snapshot (Si_UnitBalance.Gatherers.cs), not the
+            // prefab x multiplier scheme above.
+            try { PropagateGatherersLive(liveUnits); }
+            catch (Exception gex) { MelonLogger.Warning($"[GATHER-LIVE] {gex.Message}"); }
         }
 
         private static void PropagateToInstance(GameObject liveGO, ObjectInfo info, HashSet<int> processedGOs,
@@ -1145,6 +1150,8 @@ namespace Si_UnitBalance
                         sb.Append($"\"hha_spread_min\":{hhaSpreadMin:F3},");
                         sb.Append($"\"hha_spread_max\":{hhaSpreadMax:F3},");
                     }
+                    // Gatherers (Shrimp, Sol/Cent Harvester): vanilla ExtractAmount / DepositAmount / MaxAmount / tick
+                    sb.Append(GathererDumpJson(info));
                     // Teleport
                     sb.Append($"\"has_teleport\":{(hasTeleport ? "true" : "false")},");
                     sb.Append($"\"teleport_time\":{teleportTime:F1},");
@@ -1289,6 +1296,17 @@ namespace Si_UnitBalance
 
                         float vehSpd = Jf(dump, "move_speed");
                         if (vehSpd > 0) { entry["_base_speed"] = $"Speed:{vehSpd:G}"; changed = true; }
+                    }
+
+                    // _base_gather (gatherers only): "Cargo:400 Harvest:5/bite Deposit:50/1s"
+                    if (dump["gather_capacity"] != null || dump["gather_extract_amount"] != null)
+                    {
+                        bool claws = Js(dump, "gather_kind") == "claws";
+                        float gTick = Jf(dump, "gather_tick");
+                        string tickTxt = gTick.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "s";
+                        string newGather = $"Cargo:{Ji(dump, "gather_capacity")} Harvest:{Ji(dump, "gather_extract_amount")}/{(claws ? "bite" : tickTxt)} Deposit:{Ji(dump, "gather_deposit_amount")}/{tickTxt}";
+                        if (entry["_base_gather"]?.ToString() != newGather)
+                        { entry["_base_gather"] = newGather; changed = true; }
                     }
 
                     int fow = Ji(dump, "fow_view"), tgt = Ji(dump, "target_dist");
@@ -1469,6 +1487,14 @@ namespace Si_UnitBalance
                     Jf(oldUnit, "run_speed"), Jf(newUnit, "run_speed"));
                 adjCount += MigrateMult(entry, "sprint_speed_mult", unitName, fileName,
                     Jf(oldUnit, "sprint_speed"), Jf(newUnit, "sprint_speed"));
+
+                // --- Gatherers (keeps the absolute amount when a game update changes the vanilla value) ---
+                adjCount += MigrateMult(entry, GatherHarvestKey, unitName, fileName,
+                    Ji(oldUnit, "gather_extract_amount"), Ji(newUnit, "gather_extract_amount"));
+                adjCount += MigrateMult(entry, GatherCapacityKey, unitName, fileName,
+                    Ji(oldUnit, "gather_capacity"), Ji(newUnit, "gather_capacity"));
+                adjCount += MigrateMult(entry, GatherDepositKey, unitName, fileName,
+                    Ji(oldUnit, "gather_deposit_amount"), Ji(newUnit, "gather_deposit_amount"));
 
                 // --- Weapon multipliers (pri/sec) ---
                 if (hasVT)

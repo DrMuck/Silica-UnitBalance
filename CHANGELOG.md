@@ -4,6 +4,50 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-20 — Gatherer params: harvest rate, cargo capacity, deposit rate (v7.19.0)
+
+Three new per-unit multipliers (1 = vanilla) for the resource gatherers, in a new last param group **Harvesting** that
+only gatherers get (Shrimp, Sol Harvester, Cent Harvester; appended after the other groups, so their menu numbers did
+not move). Also in `/stats`, the ModUI browser (base values from the vanilla prefab snapshot, as for every other unit
+param), the Discord diff and the default config (only on those three units).
+
+| Key | Game field (int) | Vanilla 1.0.17 (Shrimp / Sol + Cent Harvester) | Mechanism |
+|---|---|---|---|
+| `harvest_rate_mult` | `MiningClaws.ExtractAmount` (per bite) / `MiningArmsBase.ExtractAmount` (per 0.5 s tick x spin-up) | 5 / 100 | Shrimp: OverrideManager (synced). Harvesters: tracked direct prefab write (server-only) |
+| `cargo_capacity_mult` | `ResourceHolder.MaxAmount` | 400 / 7500 | OverrideManager (synced) |
+| `deposit_rate_mult` | `MiningClaws.DepositAmount` (per 1 s tick) / `MiningArmsBase.DepositAmount` (per 0.5 s tick) | 50 / 200 | as `harvest_rate_mult` |
+
+- **Why one key per param, not per resource:** a gatherer has exactly one `ResourceHolder` with one `ResourceType`
+  (Shrimp Biotics, harvesters Balterium); the game has no per-resource rate or capacity field.
+- **Rates are amounts per tick:** the tick lengths (`MiningClaws.Tick` 1 s, `MiningArmsBase.ExtractionTick` 0.5 s, shared
+  by extraction and deposit on a harvester) are not touched, so `harvest_rate_mult` never changes the deposit speed.
+  Results are rounded to whole numbers, at least 1, at most 1 000 000.
+- **Authority:** extraction and deposit run on the server only (`MiningArmsBase`: `!Game.GetIsClient()`; Shrimp: the
+  client only predicts a bite and the server's `ResourceHolder` RPC overwrites the cargo; the client's deposit tick
+  returns before `RetrieveResource`). The values therefore hold for AI-driven and player-piloted gatherers alike.
+  Clients read `MaxAmount` only for the cargo bar, and that one is synced.
+- **Why the harvesters' rates are server-only:** OverrideManager resolves a prefab member DeclaredOnly on the concrete
+  component type. `ExtractAmount` / `DepositAmount` are declared on `MiningArmsBase`, the prefab component is a
+  `MiningArmsLaser` / `MiningArmsRoller`, so OM cannot reach them. Clients never read those two fields, so nothing is lost.
+  The mod checks OM's reach per member (`OMReachesPrefabMember`) instead of trying and logging a failed set.
+- **No compounding:** every value is computed from a per-process vanilla snapshot (first value seen at an apply, right
+  after `OMRevertAll` + `RestoreDirectWrites`), never from the current prefab value. Direct writes go through the new
+  `WriteIntTracked` (int twin of `WriteFloatTracked`), so `RestoreDirectWrites` puts them back before every re-apply.
+- **Live instances:** `PropagateToLiveInstances` ends with `PropagateGatherersLive`, which writes absolute values
+  (snapshot x current mult, vanilla once a mult is removed) onto already-spawned gatherers. A lowered capacity below the
+  cargo on board cuts the cargo (`ResourceHolder.SetResource`), otherwise the AI, which heads home at
+  `RemainingSpace == 0`, would never see a full hold. Server-side only: a client keeps the `MaxAmount` its copy of an
+  already-spawned unit was created with (cargo bar only) until that unit respawns.
+- **Dump / annotations:** `Si_UnitBalance_Dump.json` gets `gather_component`, `gather_kind`, `gather_resource`,
+  `gather_capacity`, `gather_extract_amount`, `gather_deposit_amount`, `gather_tick` on gatherers; the config gets a
+  `_base_gather` annotation ("Cargo:400 Harvest:5/bite Deposit:50/1s"); the version migration keeps the absolute
+  amounts when a game update changes them. `[OMVERIFY]` live-check covers the three fields (kind 7).
+- **Side effects to know:** the vanilla AI commander sizes its gatherer count from the team's total gatherer capacity
+  (`AIResourcesHandler.Think`: `GetHarvestersCapacity`, ~4000 / capacity-each per field), so a higher cargo capacity
+  makes the vanilla AI build fewer Shrimps / harvesters. Si_RTS_AI's eco planner hardcodes `CARRY_CAPACITY = 400` and
+  `DEPOSIT_RATE = 50` (`Planning/EcoSimulator.cs`), so its income projections ignore these params.
+- Log tags `[GATHER]`, `[GATHER-LIVE]`. Not run in a game yet.
+
 ## 2026-11-19 — Queen from the Colossal Spawning Cyst: `!queenb` (v7.18.1)
 
 New player command `!queenb` for the Alien commander and new setting `alien_queen_build_max` (int, default 2;

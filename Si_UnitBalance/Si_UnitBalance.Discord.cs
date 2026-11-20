@@ -41,7 +41,7 @@ namespace Si_UnitBalance
         // Parameters to skip when comparing (annotations, not real values)
         private static readonly HashSet<string> _skipParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "_base", "_pri_weapon", "_sec_weapon", "_base_speed", "_base_sense",
+            "_base", "_pri_weapon", "_sec_weapon", "_base_speed", "_base_sense", "_base_gather",
             "_weapon", "_base_movement", "_note"
         };
 
@@ -183,6 +183,10 @@ namespace Si_UnitBalance
                 {
                     if (param.Key.StartsWith("_") || _skipParams.Contains(param.Key)) continue;
                     var defaultVal = defaultUnit[param.Key];
+                    // Gatherer multipliers are new in 7.19.0: a Default file written before that lacks them, and
+                    // their vanilla is 1 by definition, so compare against 1 instead of dropping the change.
+                    if (defaultVal == null && Array.IndexOf(_gathererParamKeys, param.Key) >= 0)
+                        defaultVal = new JValue(1.0);
                     if (defaultVal == null) continue;
 
                     if (!TokensEqual(param.Value, defaultVal))

@@ -573,7 +573,25 @@ def build_unit(name, u, ctype):
         e['fow_distance'] = fow if fow else -1
         e['visible_event_radius_mult'] = 1.00
 
+    # ── HARVESTING (gatherers only: Shrimp, Sol/Cent Harvester; 7.19.0) ──
+    # The keys go only on the units that have a gatherer; the vanilla annotation comes from the dump's
+    # gather_* fields (a dump written before 7.19.0 has none: keys without the annotation then).
+    if name in GATHERER_UNITS or u.get('gather_component'):
+        if u.get('gather_capacity') is not None:
+            tick = u.get('gather_tick', 0)
+            tick_txt = f"{tick:g}s"
+            per = 'bite' if u.get('gather_kind') == 'claws' else tick_txt
+            e['_base_gather'] = (f"Cargo:{u.get('gather_capacity')} Harvest:{u.get('gather_extract_amount')}/{per} "
+                                 f"Deposit:{u.get('gather_deposit_amount')}/{tick_txt}")
+        e['harvest_rate_mult'] = 1.00
+        e['cargo_capacity_mult'] = 1.00
+        e['deposit_rate_mult'] = 1.00
+
     return e
+
+
+# Units with MiningClaws (Shrimp) or MiningArmsBase (harvesters): the only ones that get the harvesting keys.
+GATHERER_UNITS = {'Shrimp', 'Sol Harvester', 'Cent Harvester'}
 
 
 # =============================================================================

@@ -427,3 +427,30 @@ NOT PRESENT — Crab is melee only.
 - **Electric damage**: Shocker, MiningLaser, PulseTank only
 - **Hitscan**: Ray, MiningLaser only
 - **All rockets share gravity 0.1** (nearly flat trajectory)
+
+---
+
+## 5. GATHERERS (Shrimp, Sol Harvester, Cent Harvester) — game Release 1.0.17
+
+> Values read from `Silica_Data/sharedassets0.assets` (UnityPy typetree decode, 2026-11-20); field semantics read in the
+> SilicaCore decompile (`MiningClaws.cs`, `MiningArmsBase.cs`, `ResourceHolder.cs`). Identical in 0.9.47 code.
+> Si_UnitBalance 7.19.0 params: `harvest_rate_mult` -> ExtractAmount, `cargo_capacity_mult` -> MaxAmount,
+> `deposit_rate_mult` -> DepositAmount.
+
+| Unit (prefab) | Component | ExtractAmount | DepositAmount | Tick | ResourceHolder.MaxAmount | Resource |
+|---|---|---|---|---|---|---|
+| Shrimp | MiningClaws | 5 per bite (AttackPrimary hit, attack Time 0.5 s) | 50 per Tick | Tick 1.0 s | 400 | Biotics |
+| Sol_HoverHarvester | MiningArmsLaser : MiningArmsBase | 100 per ExtractionTick x spin-up 0..1 | 200 per ExtractionTick | ExtractionTick 0.5 s | 7500 | Balterium |
+| Cent_HeavyHarvester | MiningArmsRoller : MiningArmsBase | 100 per ExtractionTick x spin-up 0..1 | 200 per ExtractionTick | ExtractionTick 0.5 s | 7500 | Balterium |
+
+- Harvester: extraction and deposit share one tick (`ExtractionTick`); full spin = 200/s extracted (7500 in ~37.5 s), 400/s
+  unloaded (~19 s). Deposit also limited by the team's free storage (`Team.RemainingResourceCapacity`).
+- Shrimp: 5 per bite; bites chain every attack `Time` (0.5 s) while AI-harvesting -> ~10/s, 400 in ~40 s (inferred from the
+  attack timing, not measured). Unloads 50 per 1 s tick (400 in 8 s).
+- Server-only ticks: `MiningArmsBase.OrderedUpdate` (`!Game.GetIsClient()`), `MiningClaws` deposit (client returns before
+  `RetrieveResource`), `MiningClaws.OnExtractAttackHit` (client only predicts; `ResourceHolder` RPC from the server
+  overwrites `AmountStored`). The client reads `MaxAmount` for the cargo bar (`Crosshair.ResourceCapacity`, `GetStoredResources01`).
+- OverrideManager reach (`A:ObjectInfo_*.asset`, DeclaredOnly member lookup on the prefab's MonoBehaviours):
+  `ResourceHolder.MaxAmount` yes, `MiningClaws.ExtractAmount/DepositAmount` yes, `MiningArmsBase.ExtractAmount/DepositAmount`
+  on a MiningArmsLaser/Roller **no** (inherited member) -> tracked direct write, server-only.
+- Vanilla Wasp has no ResourceHolder / MiningClaws: not a gatherer.

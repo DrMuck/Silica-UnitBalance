@@ -22,6 +22,9 @@
  - build_radius: Override MaximumBaseStructureDistance (absolute meters)
  - deposit_radius: Override ResourceDepositPoint.DepositRadius (absolute meters, Bio Cache)
  - extraction_radius: Override MiningArmsBase.ExtractionRadius (absolute meters, Shrimp harvester)
+ - harvest_rate_mult / cargo_capacity_mult / deposit_rate_mult: gatherers (Shrimp, Sol/Cent Harvester) — scale
+   MiningClaws/MiningArmsBase.ExtractAmount, ResourceHolder.MaxAmount, MiningClaws/MiningArmsBase.DepositAmount
+   (Si_UnitBalance.Gatherers.cs)
 */
 
 using HarmonyLib;
@@ -35,7 +38,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.18.1", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.19.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -191,6 +194,14 @@ namespace Si_UnitBalance
         private static readonly Dictionary<string, float> _extractionRadiusOverrides =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _turnRadiusMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        // Gatherer params (Si_UnitBalance.Gatherers.cs): harvest_rate_mult -> ExtractAmount,
+        // cargo_capacity_mult -> ResourceHolder.MaxAmount, deposit_rate_mult -> DepositAmount
+        private static readonly Dictionary<string, float> _harvestRateMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _cargoCapacityMultipliers =
+            new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, float> _depositRateMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, float> _turboSpeedMultipliers =
             new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
@@ -428,7 +439,7 @@ namespace Si_UnitBalance
             }
             catch (Exception ex) { MelonLogger.Warning($"Failed to subscribe to OnStartUnloadingLevel: {ex.Message}"); }
 
-            MelonLogger.Msg($"Unit Balance v7.18.1 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.19.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -1007,6 +1018,9 @@ namespace Si_UnitBalance
                 _depositRadiusOverrides.Clear();
                 _extractionRadiusOverrides.Clear();
                 _turnRadiusMultipliers.Clear();
+                _harvestRateMultipliers.Clear();
+                _cargoCapacityMultipliers.Clear();
+                _depositRateMultipliers.Clear();
                 _turboSpeedMultipliers.Clear();
                 _targetDistanceOverrides.Clear();
                 _jumpSpeedMultipliers.Clear();
@@ -1116,6 +1130,9 @@ namespace Si_UnitBalance
                         float magazineMult = overrides["magazine_mult"]?.Value<float>() ?? 1.0f;
                         float fireRateMult = overrides["fire_rate_mult"]?.Value<float>() ?? 1.0f;
                         float turnRadiusMult = overrides["turn_radius_mult"]?.Value<float>() ?? 1.0f;
+                        float harvestRateMult = overrides["harvest_rate_mult"]?.Value<float>() ?? 1.0f;
+                        float cargoCapacityMult = overrides["cargo_capacity_mult"]?.Value<float>() ?? 1.0f;
+                        float depositRateMult = overrides["deposit_rate_mult"]?.Value<float>() ?? 1.0f;
                         float turboSpeedMult = overrides["turbo_speed_mult"]?.Value<float>() ?? 1.0f;
                         float targetDistance = overrides["target_distance"]?.Value<float>() ?? -1f;
                         float buildRadius = overrides["build_radius"]?.Value<float>() ?? -1f;
@@ -1212,6 +1229,9 @@ namespace Si_UnitBalance
                             _fireRateMultipliers[unitName] = fireRateMult;
                         if (Math.Abs(turnRadiusMult - 1.0f) > 0.001f)
                             _turnRadiusMultipliers[unitName] = turnRadiusMult;
+                        AddGathererMult(_harvestRateMultipliers, unitName, "harvest_rate_mult", harvestRateMult);
+                        AddGathererMult(_cargoCapacityMultipliers, unitName, "cargo_capacity_mult", cargoCapacityMult);
+                        AddGathererMult(_depositRateMultipliers, unitName, "deposit_rate_mult", depositRateMult);
                         if (Math.Abs(turboSpeedMult - 1.0f) > 0.001f)
                             _turboSpeedMultipliers[unitName] = turboSpeedMult;
                         if (targetDistance >= 0)

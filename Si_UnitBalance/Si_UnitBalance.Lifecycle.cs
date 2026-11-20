@@ -549,6 +549,7 @@ namespace Si_UnitBalance
                     ApplyUnitCapOverrides(omReady);
                     ApplyDepositRadiusOverrides(omReady);
                     ApplyExtractionRadiusOverrides(omReady);
+                    ApplyGathererOverrides(omReady);
 
                     if (_shrimpDisableAim)
                         ApplyShrimpAimDisable();

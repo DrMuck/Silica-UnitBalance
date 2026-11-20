@@ -945,6 +945,7 @@ namespace Si_UnitBalance
             public UnityEngine.Object? Owner; // the Unity object that holds Target (destroyed -> entry dropped)
             public float Vanilla;             // value before the first write by this mod
             public string Label = "";         // for logs and [OMVERIFY] sentinels
+            public bool IsInt;                // int member (WriteIntTracked): Vanilla holds the int exactly (< 2^24)
         }
 
         private sealed class ReferenceComparer : IEqualityComparer<object>
@@ -1005,6 +1006,34 @@ namespace Si_UnitBalance
             else ((PropertyInfo)m).SetValue(obj, value);
         }
 
+        /// <summary>WriteFloatTracked for an int field/property (gatherer amounts, ResourceHolder.MaxAmount):
+        /// records the pre-mod value on the first write, RestoreDirectWrites puts it back.</summary>
+        private static void WriteIntTracked(object obj, MemberInfo m, int value, string label, UnityEngine.Object? owner)
+        {
+            try
+            {
+                if (!_directWriteIndex.TryGetValue(obj, out var byMember))
+                {
+                    byMember = new Dictionary<string, DirectWrite>();
+                    _directWriteIndex[obj] = byMember;
+                }
+                if (!byMember.ContainsKey(m.Name))
+                {
+                    object cur = m is FieldInfo cf ? cf.GetValue(obj) : ((PropertyInfo)m).GetValue(obj);
+                    if (cur is int vanilla)
+                    {
+                        var dw = new DirectWrite { Target = obj, Member = m, Owner = owner ?? (obj as UnityEngine.Object), Vanilla = vanilla, Label = label, IsInt = true };
+                        byMember[m.Name] = dw;
+                        _directWrites.Add(dw);
+                    }
+                }
+            }
+            catch (Exception ex) { LogDebug($"[DIRECT] could not record {label}: {ex.Message}"); }
+
+            if (m is FieldInfo f) f.SetValue(obj, value);
+            else ((PropertyInfo)m).SetValue(obj, value);
+        }
+
         // KNOWN GAP (documented, not tracked): the direct branches below exist only for a build WITHOUT a
         // usable OverrideManager (InitOverrideManager failed, useOM == false). Both supported game branches
         // (0.9.47 and 1.0.x) have it, so they are unreachable there; in that mode they would still read the
@@ -1044,9 +1073,20 @@ namespace Si_UnitBalance
                             continue;
                         }
                         object cur = dw.Member is FieldInfo cf ? cf.GetValue(dw.Target) : ((PropertyInfo)dw.Member).GetValue(dw.Target);
-                        if (cur is float fv && fv == dw.Vanilla) continue;
-                        if (dw.Member is FieldInfo f) f.SetValue(dw.Target, dw.Vanilla);
-                        else ((PropertyInfo)dw.Member).SetValue(dw.Target, dw.Vanilla);
+                        object vanillaVal;
+                        if (dw.IsInt)
+                        {
+                            int iv = (int)Math.Round(dw.Vanilla);
+                            if (cur is int ci && ci == iv) continue;
+                            vanillaVal = iv;
+                        }
+                        else
+                        {
+                            if (cur is float fv && fv == dw.Vanilla) continue;
+                            vanillaVal = dw.Vanilla;
+                        }
+                        if (dw.Member is FieldInfo f) f.SetValue(dw.Target, vanillaVal);
+                        else ((PropertyInfo)dw.Member).SetValue(dw.Target, vanillaVal);
                         restored++;
                     }
                     catch (Exception ex)

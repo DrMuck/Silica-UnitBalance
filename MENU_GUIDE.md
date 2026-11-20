@@ -84,6 +84,21 @@ Set: .1 1.5 (or !b 1 1.5)
 The number on the right of `=` is the current **multiplier** (or absolute value).
 `(base: X)` is the vanilla game value, for reference.
 
+**Gatherers (Shrimp, Sol Harvester, Cent Harvester)** have an extra last group **Harvesting** (after all other
+groups, so the other group numbers did not move):
+
+```
+Shrimp > Harvesting
+1. harvest_rate_mult = -    (base: 5)      MiningClaws.ExtractAmount: Biotics per bite (a bite every ~0.5 s)
+2. cargo_capacity_mult = -  (base: 400)    ResourceHolder.MaxAmount: Biotics it carries
+3. deposit_rate_mult = -    (base: 50)     MiningClaws.DepositAmount: Biotics unloaded per 1 s tick
+Sol Harvester > Harvesting   (base: 100 / 7500 / 200)  MiningArmsBase amounts per 0.5 s tick (Balterium)
+```
+
+All three are multipliers on whole-number game fields (result rounded, at least 1). The extraction rate is
+"amount per tick": the tick length itself is not changed. A Harvester extracts and unloads on the same 0.5 s
+tick, a Shrimp extracts per bite and unloads on its 1 s tick.
+
 ---
 
 ## 4. Editing a value
@@ -134,6 +149,7 @@ The mod has a `PropagateToLiveInstances` pass on game start (and during `!rebala
 | **Damage / range / projectile** | ❌ keep old values | ✅ | ✅ |
 | **Move/walk/run/sprint/jump/strafe/fly speed** | ✅ live propagated | ✅ | ✅ |
 | **FOW / target distance** | ✅ live propagated | ✅ | ✅ |
+| **Harvesting (harvest / cargo / deposit, gatherers)** | ✅ live propagated on the server (cargo above a lowered capacity is cut to the new capacity). A player already piloting such a unit sees the old capacity on the cargo bar until the unit respawns | ✅ | ✅ |
 | **Tech research time / cost** | n/a | ✅ — affects future tech-ups starting next research |
 | **Decay (Cap&Decay > Decay)** | mostly live (keep_production toggle is immediate) | ✅ | ✅ |
 | **Player Cap Exempt switch + buffer (Cap&Decay > 2)** | ✅ immediate (window re-evaluated on every cap recount and control change) | ✅ | ✅ |
@@ -179,4 +195,4 @@ The mod has a `PropagateToLiveInstances` pass on game start (and during `!rebala
 - **Default (vanilla baseline):** `UserData\cfg\UnitBalance\Si_UnitBalance_Config_Default.json`
 - **Saved presets:** `UserData\cfg\UnitBalance\saves\*.json` (created via the JSON menu)
 - **Audit log:** every `!b` write is logged with player name + Steam ID for accountability.
-- **Server log lines to watch:** `[Unit Balance]`, `[BAL]`, `[TECH]`, `[TECH-COST]`, `[HEALTH]`, `[DMG]`, `[RANGE]`, `[MOVESPEED]`, etc.
+- **Server log lines to watch:** `[Unit Balance]`, `[BAL]`, `[TECH]`, `[TECH-COST]`, `[HEALTH]`, `[DMG]`, `[RANGE]`, `[MOVESPEED]`, `[GATHER]` / `[GATHER-LIVE]`, etc.

@@ -463,7 +463,11 @@
             "_base_sense": "FOW:200 Target:400",
             "target_distance": 400,
             "fow_distance": 200,
-            "visible_event_radius_mult": 1.0
+            "visible_event_radius_mult": 1.0,
+            "_base_gather": "Cargo:7500 Harvest:100/0.5s Deposit:200/0.5s",
+            "harvest_rate_mult": 1.0,
+            "cargo_capacity_mult": 1.0,
+            "deposit_rate_mult": 1.0
         },
         "Siege Tank": {
             "_base": "HP:80000 Cost:4500 Build:60.0s T7",
@@ -1202,7 +1206,11 @@
             "_base_sense": "FOW:200 Target:400",
             "target_distance": 400,
             "fow_distance": 200,
-            "visible_event_radius_mult": 1.0
+            "visible_event_radius_mult": 1.0,
+            "_base_gather": "Cargo:7500 Harvest:100/0.5s Deposit:200/0.5s",
+            "harvest_rate_mult": 1.0,
+            "cargo_capacity_mult": 1.0,
+            "deposit_rate_mult": 1.0
         },
         "Crimson Tank": {
             "_base": "HP:80000 Cost:4500 Build:60.0s T7",
@@ -1441,7 +1449,11 @@
             "_base_sense": "FOW:200 Target:400",
             "target_distance": 400,
             "fow_distance": 200,
-            "visible_event_radius_mult": 1.0
+            "visible_event_radius_mult": 1.0,
+            "_base_gather": "Cargo:400 Harvest:5/bite Deposit:50/1s",
+            "harvest_rate_mult": 1.0,
+            "cargo_capacity_mult": 1.0,
+            "deposit_rate_mult": 1.0
         },
         "Shocker": {
             "_base": "HP:400 Cost:220 Build:20.0s T1",
