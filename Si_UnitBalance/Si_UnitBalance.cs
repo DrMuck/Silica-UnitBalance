@@ -38,7 +38,7 @@ using System.IO;
 using System.Reflection;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.19.0", "schwe")]
+[assembly: MelonInfo(typeof(Si_UnitBalance.UnitBalance), "Unit Balance", "7.20.0", "schwe")]
 [assembly: MelonGame("Bohemia Interactive", "Silica")]
 [assembly: MelonOptionalDependencies("Admin Mod")]
 
@@ -439,7 +439,7 @@ namespace Si_UnitBalance
             }
             catch (Exception ex) { MelonLogger.Warning($"Failed to subscribe to OnStartUnloadingLevel: {ex.Message}"); }
 
-            MelonLogger.Msg($"Unit Balance v7.19.0 initialized. Config: {_configPath}");
+            MelonLogger.Msg($"Unit Balance v7.20.0 initialized. Config: {_configPath}");
             MelonLogger.Msg($"  Enabled: {_enabled} | Damage: {_damageMultipliers.Count} | Health: {_healthMultipliers.Count} | Cost: {_costMultipliers.Count} | BuildTime: {_buildTimeMultipliers.Count} | Range: {_rangeMultipliers.Count} | Speed: {_speedMultipliers.Count} | Reload: {_reloadTimeMultipliers.Count} | MoveSpeed: {_moveSpeedMultipliers.Count} | MinTier: {_minTierOverrides.Count} | TechTime: {_techTierTimes.Count} | TechCost: {_techTierCosts.Count}");
         }
 
@@ -1041,6 +1041,8 @@ namespace Si_UnitBalance
                 _aimCompensationOverrides.Clear();
                 _pitchMaxUpOverrides.Clear();
                 _pitchMaxDownOverrides.Clear();
+                _turretYawSpeedMultipliers.Clear();
+                _turretPitchSpeedMultipliers.Clear();
                 _proximityOverrides.Clear();
                 _techTierTimes.Clear();
                 _techTierCosts.Clear();
@@ -1154,6 +1156,8 @@ namespace Si_UnitBalance
                         if (aimCompensation > 4) { MelonLogger.Warning($"[UnitBalance] {unitName}: aim_compensation {aimCompensation} out of range (valid 0-4) — clamping to 4"); aimCompensation = 4; }
                         float pitchMaxUp = overrides["pitch_max_up"]?.Value<float>() ?? -1f;
                         float pitchMaxDown = overrides["pitch_max_down"]?.Value<float>() ?? -1f;
+                        float turretYawSpeedMult = overrides[TurretYawSpeedKey]?.Value<float>() ?? 1.0f;
+                        float turretPitchSpeedMult = overrides[TurretPitchSpeedKey]?.Value<float>() ?? 1.0f;
                         float strafeSpeedMult = overrides["strafe_speed_mult"]?.Value<float>() ?? 1.0f;
                         float flySpeedMult = overrides["fly_speed_mult"]?.Value<float>() ?? 1.0f;
                         float runSpeedMult = overrides["run_speed_mult"]?.Value<float>() ?? 1.0f;
@@ -1269,6 +1273,8 @@ namespace Si_UnitBalance
                             _pitchMaxUpOverrides[unitName] = pitchMaxUp;
                         if (pitchMaxDown >= 0f)
                             _pitchMaxDownOverrides[unitName] = pitchMaxDown;
+                        AddTurretSpeedMult(_turretYawSpeedMultipliers, unitName, TurretYawSpeedKey, turretYawSpeedMult);
+                        AddTurretSpeedMult(_turretPitchSpeedMultipliers, unitName, TurretPitchSpeedKey, turretPitchSpeedMult);
                         if (Math.Abs(strafeSpeedMult - 1.0f) > 0.001f)
                             _strafeSpeedMultipliers[unitName] = strafeSpeedMult;
                         if (Math.Abs(flySpeedMult - 1.0f) > 0.001f)

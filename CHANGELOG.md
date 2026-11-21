@@ -4,6 +4,29 @@ Tracks completed changes and tasks for the Si_UnitBalanceUI project.
 
 ---
 
+## 2026-11-21 — Turret rotation speed: turret_yaw_speed_mult, turret_pitch_speed_mult (v7.20.0)
+
+Two new per-unit multipliers (1 = vanilla) at the end of the **Ballistics** group (vehicles, aircraft, structures; not
+infantry). Built for both game branches, **not run in a game yet**.
+
+| Key | Game field (float, deg/s) | Component |
+|---|---|---|
+| `turret_yaw_speed_mult` | `YawSpeed` | `VehicleTurret` (units), `TurretRotator` (defence structures) |
+| `turret_pitch_speed_mult` | `PitchSpeed` | same |
+
+- **Who uses the value:** every machine turns the turret itself toward the networked aim point with its own copy of
+  the field (`GameMath.RotateGameSubsystemToPoint`), so a player's own turret follows the player's client.
+- **Reach:** the first turret component of the prefab is set through OverrideManager (`A:<ObjectInfo>.asset`, prefab
+  member fallback) and synced to all clients, players included. OverrideManager cannot address a second turret of the
+  same prefab, so further turrets get a tracked direct prefab write: server-only, AI turrets only.
+- **Already spawned units:** the server's live instances are set from the prefab after every apply; on a client they
+  keep their old speed until they respawn.
+- **No compounding:** vanilla values are remembered per prefab component on first sight; `!rebalance` and
+  `!rebalance default` put them back (OverrideManager revert + `RestoreDirectWrites`), live instances included.
+- **Side effect to know:** the game uses `YawSpeed` when it classifies a unit as anti-air for the AI
+  (`ObjectInfo.GetCanMountTrackAircraft`).
+- Code: `Si_UnitBalance.TurretSpeed.cs`, step `ApplyTurretSpeedOverrides` after the pitch limits. Log tag `[TURRETSPEED]`.
+
 ## 2026-11-20 — Gatherer params: harvest rate, cargo capacity, deposit rate (v7.19.0)
 
 Three new per-unit multipliers (1 = vanilla) for the resource gatherers, in a new last param group **Harvesting** that

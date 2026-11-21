@@ -535,6 +535,7 @@ namespace Si_UnitBalance
                     ApplyProjectileTuningOverrides(omReady);
                     ApplyAimCompensationOverrides();
                     ApplyTurretPitchOverrides();
+                    ApplyTurretSpeedOverrides(omReady);
                     ApplyRangeOverrides(omReady);
                     ApplyTargetDistanceOverrides(omReady);
                     ApplyFoWDistanceOverrides(omReady);

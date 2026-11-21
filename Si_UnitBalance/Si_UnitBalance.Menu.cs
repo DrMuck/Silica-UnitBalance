@@ -757,7 +757,8 @@ namespace Si_UnitBalance
                               "ai_lead_velocity", "ai_lead_gravity", "ai_lead_drag" }
                     : new[] { "impact_scale_by_speed", "drag_mult",
                               "ai_lead_velocity", "ai_lead_gravity", "ai_lead_drag",
-                              "aim_compensation", "pitch_max_up", "pitch_max_down" });
+                              "aim_compensation", "pitch_max_up", "pitch_max_down",
+                              TurretYawSpeedKey, TurretPitchSpeedKey });
             }
 
             // ── Movement (only applicable params per component type) ──
@@ -1403,6 +1404,18 @@ namespace Si_UnitBalance
                                     string tf = key == "pitch_max_up" ? "PitchMaxUp" : "PitchMaxDown";
                                     var pf = vtComp.GetType().GetField(tf, flags);
                                     if (pf != null) { try { val = ((float)pf.GetValue(vtComp)).ToString("0.#") + "°"; } catch { } }
+                                }
+                                break;
+                            }
+                            case TurretYawSpeedKey:
+                            case TurretPitchSpeedKey:
+                            {
+                                // First turret of the prefab = the one OverrideManager syncs to clients.
+                                var tsList = TurretSpeedComponents(prefab);
+                                if (tsList.Count > 0)
+                                {
+                                    var tsf = TurretSpeedField(tsList[0], key == TurretYawSpeedKey ? "YawSpeed" : "PitchSpeed");
+                                    if (tsf != null) { try { val = ((float)tsf.GetValue(tsList[0])).ToString("0.#") + " deg/s"; } catch { } }
                                 }
                                 break;
                             }
